@@ -22,10 +22,10 @@ const (
 	seedCount      = 1000
 	cellSpacing    = 29.0
 	guideSpacing   = 20.0
-	guideInfluence = 110.0
+	guideInfluence = 180.0
 	noiseScale     = 0.0034
 
-	showGuides = true
+	showGuides = false
 )
 
 //go:embed grain.kage
@@ -74,7 +74,7 @@ func cubicBezier(a, b, c, d V, t float64) V {
 
 // Sample Catmull-Rom curves as Beziers for both drawing and projection.
 func splineGuide(knots []V, sign float64) Guide {
-	const samplesPerSegment = 32
+	const samplesPerSegment = 64
 	pts := []V{knots[0]}
 	for i := 0; i < len(knots)-1; i++ {
 		a, d := knots[i], knots[i+1]
@@ -161,7 +161,7 @@ func (g *Guide) project(p V) Projection {
 			continue
 		}
 
-		tan := d.Norm()
+		tan := g.segmentTangent(i, t)
 		n := tan.Perp().Mul(g.BrightSign)
 		segLen := math.Sqrt(l2)
 		best = Projection{
@@ -174,6 +174,19 @@ func (g *Guide) project(p V) Projection {
 		}
 	}
 	return best
+}
+
+// Interpolate vertex tangents so offset rows do not kink at sample boundaries.
+func (g *Guide) segmentTangent(i int, u float64) V {
+	t := g.Pts[i+1].Sub(g.Pts[i]).Norm()
+	a, b := t, t
+	if i > 0 {
+		a = g.Pts[i].Sub(g.Pts[i-1]).Norm().Add(t).Norm()
+	}
+	if i+2 < len(g.Pts) {
+		b = t.Add(g.Pts[i+2].Sub(g.Pts[i+1]).Norm()).Norm()
+	}
+	return lerpV(a, b, u).Norm()
 }
 
 func (g *Guide) frameAt(s float64) (q, t, n V) {
@@ -189,7 +202,7 @@ func (g *Guide) frameAt(s float64) (q, t, n V) {
 		u = (s - g.S[i]) / seg
 	}
 	q = lerpV(a, b, u)
-	t = b.Sub(a).Norm()
+	t = g.segmentTangent(i, u)
 	n = t.Perp().Mul(g.BrightSign)
 	return
 }
@@ -211,7 +224,7 @@ func guideSideSpacing(signed float64) float64 {
 	if signed < 0 {
 		return guideSpacing * .6
 	}
-	return guideSpacing * 1.4
+	return guideSpacing * 2.4
 }
 
 func desiredSpacing(p V, guides []Guide, noise *Perlin) float64 {
@@ -221,34 +234,89 @@ func desiredSpacing(p V, guides []Guide, noise *Perlin) float64 {
 	return lerp(guideSideSpacing(pr.Signed), spacing, smoothstep(0, 85, pr.Dist))
 }
 
-// Add guide rows with smaller cells on the dark side and larger lit faces.
-// The outer rows ease the transition back to the background cells.
-func addGuideSeeds(seeds []V, guides []Guide) []V {
+// Follow bends with short polygon edges, without subdividing them into tiny
+// slivers. The concept uses broad rock faces even around curled ridges.
+func guideSamples(g *Guide, spacing float64, rng *rand.Rand) []float64 {
+	length := g.S[len(g.S)-1]
+	samples := []float64{0}
+	for s := 0.0; s < length; {
+		step := math.Min(spacing*lerp(.7, 1, rng.Float64()), length-s)
+		for step > 2 {
+			a, ta, _ := g.frameAt(s)
+			b, tb, _ := g.frameAt(s + step)
+			mid, _, _ := g.frameAt(s + step*.5)
+			if mid.Sub(lerpV(a, b, .5)).Len() <= 1.2 && ta.Dot(tb) >= math.Cos(.45) {
+				break
+			}
+			step *= .75
+		}
+		s += step
+		samples = append(samples, s)
+	}
+	// Avoid a tiny final cell at the end of an otherwise regular row.
+	if len(samples) > 2 {
+		n := len(samples)
+		if samples[n-1]-samples[n-2] < .5*(samples[n-2]-samples[n-3]) {
+			samples[n-2] = (samples[n-3] + samples[n-1]) * .5
+		}
+	}
+	return samples
+}
+
+// Keep a paired crest for a smooth silhouette, then scatter independent bands
+// behind it. Unequal lengths and depths produce thin, irregular rock faces
+// without continuous horizontal courses or aligned vertical joints.
+func addGuideSeeds(seeds []V, guides []Guide, rng *rand.Rand) []V {
+	background := make([]V, 0, len(seeds))
+	for _, p := range seeds {
+		_, pr := nearestGuide(p, guides)
+		width := guideSpacing * 2.7
+		if pr.Signed >= 0 {
+			width = guideSpacing * 4.4
+		}
+		along := math.Abs(p.Sub(pr.Q).Dot(pr.T))
+		if pr.Dist >= width || along > guideSpacing*.5 {
+			background = append(background, p)
+		}
+	}
+	seeds = background
 	for i := range guides {
 		g := &guides[i]
-		length := g.S[len(g.S)-1]
+		crest := guideSamples(g, guideSideSpacing(1), rng)
 		for _, side := range []float64{-1, 1} {
-			baseSpacing := guideSideSpacing(side)
-			minimum := baseSpacing * .48
-			for row := 0; row < 2; row++ {
-				spacing := baseSpacing * (1 + .6*float64(row))
-				// Keep the innermost rows equally far from the guide so the
-				// density difference does not shift the seam to either side.
-				offset := guideSpacing*.5 + baseSpacing*1.1*float64(row)
-				steps := int(math.Ceil(length / spacing))
-				if steps == 0 {
-					continue
+			offsets := []float64{.4, 1.4, 2.2}
+			if side > 0 {
+				offsets = []float64{.4, 1.4, 2.5, 3.8}
+			}
+			for row, offset := range offsets {
+				rowSamples := crest
+				if row > 0 {
+					// Resample every band independently so neighboring cells
+					// meet at staggered, irregular polygon edges.
+					spacing := guideSideSpacing(side) * (1 + .2*float64(row))
+					rowSamples = guideSamples(g, spacing, rng)
 				}
-				for j := 0; j <= steps; j++ {
-					q, _, n := g.frameAt(length * float64(j) / float64(steps))
-					p := q.Add(n.Mul(side * offset))
+				for _, s := range rowSamples {
+					depth := guideSpacing * offset
+					if row > 0 {
+						// Gradually release the normal constraint away from the
+						// crest, retaining the flattened shape near the guide.
+						depth += guideSpacing * .075 * float64(row) * (2*rng.Float64() - 1)
+					}
+					q, _, n := g.frameAt(s)
+					p := q.Add(n.Mul(side * depth))
 					if p.X < 1 || p.X > W-1 || p.Y < 1 || p.Y > H-1 {
 						continue
 					}
-					// Avoid crowded cells near existing seeds and crossing guides.
+					// Offset curves can fold inside tight curls or meet another
+					// guide. Let the nearest guide own that part of the band.
+					gi, pr := nearestGuide(p, guides)
+					if gi != i || pr.Signed*side <= 0 || math.Abs(pr.S-s) > guideSideSpacing(side) {
+						continue
+					}
 					crowded := false
 					for _, seed := range seeds {
-						if p.Sub(seed).Len2() < minimum*minimum {
+						if p.Sub(seed).Len2() < 4 {
 							crowded = true
 							break
 						}
@@ -479,6 +547,24 @@ func cellColor(v float64) color.NRGBA {
 	return color.NRGBA{221, 215, 200, 255}
 }
 
+// Dense shadow seeds support the ridge geometry, but their small faces should
+// disappear into the black pocket instead of showing up as a chain of pebbles.
+func hideSmallShadowCell(poly []V, center V, tone float64, guides []Guide) bool {
+	if tone > .30 || len(poly) < 3 {
+		return false
+	}
+	gi, pr := nearestGuide(center, guides)
+	if gi < 0 || pr.Signed >= 0 || pr.Dist > guideSpacing*2.7 {
+		return false
+	}
+	twiceArea := 0.0
+	for i, a := range poly {
+		b := poly[(i+1)%len(poly)]
+		twiceArea += a.X*b.Y - b.X*a.Y
+	}
+	return math.Abs(twiceArea)*.5 < cellSpacing*cellSpacing
+}
+
 func clipHalfPlane(poly []V, n V, c float64) []V {
 	if len(poly) == 0 {
 		return poly
@@ -596,13 +682,13 @@ func (g *Game) regenerate() {
 	noise := NewPerlin(rng)
 	seeds := generateSeeds(rng, seedCount, guides, noise)
 	warpSeeds(seeds, guides)
-	seeds = addGuideSeeds(seeds, guides)
 	relaxSeeds(seeds, guides, noise)
+	seeds = addGuideSeeds(seeds, guides, rng)
 
 	img := ebiten.NewImage(W, H)
 	img.Fill(color.Black)
 
-	// Build the material mesh without changing cell geometry or base tones.
+	// Build the material mesh, suppressing tiny shadow faces near the guides.
 	vertices := make([]ebiten.Vertex, 0, len(seeds)*18)
 	indices := make([]uint32, 0, len(seeds)*18)
 	polys := make([][]V, len(seeds))
@@ -612,6 +698,11 @@ func (g *Game) regenerate() {
 		polys[i] = poly
 		v := .015 + .27*smoothstep(.39, .58, fbm(noise, s)) + guideBias(s, guides, noise)
 		clr := cellColor(v)
+		if hideSmallShadowCell(poly, s, v, guides) {
+			// Keep the seed and polygon to preserve the smooth bright ridge.
+			// Black also suppresses shader grain, relief, and shared outlines.
+			clr = color.NRGBA{A: 255}
+		}
 		vertices, indices = appendCellMesh(vertices, indices, poly, s, clr, rng)
 		// Include near-black palette tones, and hide shared edges even when
 		// the neighboring cell is lighter.
