@@ -684,21 +684,20 @@ type Game struct {
 
 // Render each tessellation separately so transparent guide cells contribute
 // neither faces nor outlines, and the foreground covers the background mesh.
-func (g *Game) drawGrid(img *ebiten.Image, seeds []V, cellColorAt func(V) color.NRGBA, rng *rand.Rand) {
-	vertices := make([]ebiten.Vertex, 0, len(seeds)*18)
-	indices := make([]uint32, 0, len(seeds)*18)
+func (g *Game) drawGrid(img *ebiten.Image, grid RockGrid, rng *rand.Rand) {
+	vertices := make([]ebiten.Vertex, 0, len(grid)*18)
+	indices := make([]uint32, 0, len(grid)*18)
 	type cellEdge struct {
 		a, b  V
 		alpha uint8
 	}
 	edges := make(map[[4]int64]cellEdge)
 	hiddenEdges := make(map[[4]int64]bool)
-	for i, s := range seeds {
-		clr := cellColorAt(s)
+	for _, cell := range grid {
+		s, clr, poly := cell.Center, cell.Color, cell.Polygon
 		if clr.A == 0 {
 			continue
 		}
-		poly := voronoiCell(i, seeds)
 		vertices, indices = appendCellMesh(vertices, indices, poly, s, clr, rng)
 		for j, a := range poly {
 			b := poly[(j+1)%len(poly)]
@@ -762,18 +761,23 @@ func (g *Game) regenerate() {
 	seeds = addGuideSeeds(seeds, guides, rng)
 	branches := generateBranches(guides, noise, rand.New(rand.NewSource(g.seed^0x6272616e6368)))
 
+	backgroundGrid := newRockGrid(backgroundSeeds, func(p V) color.NRGBA {
+		return backgroundCellColor(p, backgroundNoise)
+	})
+	foregroundGrid := newRockGrid(seeds, func(p V) color.NRGBA {
+		return guideCellColor(p, guides, noise, branches)
+	})
+	vines := generateVines(newVineTerrain(backgroundGrid, foregroundGrid), rand.New(rand.NewSource(g.seed^0x76696e6573)))
+
 	img := ebiten.NewImage(W, H)
 	img.Fill(color.Black)
-	g.drawGrid(img, backgroundSeeds, func(p V) color.NRGBA {
-		return backgroundCellColor(p, backgroundNoise)
-	}, backgroundRNG)
+	g.drawGrid(img, backgroundGrid, backgroundRNG)
 
 	foreground := ebiten.NewImage(W, H)
-	g.drawGrid(foreground, seeds, func(p V) color.NRGBA {
-		return guideCellColor(p, guides, noise, branches)
-	}, rng)
+	g.drawGrid(foreground, foregroundGrid, rng)
 	img.DrawImage(foreground, nil)
 	foreground.Deallocate()
+	drawVines(img, vines)
 
 	if showGuides {
 		blue := color.NRGBA{R: 0, G: 160, B: 250, A: 255}
