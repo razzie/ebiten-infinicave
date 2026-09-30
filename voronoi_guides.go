@@ -1,0 +1,609 @@
+package main
+
+import (
+	"flag"
+	"image/color"
+	"image/png"
+	"log"
+	"math"
+	"math/rand"
+	"os"
+
+	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/hajimehoshi/ebiten/v2/vector"
+)
+
+const (
+	W = 1000
+	H = 1000
+
+	seedCount      = 1000
+	cellSpacing    = 29.0
+	guideInfluence = 110.0
+	noiseScale     = 0.0034
+
+	showGuides = true
+)
+
+type V struct{ X, Y float64 }
+
+func (a V) Add(b V) V               { return V{a.X + b.X, a.Y + b.Y} }
+func (a V) Sub(b V) V               { return V{a.X - b.X, a.Y - b.Y} }
+func (a V) Mul(s float64) V         { return V{a.X * s, a.Y * s} }
+func (a V) Dot(b V) float64         { return a.X*b.X + a.Y*b.Y }
+func (a V) Len2() float64           { return a.Dot(a) }
+func (a V) Len() float64            { return math.Sqrt(a.Len2()) }
+func (a V) Perp() V                 { return V{-a.Y, a.X} }
+func lerpV(a, b V, t float64) V     { return a.Mul(1 - t).Add(b.Mul(t)) }
+func clamp(x, a, b float64) float64 { return math.Max(a, math.Min(b, x)) }
+func lerp(a, b, t float64) float64  { return a + (b-a)*t }
+
+func (a V) Norm() V {
+	l := a.Len()
+	if l == 0 {
+		return V{1, 0}
+	}
+	return a.Mul(1 / l)
+}
+
+func smoothstep(a, b, x float64) float64 {
+	t := clamp((x-a)/(b-a), 0, 1)
+	return t * t * (3 - 2*t)
+}
+
+type Guide struct {
+	Pts        []V
+	S          []float64 // cumulative arc length
+	BrightSign float64   // selects a continuous lit side, including around curls
+}
+
+// Each spline segment is a cubic Bezier with matching tangents at its joins.
+func cubicBezier(a, b, c, d V, t float64) V {
+	u := 1 - t
+	return a.Mul(u * u * u).
+		Add(b.Mul(3 * u * u * t)).
+		Add(c.Mul(3 * u * t * t)).
+		Add(d.Mul(t * t * t))
+}
+
+// Sample Catmull-Rom curves as Beziers for both drawing and projection.
+func splineGuide(knots []V, sign float64) Guide {
+	const samplesPerSegment = 32
+	pts := []V{knots[0]}
+	for i := 0; i < len(knots)-1; i++ {
+		a, d := knots[i], knots[i+1]
+		prev, next := a.Mul(2).Sub(d), d.Mul(2).Sub(a)
+		if i > 0 {
+			prev = knots[i-1]
+		}
+		if i+2 < len(knots) {
+			next = knots[i+2]
+		}
+		b := a.Add(d.Sub(prev).Mul(1.0 / 6))
+		c := d.Sub(next.Sub(a).Mul(1.0 / 6))
+		for j := 1; j <= samplesPerSegment; j++ {
+			pts = append(pts, cubicBezier(a, b, c, d, float64(j)/samplesPerSegment))
+		}
+	}
+	ss := make([]float64, len(pts))
+	for i := 1; i < len(pts); i++ {
+		ss[i] = ss[i-1] + pts[i].Sub(pts[i-1]).Len()
+	}
+	return Guide{Pts: pts, S: ss, BrightSign: sign}
+}
+
+func generateGuides(rng *rand.Rand) []Guide {
+	// Unequal compositional anchors leave large pockets of negative space.
+	// Curves may cross regions or leave the canvas. Knot order sets the lit side.
+	templates := [][]V{
+		{{.24, .38}, {.43, .30}, {.62, .21}, {.73, .12}, {.76, .02}},
+		{{.26, .08}, {.34, .05}, {.43, -.015}},
+		{{.035, .15}, {.10, .19}, {.18, .205}},
+		{{.80, .125}, {.85, .08}, {.90, .025}},
+		{{-.025, .45}, {.095, .49}, {.15, .52}},
+		{{.10, .65}, {.26, .625}, {.44, .60}},
+		{{.50, .62}, {.55, .56}, {.565, .48}, {.545, .44}, {.505, .415}, {.535, .38}, {.585, .35}},
+		{{.76, .595}, {.84, .525}, {.90, .455}, {.87, .385}},
+		{{.635, .785}, {.602, .748}, {.615, .705}, {.65, .677}, {.71, .697}},
+		{{.445, .925}, {.49, .83}, {.535, .735}},
+		{{.56, .75}, {.60, .82}, {.68, .86}, {.80, .94}},
+	}
+	guides := make([]Guide, 0, len(templates))
+	for _, template := range templates {
+		center := V{}
+		for _, p := range template {
+			center = center.Add(p)
+		}
+		center = center.Mul(1 / float64(len(template)))
+		shift := V{lerp(-.018, .018, rng.Float64()), lerp(-.018, .018, rng.Float64())}
+		scale := lerp(.91, 1.09, rng.Float64())
+		angle := lerp(-.07, .07, rng.Float64())
+		knots := make([]V, len(template))
+		for i, p := range template {
+			d := p.Sub(center).Mul(scale)
+			d = V{d.X*math.Cos(angle) - d.Y*math.Sin(angle), d.X*math.Sin(angle) + d.Y*math.Cos(angle)}
+			q := center.Add(shift).Add(d)
+			knots[i] = V{q.X * W, q.Y * H}
+		}
+		guides = append(guides, splineGuide(knots, 1))
+	}
+	return guides
+}
+
+type Projection struct {
+	Q      V
+	T, N   V
+	S      float64
+	Signed float64
+	Dist   float64
+}
+
+func (g *Guide) project(p V) Projection {
+	best := Projection{Dist: math.Inf(1)}
+	for i := 0; i < len(g.Pts)-1; i++ {
+		a, b := g.Pts[i], g.Pts[i+1]
+		d := b.Sub(a)
+		l2 := d.Len2()
+		if l2 == 0 {
+			continue
+		}
+		t := clamp(p.Sub(a).Dot(d)/l2, 0, 1)
+		q := a.Add(d.Mul(t))
+		delta := p.Sub(q)
+		dist := delta.Len()
+		if dist >= best.Dist {
+			continue
+		}
+
+		tan := d.Norm()
+		n := tan.Perp().Mul(g.BrightSign)
+		segLen := math.Sqrt(l2)
+		best = Projection{
+			Q:      q,
+			T:      tan,
+			N:      n,
+			S:      g.S[i] + t*segLen,
+			Signed: delta.Dot(n),
+			Dist:   dist,
+		}
+	}
+	return best
+}
+
+func (g *Guide) frameAt(s float64) (q, t, n V) {
+	s = clamp(s, 0, g.S[len(g.S)-1])
+	i := 0
+	for i+1 < len(g.S)-1 && g.S[i+1] < s {
+		i++
+	}
+	a, b := g.Pts[i], g.Pts[i+1]
+	seg := g.S[i+1] - g.S[i]
+	u := 0.0
+	if seg > 0 {
+		u = (s - g.S[i]) / seg
+	}
+	q = lerpV(a, b, u)
+	t = b.Sub(a).Norm()
+	n = t.Perp().Mul(g.BrightSign)
+	return
+}
+
+func nearestGuide(p V, guides []Guide) (int, Projection) {
+	bestI := -1
+	best := Projection{Dist: math.Inf(1)}
+	for i := range guides {
+		pr := guides[i].project(p)
+		if pr.Dist < best.Dist {
+			bestI, best = i, pr
+		}
+	}
+	return bestI, best
+}
+
+func desiredSpacing(p V, guides []Guide, noise *Perlin) float64 {
+	_, pr := nearestGuide(p, guides)
+	terrain := smoothstep(.39, .58, fbm(noise, p))
+	spacing := lerp(43, 30, terrain)
+	return lerp(22, spacing, smoothstep(0, 85, pr.Dist))
+}
+
+func generateSeeds(rng *rand.Rand, count int, guides []Guide, noise *Perlin) []V {
+	// Weighted best-candidate sampling gives dark pockets larger cells.
+	pts := make([]V, 0, count)
+	for len(pts) < count {
+		best := V{}
+		bestD2 := -1.0
+		candidates := 22
+		if len(pts) < 8 {
+			candidates = 8
+		}
+		for c := 0; c < candidates; c++ {
+			p := V{rng.Float64() * W, rng.Float64() * H}
+			minD2 := math.Inf(1)
+			for _, q := range pts {
+				d2 := p.Sub(q).Len2()
+				if d2 < minD2 {
+					minD2 = d2
+				}
+			}
+			spacing := desiredSpacing(p, guides, noise)
+			minD2 /= spacing * spacing
+			if minD2 > bestD2 {
+				best, bestD2 = p, minD2
+			}
+		}
+		pts = append(pts, best)
+	}
+	return pts
+}
+
+func warpSeeds(seeds []V, guides []Guide) {
+	row := cellSpacing * 0.92
+
+	for i, p := range seeds {
+		gi, pr := nearestGuide(p, guides)
+		if gi < 0 || pr.Dist >= guideInfluence {
+			continue
+		}
+
+		// Guide alignment fades smoothly into the surrounding irregular cells.
+		w := 1 - smoothstep(0.35*guideInfluence, guideInfluence, pr.Dist)
+		absD := math.Abs(pr.Signed)
+		side := 1.0
+		if pr.Signed < 0 {
+			side = -1
+		}
+
+		// Snap normal distance into rows parallel to the guide. The first row is
+		// half a cell away, so the guide itself becomes a Voronoi boundary-ish seam.
+		rowIndex := math.Max(0, math.Round(absD/row-0.5))
+		targetD := side * (rowIndex + 0.5) * row
+
+		// Weak tangent snapping prevents a perfectly crystalline lattice but makes
+		// neighboring centers flow smoothly along the guide.
+		phase := 0.0
+		if int(rowIndex)&1 != 0 {
+			phase = 0.5 * row
+		}
+		targetS := math.Round((pr.S-phase)/row)*row + phase
+		q, t, n := guides[gi].frameAt(targetS)
+		target := q.Add(n.Mul(targetD))
+
+		// Keep more of the original tangential randomness than normal randomness.
+		delta := target.Sub(p)
+		nShift := n.Mul(delta.Dot(n) * 0.32 * w)
+		tShift := t.Mul(delta.Dot(t) * 0.08 * w)
+		p = p.Add(nShift).Add(tShift)
+		p.X = clamp(p.X, 2, W-2)
+		p.Y = clamp(p.Y, 2, H-2)
+		seeds[i] = p
+	}
+}
+
+// Repel crowded seeds after warping without forcing a regular lattice.
+func relaxSeeds(seeds []V, guides []Guide, noise *Perlin) {
+	spacing := make([]float64, len(seeds))
+	for i, p := range seeds {
+		spacing[i] = desiredSpacing(p, guides, noise) * .48
+	}
+	for pass := 0; pass < 4; pass++ {
+		shifts := make([]V, len(seeds))
+		for i, p := range seeds {
+			for j := i + 1; j < len(seeds); j++ {
+				d := p.Sub(seeds[j])
+				distance := d.Len()
+				minimum := (spacing[i] + spacing[j]) * .5
+				if distance >= minimum {
+					continue
+				}
+				push := d.Norm().Mul((minimum - distance) * .35)
+				shifts[i] = shifts[i].Add(push)
+				shifts[j] = shifts[j].Sub(push)
+			}
+		}
+		for i := range seeds {
+			seeds[i] = seeds[i].Add(shifts[i])
+			seeds[i].X = clamp(seeds[i].X, 1, W-1)
+			seeds[i].Y = clamp(seeds[i].Y, 1, H-1)
+		}
+	}
+}
+
+// Classic gradient Perlin noise.
+type Perlin struct{ p [512]int }
+
+func NewPerlin(rng *rand.Rand) *Perlin {
+	q := rng.Perm(256)
+	n := &Perlin{}
+	for i := 0; i < 512; i++ {
+		n.p[i] = q[i&255]
+	}
+	return n
+}
+
+func fade(t float64) float64 { return t * t * t * (t*(t*6-15) + 10) }
+
+func grad(h int, x, y float64) float64 {
+	switch h & 7 {
+	case 0:
+		return x + y
+	case 1:
+		return -x + y
+	case 2:
+		return x - y
+	case 3:
+		return -x - y
+	case 4:
+		return x
+	case 5:
+		return -x
+	case 6:
+		return y
+	default:
+		return -y
+	}
+}
+
+func (n *Perlin) Noise(x, y float64) float64 {
+	x0 := math.Floor(x)
+	y0 := math.Floor(y)
+	xi := int(x0) & 255
+	yi := int(y0) & 255
+	xf := x - x0
+	yf := y - y0
+	u, v := fade(xf), fade(yf)
+
+	aa := n.p[n.p[xi]+yi]
+	ab := n.p[n.p[xi]+yi+1]
+	ba := n.p[n.p[xi+1]+yi]
+	bb := n.p[n.p[xi+1]+yi+1]
+
+	x1 := lerp(grad(aa, xf, yf), grad(ba, xf-1, yf), u)
+	x2 := lerp(grad(ab, xf, yf-1), grad(bb, xf-1, yf-1), u)
+	return lerp(x1, x2, v) * 0.7071
+}
+
+func fbm(n *Perlin, p V) float64 {
+	a, f, sum, norm := 1.0, noiseScale, 0.0, 0.0
+	for i := 0; i < 4; i++ {
+		sum += a * n.Noise(p.X*f, p.Y*f)
+		norm += a
+		a *= 0.52
+		f *= 2.08
+	}
+	return 0.5 + 0.5*sum/norm
+}
+
+func guideBias(p V, guides []Guide, noise *Perlin) float64 {
+	light, shadow := 0.0, 0.0
+	for i := range guides {
+		pr := guides[i].project(p)
+		if pr.Dist >= guideInfluence {
+			continue
+		}
+		// Broad noise makes the shoulder branch and widen independently of the
+		// narrow highlight. The normal stays continuous around tight curves.
+		variation := smoothstep(.32, .66, fbm(noise, p.Add(V{317, 791})))
+		width := lerp(48, guideInfluence, variation)
+		along := math.Sqrt(math.Max(0, pr.Dist*pr.Dist-pr.Signed*pr.Signed))
+		endFade := 1 - smoothstep(0, width*.45, along)
+		if pr.Signed >= 0 {
+			crest := .64 * math.Exp(-pr.Dist/lerp(15, 23, variation))
+			shoulder := .25 * (1 - smoothstep(0, width, pr.Dist))
+			light = math.Max(light, (crest+shoulder)*endFade)
+		} else {
+			shadow = math.Max(shadow, .24*(1-smoothstep(0, width*.8, pr.Dist))*endFade)
+		}
+	}
+	return light - shadow
+}
+
+func cellColor(v float64) color.NRGBA {
+	// Flat polygon fills with continuous charcoal, gray, and warm ivory tones.
+	stops := []struct {
+		value   float64
+		r, g, b float64
+	}{
+		{0, 0, 0, 0},
+		{.10, 3, 3, 3},
+		{.25, 37, 38, 37},
+		{.43, 83, 83, 79},
+		{.65, 145, 143, 133},
+		{.85, 197, 192, 177},
+		{1, 221, 215, 200},
+	}
+	v = clamp(v, 0, 1)
+	for i := 1; i < len(stops); i++ {
+		a, b := stops[i-1], stops[i]
+		if v <= b.value {
+			t := (v - a.value) / (b.value - a.value)
+			return color.NRGBA{uint8(math.Round(lerp(a.r, b.r, t))), uint8(math.Round(lerp(a.g, b.g, t))), uint8(math.Round(lerp(a.b, b.b, t))), 255}
+		}
+	}
+	return color.NRGBA{221, 215, 200, 255}
+}
+
+func clipHalfPlane(poly []V, n V, c float64) []V {
+	if len(poly) == 0 {
+		return poly
+	}
+	out := make([]V, 0, len(poly)+1)
+	prev := poly[len(poly)-1]
+	prevIn := prev.Dot(n) <= c+1e-9
+	for _, cur := range poly {
+		curIn := cur.Dot(n) <= c+1e-9
+		if curIn != prevIn {
+			d := cur.Sub(prev)
+			den := d.Dot(n)
+			if math.Abs(den) > 1e-12 {
+				t := (c - prev.Dot(n)) / den
+				out = append(out, prev.Add(d.Mul(t)))
+			}
+		}
+		if curIn {
+			out = append(out, cur)
+		}
+		prev, prevIn = cur, curIn
+	}
+	return out
+}
+
+func voronoiCell(i int, pts []V) []V {
+	poly := []V{{0, 0}, {W, 0}, {W, H}, {0, H}}
+	a := pts[i]
+	for j, b := range pts {
+		if i == j {
+			continue
+		}
+		n := b.Sub(a)
+		c := 0.5 * (b.Len2() - a.Len2())
+		poly = clipHalfPlane(poly, n, c)
+		if len(poly) == 0 {
+			break
+		}
+	}
+	return poly
+}
+
+func pathFromPoly(poly []V) *vector.Path {
+	p := &vector.Path{}
+	if len(poly) == 0 {
+		return p
+	}
+	p.MoveTo(float32(poly[0].X), float32(poly[0].Y))
+	for _, q := range poly[1:] {
+		p.LineTo(float32(q.X), float32(q.Y))
+	}
+	p.Close()
+	return p
+}
+
+func fillPath(dst *ebiten.Image, p *vector.Path, clr color.Color) {
+	op := &vector.DrawPathOptions{AntiAlias: true}
+	op.ColorScale.ScaleWithColor(clr)
+	vector.FillPath(dst, p, nil, op)
+}
+
+func strokePath(dst *ebiten.Image, p *vector.Path, width float32, clr color.Color) {
+	op := &vector.DrawPathOptions{AntiAlias: true}
+	op.ColorScale.ScaleWithColor(clr)
+	vector.StrokePath(dst, p, &vector.StrokeOptions{
+		Width:    width,
+		LineCap:  vector.LineCapButt,
+		LineJoin: vector.LineJoinRound,
+	}, op)
+}
+
+type Game struct {
+	canvas    *ebiten.Image
+	seed      int64
+	output    string
+	exported  bool
+	exportErr error
+}
+
+func (g *Game) regenerate() {
+	rng := rand.New(rand.NewSource(g.seed))
+
+	guides := generateGuides(rng)
+	noise := NewPerlin(rng)
+	seeds := generateSeeds(rng, seedCount, guides, noise)
+	warpSeeds(seeds, guides)
+	relaxSeeds(seeds, guides, noise)
+
+	img := ebiten.NewImage(W, H)
+	img.Fill(color.Black)
+
+	// Fill cells first.
+	polys := make([][]V, len(seeds))
+	for i, s := range seeds {
+		poly := voronoiCell(i, seeds)
+		polys[i] = poly
+		v := .015 + .27*smoothstep(.39, .58, fbm(noise, s)) + guideBias(s, guides, noise)
+		fillPath(img, pathFromPoly(poly), cellColor(v))
+	}
+
+	// Shared edges are stroked once so their opacity stays consistent.
+	edges := &vector.Path{}
+	seen := make(map[[4]int64]bool)
+	for _, poly := range polys {
+		for i, a := range poly {
+			b := poly[(i+1)%len(poly)]
+			ax, ay := int64(math.Round(a.X*1e4)), int64(math.Round(a.Y*1e4))
+			bx, by := int64(math.Round(b.X*1e4)), int64(math.Round(b.Y*1e4))
+			if ax > bx || (ax == bx && ay > by) {
+				ax, ay, bx, by = bx, by, ax, ay
+			}
+			key := [4]int64{ax, ay, bx, by}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			edges.MoveTo(float32(a.X), float32(a.Y))
+			edges.LineTo(float32(b.X), float32(b.Y))
+		}
+	}
+	strokePath(img, edges, .85, color.NRGBA{R: 158, G: 158, B: 151, A: 205})
+
+	if showGuides {
+		blue := color.NRGBA{R: 0, G: 160, B: 250, A: 255}
+		for i := range guides {
+			p := &vector.Path{}
+			p.MoveTo(float32(guides[i].Pts[0].X), float32(guides[i].Pts[0].Y))
+			for _, q := range guides[i].Pts[1:] {
+				p.LineTo(float32(q.X), float32(q.Y))
+			}
+			strokePath(img, p, 7.5, blue)
+		}
+	}
+
+	g.canvas = img
+}
+
+func (g *Game) Update() error {
+	if g.exported {
+		if g.exportErr != nil {
+			return g.exportErr
+		}
+		return ebiten.Termination
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyR) {
+		g.seed++
+		g.regenerate()
+	}
+	return nil
+}
+
+func (g *Game) Draw(screen *ebiten.Image) {
+	screen.DrawImage(g.canvas, nil)
+	if g.output != "" && !g.exported {
+		g.exported = true
+		f, err := os.Create(g.output)
+		if err != nil {
+			g.exportErr = err
+			return
+		}
+		g.exportErr = png.Encode(f, g.canvas)
+		if err := f.Close(); g.exportErr == nil {
+			g.exportErr = err
+		}
+	}
+}
+
+func (g *Game) Layout(_, _ int) (int, int) { return W, H }
+
+func main() {
+	seed := flag.Int64("seed", rand.Int63(), "random seed (random by default)")
+	output := flag.String("output", "", "save a PNG to this path and exit")
+	flag.Parse()
+
+	g := &Game{seed: *seed, output: *output}
+	g.regenerate()
+
+	ebiten.SetWindowSize(W, H)
+	ebiten.SetWindowTitle("Perlin + guide-warped Voronoi")
+	if err := ebiten.RunGame(g); err != nil {
+		log.Fatal(err)
+	}
+}
