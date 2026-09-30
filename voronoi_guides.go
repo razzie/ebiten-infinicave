@@ -21,6 +21,7 @@ const (
 
 	seedCount      = 1000
 	cellSpacing    = 29.0
+	guideSpacing   = 20.0
 	guideInfluence = 110.0
 	noiseScale     = 0.0034
 
@@ -205,15 +206,65 @@ func nearestGuide(p V, guides []Guide) (int, Projection) {
 	return bestI, best
 }
 
+// Negative signed distance is the shadow side selected by the guide normal.
+func guideSideSpacing(signed float64) float64 {
+	if signed < 0 {
+		return guideSpacing * .6
+	}
+	return guideSpacing * 1.4
+}
+
 func desiredSpacing(p V, guides []Guide, noise *Perlin) float64 {
 	_, pr := nearestGuide(p, guides)
 	terrain := smoothstep(.39, .58, fbm(noise, p))
 	spacing := lerp(43, 30, terrain)
-	return lerp(22, spacing, smoothstep(0, 85, pr.Dist))
+	return lerp(guideSideSpacing(pr.Signed), spacing, smoothstep(0, 85, pr.Dist))
+}
+
+// Add guide rows with smaller cells on the dark side and larger lit faces.
+// The outer rows ease the transition back to the background cells.
+func addGuideSeeds(seeds []V, guides []Guide) []V {
+	for i := range guides {
+		g := &guides[i]
+		length := g.S[len(g.S)-1]
+		for _, side := range []float64{-1, 1} {
+			baseSpacing := guideSideSpacing(side)
+			minimum := baseSpacing * .48
+			for row := 0; row < 2; row++ {
+				spacing := baseSpacing * (1 + .6*float64(row))
+				// Keep the innermost rows equally far from the guide so the
+				// density difference does not shift the seam to either side.
+				offset := guideSpacing*.5 + baseSpacing*1.1*float64(row)
+				steps := int(math.Ceil(length / spacing))
+				if steps == 0 {
+					continue
+				}
+				for j := 0; j <= steps; j++ {
+					q, _, n := g.frameAt(length * float64(j) / float64(steps))
+					p := q.Add(n.Mul(side * offset))
+					if p.X < 1 || p.X > W-1 || p.Y < 1 || p.Y > H-1 {
+						continue
+					}
+					// Avoid crowded cells near existing seeds and crossing guides.
+					crowded := false
+					for _, seed := range seeds {
+						if p.Sub(seed).Len2() < minimum*minimum {
+							crowded = true
+							break
+						}
+					}
+					if !crowded {
+						seeds = append(seeds, p)
+					}
+				}
+			}
+		}
+	}
+	return seeds
 }
 
 func generateSeeds(rng *rand.Rand, count int, guides []Guide, noise *Perlin) []V {
-	// Weighted best-candidate sampling gives dark pockets larger cells.
+	// Weighted sampling follows guide-side spacing and background terrain.
 	pts := make([]V, 0, count)
 	for len(pts) < count {
 		best := V{}
@@ -519,6 +570,15 @@ func strokePath(dst *ebiten.Image, p *vector.Path, width float32, clr color.Colo
 	}, op)
 }
 
+func edgeKey(a, b V) [4]int64 {
+	ax, ay := int64(math.Round(a.X*1e4)), int64(math.Round(a.Y*1e4))
+	bx, by := int64(math.Round(b.X*1e4)), int64(math.Round(b.Y*1e4))
+	if ax > bx || (ax == bx && ay > by) {
+		ax, ay, bx, by = bx, by, ax, ay
+	}
+	return [4]int64{ax, ay, bx, by}
+}
+
 type Game struct {
 	canvas    *ebiten.Image
 	material  *ebiten.Shader
@@ -536,6 +596,7 @@ func (g *Game) regenerate() {
 	noise := NewPerlin(rng)
 	seeds := generateSeeds(rng, seedCount, guides, noise)
 	warpSeeds(seeds, guides)
+	seeds = addGuideSeeds(seeds, guides)
 	relaxSeeds(seeds, guides, noise)
 
 	img := ebiten.NewImage(W, H)
@@ -545,11 +606,20 @@ func (g *Game) regenerate() {
 	vertices := make([]ebiten.Vertex, 0, len(seeds)*18)
 	indices := make([]uint32, 0, len(seeds)*18)
 	polys := make([][]V, len(seeds))
+	hiddenEdges := make(map[[4]int64]bool)
 	for i, s := range seeds {
 		poly := voronoiCell(i, seeds)
 		polys[i] = poly
 		v := .015 + .27*smoothstep(.39, .58, fbm(noise, s)) + guideBias(s, guides, noise)
-		vertices, indices = appendCellMesh(vertices, indices, poly, s, cellColor(v), rng)
+		clr := cellColor(v)
+		vertices, indices = appendCellMesh(vertices, indices, poly, s, clr, rng)
+		// Include near-black palette tones, and hide shared edges even when
+		// the neighboring cell is lighter.
+		if clr.R <= 3 && clr.G <= 3 && clr.B <= 3 {
+			for j, a := range poly {
+				hiddenEdges[edgeKey(a, poly[(j+1)%len(poly)])] = true
+			}
+		}
 	}
 
 	img.DrawTrianglesShader32(vertices, indices, g.material, &ebiten.DrawTrianglesShaderOptions{
@@ -560,19 +630,14 @@ func (g *Game) regenerate() {
 		},
 	})
 
-	// Shared edges are stroked once so their opacity stays consistent.
+	// Shared edges are stroked once, except along black cells.
 	edges := &vector.Path{}
 	seen := make(map[[4]int64]bool)
 	for _, poly := range polys {
 		for i, a := range poly {
 			b := poly[(i+1)%len(poly)]
-			ax, ay := int64(math.Round(a.X*1e4)), int64(math.Round(a.Y*1e4))
-			bx, by := int64(math.Round(b.X*1e4)), int64(math.Round(b.Y*1e4))
-			if ax > bx || (ax == bx && ay > by) {
-				ax, ay, bx, by = bx, by, ax, ay
-			}
-			key := [4]int64{ax, ay, bx, by}
-			if seen[key] {
+			key := edgeKey(a, b)
+			if hiddenEdges[key] || seen[key] {
 				continue
 			}
 			seen[key] = true
@@ -580,7 +645,7 @@ func (g *Game) regenerate() {
 			edges.LineTo(float32(b.X), float32(b.Y))
 		}
 	}
-	strokePath(img, edges, .85, color.NRGBA{R: 158, G: 158, B: 151, A: 205})
+	strokePath(img, edges, .55, color.NRGBA{R: 158, G: 158, B: 151, A: 55})
 
 	if showGuides {
 		blue := color.NRGBA{R: 0, G: 160, B: 250, A: 255}
