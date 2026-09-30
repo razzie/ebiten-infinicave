@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"flag"
 	"image/color"
 	"image/png"
@@ -25,6 +26,9 @@ const (
 
 	showGuides = true
 )
+
+//go:embed grain.kage
+var materialShaderSource []byte
 
 type V struct{ X, Y float64 }
 
@@ -400,7 +404,7 @@ func guideBias(p V, guides []Guide, noise *Perlin) float64 {
 }
 
 func cellColor(v float64) color.NRGBA {
-	// Flat polygon fills with continuous charcoal, gray, and warm ivory tones.
+	// Base tones for the material: charcoal, gray, and warm ivory.
 	stops := []struct {
 		value   float64
 		r, g, b float64
@@ -466,23 +470,43 @@ func voronoiCell(i int, pts []V) []V {
 	return poly
 }
 
-func pathFromPoly(poly []V) *vector.Path {
-	p := &vector.Path{}
-	if len(poly) == 0 {
-		return p
+// Convex Voronoi cells are triangulated around their interior seed. Each
+// triangle carries its distance to the outer edge for the narrow material rim.
+func appendCellMesh(vertices []ebiten.Vertex, indices []uint32, poly []V, center V, clr color.NRGBA, rng *rand.Rand) ([]ebiten.Vertex, []uint32) {
+	if len(poly) < 3 {
+		return vertices, indices
 	}
-	p.MoveTo(float32(poly[0].X), float32(poly[0].Y))
-	for _, q := range poly[1:] {
-		p.LineTo(float32(q.X), float32(q.Y))
+	radius := 0.0
+	for _, p := range poly {
+		radius = math.Max(radius, p.Sub(center).Len())
 	}
-	p.Close()
-	return p
-}
-
-func fillPath(dst *ebiten.Image, p *vector.Path, clr color.Color) {
-	op := &vector.DrawPathOptions{AntiAlias: true}
-	op.ColorScale.ScaleWithColor(clr)
-	vector.FillPath(dst, p, nil, op)
+	radius = math.Max(radius, 1)
+	angle := rng.Float64() * 2 * math.Pi
+	tilt := V{math.Cos(angle), math.Sin(angle)}
+	light := V{-.6, -.8}
+	for i, a := range poly {
+		b := poly[(i+1)%len(poly)]
+		normal := b.Sub(a).Perp().Norm()
+		if center.Sub(a).Dot(normal) < 0 {
+			normal = normal.Mul(-1)
+		}
+		facet := rng.Float64() - .5
+		first := uint32(len(vertices))
+		for _, p := range []V{center, a, b} {
+			vertices = append(vertices, ebiten.Vertex{
+				DstX: float32(p.X), DstY: float32(p.Y),
+				SrcX: float32(p.X), SrcY: float32(p.Y),
+				ColorR: float32(clr.R) / 255, ColorG: float32(clr.G) / 255,
+				ColorB: float32(clr.B) / 255, ColorA: 1,
+				Custom0: float32(math.Max(0, p.Sub(a).Dot(normal))),
+				Custom1: float32(p.Sub(center).Dot(tilt) / radius),
+				Custom2: float32(facet),
+				Custom3: float32(-normal.Dot(light)),
+			})
+		}
+		indices = append(indices, first, first+1, first+2)
+	}
+	return vertices, indices
 }
 
 func strokePath(dst *ebiten.Image, p *vector.Path, width float32, clr color.Color) {
@@ -497,6 +521,8 @@ func strokePath(dst *ebiten.Image, p *vector.Path, width float32, clr color.Colo
 
 type Game struct {
 	canvas    *ebiten.Image
+	material  *ebiten.Shader
+	texture   float64
 	seed      int64
 	output    string
 	exported  bool
@@ -515,14 +541,24 @@ func (g *Game) regenerate() {
 	img := ebiten.NewImage(W, H)
 	img.Fill(color.Black)
 
-	// Fill cells first.
+	// Build the material mesh without changing cell geometry or base tones.
+	vertices := make([]ebiten.Vertex, 0, len(seeds)*18)
+	indices := make([]uint32, 0, len(seeds)*18)
 	polys := make([][]V, len(seeds))
 	for i, s := range seeds {
 		poly := voronoiCell(i, seeds)
 		polys[i] = poly
 		v := .015 + .27*smoothstep(.39, .58, fbm(noise, s)) + guideBias(s, guides, noise)
-		fillPath(img, pathFromPoly(poly), cellColor(v))
+		vertices, indices = appendCellMesh(vertices, indices, poly, s, cellColor(v), rng)
 	}
+
+	img.DrawTrianglesShader32(vertices, indices, g.material, &ebiten.DrawTrianglesShaderOptions{
+		AntiAlias: true,
+		Uniforms: map[string]any{
+			"Texture": float32(g.texture),
+			"Offset":  []float32{rng.Float32() * 1000, rng.Float32() * 1000},
+		},
+	})
 
 	// Shared edges are stroked once so their opacity stays consistent.
 	edges := &vector.Path{}
@@ -558,6 +594,9 @@ func (g *Game) regenerate() {
 		}
 	}
 
+	if g.canvas != nil {
+		g.canvas.Deallocate()
+	}
 	g.canvas = img
 }
 
@@ -596,9 +635,18 @@ func (g *Game) Layout(_, _ int) (int, int) { return W, H }
 func main() {
 	seed := flag.Int64("seed", rand.Int63(), "random seed (random by default)")
 	output := flag.String("output", "", "save a PNG to this path and exit")
+	texture := flag.Float64("texture", 1, "surface texture strength (0 disables it, range 0-2)")
 	flag.Parse()
+	if math.IsNaN(*texture) || *texture < 0 || *texture > 2 {
+		log.Fatal("texture must be between 0 and 2")
+	}
+	material, err := ebiten.NewShader(materialShaderSource)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer material.Deallocate()
 
-	g := &Game{seed: *seed, output: *output}
+	g := &Game{seed: *seed, output: *output, material: material, texture: *texture}
 	g.regenerate()
 
 	ebiten.SetWindowSize(W, H)

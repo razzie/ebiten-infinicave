@@ -1,8 +1,8 @@
 //kage:unit pixels
 package main
 
-var Cameras vec2
-var Grain float
+var Texture float
+var Offset vec2
 
 func noise(p vec2) float {
 	q := fract(vec3(p.x, p.y, p.x) * .1031)
@@ -10,8 +10,6 @@ func noise(p vec2) float {
 	return fract((q.x + q.y) * q.z)
 }
 
-// Interpolated world-space noise supplies mineral patches between pixel grain
-// and the broad shapes, without introducing a repeating image texture.
 func smoothNoise(p vec2) float {
 	cell := floor(p)
 	f := fract(p)
@@ -21,43 +19,30 @@ func smoothNoise(p vec2) float {
 	return mix(a, b, f.y)
 }
 
-// Texture straight RGB, then restore premultiplied alpha. Transparent pores
-// must remain transparent, including at antialiased rock and vine boundaries.
-func material(c vec4, p vec2, strength float) vec4 {
-	rgb := c.rgb / max(c.a, .0001)
-	p = floor(p)
-	n := noise(p)
-	fine := noise(p + vec2(73, 191))
+// Only cell faces pass through this shader. The wireframe and blue guides are
+// drawn afterward. Source coordinates anchor the texture to the artwork.
+// custom: distance to outer edge, face tilt, facet tone, edge light direction.
+func Fragment(dst vec4, src vec2, color vec4, custom vec4) vec4 {
+	rgb := color.rgb
 	luminance := dot(rgb, vec3(.30, .59, .11))
-	mineral := smoothNoise(p/96.0)*.55 + smoothNoise(p/27.0)*.30 + smoothNoise(p/7.0)*.15
-	amount := Grain * strength
-	rgb *= 1.0 + (mineral-.5)*.70*amount
-	root := step(rgb.g*2.4, rgb.r) * step(.10, rgb.r)
-	texture := (n - .5) * (.025 + luminance*.75) * amount
-	rgb += vec3(texture, texture*.90, texture*.72) * (1.0 - root)
-	rgb *= 1.0 + (n-.5)*1.6*root*amount
-	rgb += vec3(.010, .008, .004) * step(.987, fine) * amount
-	return vec4(clamp(rgb, vec3(0), vec3(1))*c.a, c.a)
-}
+	visible := smoothstep(.008, .13, luminance)
+	p := src + Offset
 
-func distantAt(p vec2) vec4 {
-	// Source-image sampling uses image 0 coordinates for every bound image.
-	origin := imageSrc0Origin()
-	p = clamp(p, origin+vec2(.5), origin+imageSrc1Size()-vec2(.5))
-	return imageSrc1At(p)
-}
+	// Quiet mineral variation at several scales, with a slight planar tilt
+	// and faint triangular facets. Avoid turning the faces into rounded tiles.
+	mineral := (smoothNoise(p/83.0)-.5)*.055
+	mineral += (smoothNoise(p/21.0)-.5)*.035
+	mineral += (smoothNoise(p/5.0)-.5)*.012
+	plane := custom.y*.055 + custom.z*.035
+	rgb *= 1.0 + (mineral+plane)*Texture*visible
 
-func Fragment(dst vec4, src vec2, color vec4) vec4 {
-	local := src - imageSrc0Origin()
-	uv := local / imageSrc0Size()
-	// A small Gaussian kernel softens only distant silhouettes. Foreground
-	// ledges and root hairs retain their definition.
-	back := distantAt(src) * .25
-	back += (distantAt(src+vec2(2, 0)) + distantAt(src-vec2(2, 0)) + distantAt(src+vec2(0, 2)) + distantAt(src-vec2(0, 2))) * .125
-	back += (distantAt(src+vec2(2, 2)) + distantAt(src+vec2(-2, 2)) + distantAt(src+vec2(2, -2)) + distantAt(src-vec2(2, 2))) * .0625
-	back = material(back, local+vec2(0, Cameras.y), .24)
-	front := material(imageSrc0At(src), local+vec2(0, Cameras.x), 1.0)
-	c := front + back*(1.0-front.a)
-	c.rgb *= 1.0 - .25*pow(length((uv-.5)*1.35), 1.6)
-	return c
+	// Fine matte grain stays static and fades out in the black pockets.
+	grain := noise(floor(p)) - .5
+	rgb += vec3(grain) * (.004+luminance*.009) * Texture * visible
+
+	// A narrow directional rim gives lit cell boundaries a little relief.
+	// It follows only the polygon perimeter, never the internal fan edges.
+	rim := 1.0 - smoothstep(.10, 1.15, custom.x)
+	rgb += vec3(1, .98, .92) * rim * custom.w * .025 * Texture * visible
+	return vec4(clamp(rgb, vec3(0), vec3(1)), color.a)
 }
