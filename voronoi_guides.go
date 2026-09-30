@@ -228,9 +228,12 @@ func guideSideSpacing(signed float64) float64 {
 }
 
 func desiredSpacing(p V, guides []Guide, noise *Perlin) float64 {
-	_, pr := nearestGuide(p, guides)
+	gi, pr := nearestGuide(p, guides)
 	terrain := smoothstep(.39, .58, fbm(noise, p))
 	spacing := lerp(43, 30, terrain)
+	if gi < 0 {
+		return spacing
+	}
 	return lerp(guideSideSpacing(pr.Signed), spacing, smoothstep(0, 85, pr.Dist))
 }
 
@@ -551,22 +554,22 @@ func cellColor(v float64) color.NRGBA {
 	return color.NRGBA{221, 215, 200, 255}
 }
 
-// Dense shadow seeds support the ridge geometry, but their small faces should
-// disappear into the black pocket instead of showing up as a chain of pebbles.
-func hideSmallShadowCell(poly []V, center V, tone float64, guides []Guide) bool {
-	if tone > .30 || len(poly) < 3 {
-		return false
+// The underlying tessellation has no guide influence. Low Perlin values map
+// to exact black; the remaining cells stay within the charcoal palette.
+func backgroundCellColor(p V, noise *Perlin) color.NRGBA {
+	return cellColor(.30 * smoothstep(.43, .59, fbm(noise, p)))
+}
+
+// Unlit foreground cells are absent. Fade the outer shoulders and branch tips
+// per cell so the independent dark tessellation shows through their faces.
+func guideCellColor(p V, guides []Guide, noise *Perlin, branches []BranchSegment) color.NRGBA {
+	strength := guideBias(p, guides, noise, branches)
+	if strength <= 0 {
+		return color.NRGBA{}
 	}
-	gi, pr := nearestGuide(center, guides)
-	if gi < 0 || pr.Signed >= 0 || pr.Dist > guideSpacing*2.7 {
-		return false
-	}
-	twiceArea := 0.0
-	for i, a := range poly {
-		b := poly[(i+1)%len(poly)]
-		twiceArea += a.X*b.Y - b.X*a.Y
-	}
-	return math.Abs(twiceArea)*.5 < cellSpacing*cellSpacing
+	clr := cellColor(.18 + strength)
+	clr.A = uint8(math.Round(255 * smoothstep(0, .24, strength)))
+	return clr
 }
 
 func clipHalfPlane(poly []V, n V, c float64) []V {
@@ -638,7 +641,7 @@ func appendCellMesh(vertices []ebiten.Vertex, indices []uint32, poly []V, center
 				DstX: float32(p.X), DstY: float32(p.Y),
 				SrcX: float32(p.X), SrcY: float32(p.Y),
 				ColorR: float32(clr.R) / 255, ColorG: float32(clr.G) / 255,
-				ColorB: float32(clr.B) / 255, ColorA: 1,
+				ColorB: float32(clr.B) / 255, ColorA: float32(clr.A) / 255,
 				Custom0: float32(math.Max(0, p.Sub(a).Dot(normal))),
 				Custom1: float32(p.Sub(center).Dot(tilt) / radius),
 				Custom2: float32(facet),
@@ -679,9 +682,78 @@ type Game struct {
 	exportErr error
 }
 
-func (g *Game) regenerate() {
-	rng := rand.New(rand.NewSource(g.seed))
+// Render each tessellation separately so transparent guide cells contribute
+// neither faces nor outlines, and the foreground covers the background mesh.
+func (g *Game) drawGrid(img *ebiten.Image, seeds []V, cellColorAt func(V) color.NRGBA, rng *rand.Rand) {
+	vertices := make([]ebiten.Vertex, 0, len(seeds)*18)
+	indices := make([]uint32, 0, len(seeds)*18)
+	type cellEdge struct {
+		a, b  V
+		alpha uint8
+	}
+	edges := make(map[[4]int64]cellEdge)
+	hiddenEdges := make(map[[4]int64]bool)
+	for i, s := range seeds {
+		clr := cellColorAt(s)
+		if clr.A == 0 {
+			continue
+		}
+		poly := voronoiCell(i, seeds)
+		vertices, indices = appendCellMesh(vertices, indices, poly, s, clr, rng)
+		for j, a := range poly {
+			b := poly[(j+1)%len(poly)]
+			key := edgeKey(a, b)
+			// Preserve quiet black pockets in the underlying grid.
+			if clr.A == 255 && clr.R <= 3 && clr.G <= 3 && clr.B <= 3 {
+				hiddenEdges[key] = true
+			}
+			alpha := uint8(math.Round(55 * float64(clr.A) / 255))
+			if previous, ok := edges[key]; !ok || alpha > previous.alpha {
+				edges[key] = cellEdge{a, b, alpha}
+			}
+		}
+	}
 
+	if len(indices) == 0 {
+		return
+	}
+	img.DrawTrianglesShader32(vertices, indices, g.material, &ebiten.DrawTrianglesShaderOptions{
+		AntiAlias: true,
+		Uniforms: map[string]any{
+			"Texture": float32(g.texture),
+			"Offset":  []float32{rng.Float32() * 1000, rng.Float32() * 1000},
+		},
+	})
+
+	// Shared edges are stroked once, using the more visible adjacent cell.
+	// Outline opacity follows the faces, including at transparent boundaries.
+	var paths [56]*vector.Path
+	for key, edge := range edges {
+		if hiddenEdges[key] || edge.alpha == 0 {
+			continue
+		}
+		if paths[edge.alpha] == nil {
+			paths[edge.alpha] = &vector.Path{}
+		}
+		path := paths[edge.alpha]
+		path.MoveTo(float32(edge.a.X), float32(edge.a.Y))
+		path.LineTo(float32(edge.b.X), float32(edge.b.Y))
+	}
+	for alpha, path := range paths {
+		if path != nil {
+			strokePath(img, path, .55, color.NRGBA{R: 158, G: 158, B: 151, A: uint8(alpha)})
+		}
+	}
+}
+
+func (g *Game) regenerate() {
+	// Separate random streams keep the dark grid independent of guide edits.
+	backgroundRNG := rand.New(rand.NewSource(g.seed ^ 0x62617365))
+	backgroundNoise := NewPerlin(backgroundRNG)
+	backgroundSeeds := generateSeeds(backgroundRNG, seedCount, nil, backgroundNoise)
+	relaxSeeds(backgroundSeeds, nil, backgroundNoise)
+
+	rng := rand.New(rand.NewSource(g.seed))
 	guides := generateGuides(rng)
 	noise := NewPerlin(rng)
 	seeds := generateSeeds(rng, seedCount, guides, noise)
@@ -692,56 +764,16 @@ func (g *Game) regenerate() {
 
 	img := ebiten.NewImage(W, H)
 	img.Fill(color.Black)
+	g.drawGrid(img, backgroundSeeds, func(p V) color.NRGBA {
+		return backgroundCellColor(p, backgroundNoise)
+	}, backgroundRNG)
 
-	// Build the material mesh, suppressing tiny shadow faces near the guides.
-	vertices := make([]ebiten.Vertex, 0, len(seeds)*18)
-	indices := make([]uint32, 0, len(seeds)*18)
-	polys := make([][]V, len(seeds))
-	hiddenEdges := make(map[[4]int64]bool)
-	for i, s := range seeds {
-		poly := voronoiCell(i, seeds)
-		polys[i] = poly
-		v := .015 + .27*smoothstep(.39, .58, fbm(noise, s)) + guideBias(s, guides, noise, branches)
-		clr := cellColor(v)
-		if hideSmallShadowCell(poly, s, v, guides) {
-			// Keep the seed and polygon to preserve the smooth bright ridge.
-			// Black also suppresses shader grain, relief, and shared outlines.
-			clr = color.NRGBA{A: 255}
-		}
-		vertices, indices = appendCellMesh(vertices, indices, poly, s, clr, rng)
-		// Include near-black palette tones, and hide shared edges even when
-		// the neighboring cell is lighter.
-		if clr.R <= 3 && clr.G <= 3 && clr.B <= 3 {
-			for j, a := range poly {
-				hiddenEdges[edgeKey(a, poly[(j+1)%len(poly)])] = true
-			}
-		}
-	}
-
-	img.DrawTrianglesShader32(vertices, indices, g.material, &ebiten.DrawTrianglesShaderOptions{
-		AntiAlias: true,
-		Uniforms: map[string]any{
-			"Texture": float32(g.texture),
-			"Offset":  []float32{rng.Float32() * 1000, rng.Float32() * 1000},
-		},
-	})
-
-	// Shared edges are stroked once, except along black cells.
-	edges := &vector.Path{}
-	seen := make(map[[4]int64]bool)
-	for _, poly := range polys {
-		for i, a := range poly {
-			b := poly[(i+1)%len(poly)]
-			key := edgeKey(a, b)
-			if hiddenEdges[key] || seen[key] {
-				continue
-			}
-			seen[key] = true
-			edges.MoveTo(float32(a.X), float32(a.Y))
-			edges.LineTo(float32(b.X), float32(b.Y))
-		}
-	}
-	strokePath(img, edges, .55, color.NRGBA{R: 158, G: 158, B: 151, A: 55})
+	foreground := ebiten.NewImage(W, H)
+	g.drawGrid(foreground, seeds, func(p V) color.NRGBA {
+		return guideCellColor(p, guides, noise, branches)
+	}, rng)
+	img.DrawImage(foreground, nil)
+	foreground.Deallocate()
 
 	if showGuides {
 		blue := color.NRGBA{R: 0, G: 160, B: 250, A: 255}
