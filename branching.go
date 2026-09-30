@@ -17,6 +17,9 @@ func generateBranches(guides []Guide, noise *Perlin, rng *rand.Rand) []BranchSeg
 	var branches []BranchSegment
 	for i := range guides {
 		g := &guides[i]
+		if g.Seed != 0 {
+			rng = rand.New(rand.NewSource(g.Seed ^ 0x6272616e6368))
+		}
 		length := g.S[len(g.S)-1]
 		count := int(math.Max(1, math.Round(length/115)))
 		for j := 0; j < count; j++ {
@@ -36,7 +39,7 @@ func generateBranches(guides []Guide, noise *Perlin, rng *rand.Rand) []BranchSeg
 				u, v := d/reach, next/reach
 				// A coherent lateral drift makes connected fingers instead of
 				// isolated patches from thresholding a second noise field.
-				bend := noise.Noise(p.X*.009+phase, p.Y*.009-phase)
+				bend := noise.Noise(p.X*.009+phase, (p.Y+noise.OffsetY)*.009-phase)
 				heading := direction.Add(direction.Perp().Mul(bend * 1.5)).Norm()
 				end := p.Add(heading.Mul(next - d))
 				branches = append(branches, BranchSegment{
@@ -64,7 +67,7 @@ func appendBranchFork(branches []BranchSegment, p, direction V, reach, width, li
 	for d := 0.0; d < reach; {
 		next := math.Min(d+12, reach)
 		u, v := d/reach, next/reach
-		bend := noise.Noise(p.X*.012+phase, p.Y*.012-phase)
+		bend := noise.Noise(p.X*.012+phase, (p.Y+noise.OffsetY)*.012-phase)
 		heading := direction.Add(direction.Perp().Mul(bend)).Norm()
 		end := p.Add(heading.Mul(next - d))
 		branches = append(branches, BranchSegment{

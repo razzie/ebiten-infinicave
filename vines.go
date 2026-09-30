@@ -5,8 +5,6 @@ import (
 	"math"
 	"math/rand"
 	"sort"
-
-	"github.com/hajimehoshi/ebiten/v2"
 )
 
 // RockCell is shared by rendering and vine growth; colors belong to entire
@@ -134,6 +132,10 @@ type VinePoint struct {
 type Vine struct {
 	Points []VinePoint
 	Depth  int
+	// Parent and Joint identify the exact attachment on the preceding stem.
+	// Trunks have Parent == -1.
+	Parent int
+	Joint  int
 }
 
 func rotateV(v V, angle float64) V {
@@ -145,7 +147,7 @@ func rotateV(v V, angle float64) V {
 // turn before reaching a pale ridge instead of clipping it at the boundary.
 func growVine(field *VineTerrain, root, heading V, radius, reach, phase, curl float64, depth int) Vine {
 	const step = 2.5
-	v := Vine{Points: []VinePoint{{root, radius}}, Depth: depth}
+	v := Vine{Points: []VinePoint{{root, radius}}, Depth: depth, Parent: -1}
 	for s := 0.0; s < reach; s += step {
 		u := s / reach
 		r := radius * math.Pow(1-u, .8)
@@ -221,15 +223,19 @@ func (v Vine) extent() (length, span float64) {
 }
 
 func generateVines(field *VineTerrain, rng *rand.Rand) []Vine {
+	return generateVinesInBand(field, rng, 20, H-20, 5*H/W)
+}
+
+func generateVinesInBand(field *VineTerrain, rng *rand.Rand, bottom, top float64, count int) []Vine {
 	var vines []Vine
-	for rootIndex := 0; rootIndex < 5; rootIndex++ {
+	for rootIndex := 0; rootIndex < count; rootIndex++ {
 		type candidate struct {
 			p     V
 			score float64
 		}
 		var candidates []candidate
 		for attempt := 0; attempt < 240; attempt++ {
-			p := V{20 + rng.Float64()*(W-40), 20 + rng.Float64()*(H-40)}
+			p := V{20 + rng.Float64()*(W-40), bottom + rng.Float64()*(top-bottom)}
 			space := field.space(p)
 			if space < 15 {
 				continue
@@ -274,18 +280,14 @@ func generateVines(field *VineTerrain, rng *rand.Rand) []Vine {
 				d := rotateV(heading, float64(trial)*math.Pi/4)
 				a := growVine(field, candidate.p, d, radius, reachA, phase, curl, 0)
 				b := growVine(field, candidate.p, d.Mul(-1), radius, reachB, phase+math.Pi, -curl, 0)
-				v := Vine{}
-				for i := len(b.Points) - 1; i > 0; i-- {
-					v.Points = append(v.Points, b.Points[i])
-				}
-				v.Points = append(v.Points, a.Points...)
+				v, joint := joinVineHalves(a, b)
 				length, span := v.extent()
 				if length < vineMinTrunkLength || span < vineMinTrunkSpan {
 					continue
 				}
 				score := length*.6 + span + candidate.score*.3
 				if score > best {
-					trunk, rootAt, best = v, len(b.Points)-1, score
+					trunk, rootAt, best = v, joint, score
 				}
 			}
 			if len(tried) >= 10 {
@@ -295,6 +297,7 @@ func generateVines(field *VineTerrain, rng *rand.Rand) []Vine {
 		if best == 0 {
 			continue
 		}
+		trunkIndex := len(vines)
 		vines = append(vines, trunk)
 		// Invest in long, attached limbs before starting another independent
 		// trunk. Short blocked offshoots are discarded with their descendants.
@@ -327,6 +330,8 @@ func generateVines(field *VineTerrain, rng *rand.Rand) []Vine {
 			if branchLength < vineMinBranchLength {
 				continue
 			}
+			branch.Parent, branch.Joint = trunkIndex, i
+			branchIndex := len(vines)
 			vines = append(vines, branch)
 			if fork%2 == 0 && branchLength > 150 {
 				j := len(branch.Points) / 2
@@ -334,6 +339,7 @@ func generateVines(field *VineTerrain, rng *rand.Rand) []Vine {
 				d := branch.Points[j+1].P.Sub(branch.Points[j-1].P).Norm()
 				twig := growVine(field, b.P, rotateV(d, -side*.4), b.Radius*.6, lerp(140, 220, rng.Float64()), phase, -side, 2)
 				if length, _ := twig.extent(); length >= vineMinTwigLength {
+					twig.Parent, twig.Joint = branchIndex, j
 					vines = append(vines, twig)
 				}
 			}
@@ -342,53 +348,28 @@ func generateVines(field *VineTerrain, rng *rand.Rand) []Vine {
 	return vines
 }
 
-// Shaded ribbons provide a dark outline, scarlet body and narrow longitudinal
-// highlights. All shadows are drawn first, then twigs, branches and trunks so
-// forks merge into their parent instead of leaving dark seams across it.
-func drawVines(dst *ebiten.Image, vines []Vine) {
-	white := ebiten.NewImage(1, 1)
-	white.Fill(color.White)
-	defer white.Deallocate()
-	draw := func(vine Vine, shadow bool) {
-		var vertices []ebiten.Vertex
-		var indices []uint32
-		bands := []float64{-1, -.78, -.46, -.2, .04, .3, .65, 1}
-		colors := []color.NRGBA{{42, 0, 3, 255}, {116, 1, 8, 255}, {200, 4, 13, 255}, {245, 16, 23, 255}, {210, 5, 12, 255}, {155, 1, 8, 255}, {92, 0, 5, 255}, {34, 0, 3, 255}}
-		if shadow {
-			bands = []float64{-1, 1}
-			colors = []color.NRGBA{{0, 0, 0, 125}, {0, 0, 0, 125}}
-		}
-		for i, point := range vine.Points {
-			before, after := vine.Points[max(0, i-1)].P, vine.Points[min(len(vine.Points)-1, i+1)].P
-			n := after.Sub(before).Norm().Perp()
-			for j, band := range bands {
-				r := point.Radius
-				p := point.P
-				if shadow {
-					r *= 1.2
-					p = p.Add(V{1.4, 2})
-				}
-				p = p.Add(n.Mul(band * r))
-				clr := colors[j]
-				a := float32(clr.A) / 255
-				vertices = append(vertices, ebiten.Vertex{DstX: float32(p.X), DstY: float32(p.Y), SrcX: .5, SrcY: .5, ColorR: float32(clr.R) / 255 * a, ColorG: float32(clr.G) / 255 * a, ColorB: float32(clr.B) / 255 * a, ColorA: a})
-				if i > 0 && j > 0 {
-					k := uint32(len(vertices) - 1)
-					b := uint32(len(bands))
-					indices = append(indices, k-b-1, k-b, k, k-b-1, k, k-1)
-				}
-			}
-		}
-		dst.DrawTriangles32(vertices, indices, white, &ebiten.DrawTrianglesOptions{AntiAlias: true})
+// Join two growth directions at one full-width root. If either direction is
+// blocked immediately, its zero-width tip must not pinch the surviving stem.
+func joinVineHalves(a, b Vine) (Vine, int) {
+	v := Vine{Parent: -1}
+	for i := len(b.Points) - 1; i > 0; i-- {
+		v.Points = append(v.Points, b.Points[i])
 	}
-	for _, vine := range vines {
-		draw(vine, true)
-	}
-	for depth := 2; depth >= 0; depth-- {
-		for _, vine := range vines {
-			if vine.Depth == depth {
-				draw(vine, false)
-			}
+	joint := len(v.Points)
+	v.Points = append(v.Points, a.Points...)
+	v.Points[joint].Radius = math.Max(a.Points[0].Radius, b.Points[0].Radius)
+	// Both ends are actual tips, including when one half never grew.
+	length, _ := v.extent()
+	along := 0.0
+	for i := range v.Points {
+		if i > 0 {
+			along += v.Points[i].P.Sub(v.Points[i-1].P).Len()
+		}
+		if length == 0 {
+			v.Points[i].Radius = 0
+		} else {
+			v.Points[i].Radius *= smoothstep(0, math.Min(38, length*.45), math.Min(along, length-along))
 		}
 	}
+	return v, joint
 }

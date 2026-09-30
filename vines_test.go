@@ -58,7 +58,7 @@ func TestVinesBranchCurlAndStayOnDarkFaces(t *testing.T) {
 	field := newVineTerrain(background, foreground)
 	vines := generateVines(field, rand.New(rand.NewSource(42)))
 	forks, curls, longTrunks := 0, 0, 0
-	for _, vine := range vines {
+	for vineIndex, vine := range vines {
 		length, span := vine.extent()
 		if vine.Depth == 0 {
 			if length < vineMinTrunkLength || span < vineMinTrunkSpan {
@@ -110,18 +110,15 @@ func TestVinesBranchCurlAndStayOnDarkFaces(t *testing.T) {
 			continue
 		}
 		forks++
-		joined := false
-		for _, parent := range vines {
-			if parent.Depth != vine.Depth-1 {
-				continue
-			}
-			for _, p := range parent.Points {
-				if p.P == vine.Points[0].P && p.Radius >= vine.Points[0].Radius {
-					joined = true
-				}
-			}
+		if vine.Parent < 0 || vine.Parent >= vineIndex {
+			t.Fatal("branch has no preceding parent")
 		}
-		if !joined {
+		parent := vines[vine.Parent]
+		if parent.Depth != vine.Depth-1 || vine.Joint < 0 || vine.Joint >= len(parent.Points) {
+			t.Fatal("invalid parent attachment")
+		}
+		attachment := parent.Points[vine.Joint]
+		if attachment.P != vine.Points[0].P || attachment.Radius < vine.Points[0].Radius {
 			t.Fatal("detached branch")
 		}
 	}
@@ -165,5 +162,59 @@ func TestVinesSkipSmallIsolatedRockPatches(t *testing.T) {
 		if vines := generateVines(field, rand.New(rand.NewSource(seed))); len(vines) != 0 {
 			t.Fatalf("seed %d populated a small isolated rock patch with %d vines", seed, len(vines))
 		}
+	}
+}
+
+func TestTrunkJoinsAndBlockedHalfTaper(t *testing.T) {
+	field := newVineTerrain(testRockGrid([]V{{500, 500}}, []color.NRGBA{{30, 30, 30, 255}}), nil)
+	root := V{500, 500}
+	a := growVine(field, root, V{1, 0}, 8, 160, 0, 1, 0)
+	b := growVine(field, root, V{-1, 0}, 8, 160, 0, -1, 0)
+	blocked := Vine{Points: []VinePoint{{root, 0}}, Parent: -1}
+	for _, halves := range [][2]Vine{{a, b}, {a, blocked}, {blocked, b}, {blocked, blocked}} {
+		vine, joint := joinVineHalves(halves[0], halves[1])
+		if vine.Points[joint].P != root {
+			t.Fatal("joined trunk lost its shared root")
+		}
+		if vine.Points[0].Radius != 0 || vine.Points[len(vine.Points)-1].Radius != 0 {
+			t.Fatal("joined trunk has a blunt, disconnected-looking endpoint")
+		}
+		for i, p := range vine.Points {
+			if i > 0 && p.P.Sub(vine.Points[i-1].P).Len() > 2.500001 {
+				t.Fatal("gap in trunk centerline")
+			}
+			if math.IsNaN(p.Radius) || p.Radius < 0 {
+				t.Fatal("invalid trunk width")
+			}
+		}
+		if len(halves[0].Points) > 1 && len(halves[1].Points) > 1 && vine.Points[joint].Radius != 8 {
+			t.Fatal("interior trunk join is pinched")
+		}
+		// A blocked half needs a gradual taper on the surviving side.
+		if len(halves[0].Points) == 1 && len(halves[1].Points) > 1 && vine.Points[joint-1].Radius >= 1 {
+			t.Fatal("blocked forward half leaves an abrupt tip")
+		}
+		if len(halves[1].Points) == 1 && len(halves[0].Points) > 1 && vine.Points[joint+1].Radius >= 1 {
+			t.Fatal("blocked backward half leaves an abrupt tip")
+		}
+	}
+}
+
+func TestForkShadingMeetsParent(t *testing.T) {
+	parent := Vine{Parent: -1, Points: []VinePoint{{V{100, 80}, 8}, {V{100, 100}, 8}, {V{100, 120}, 8}}}
+	branch := Vine{Depth: 1, Parent: 0, Joint: 1, Points: []VinePoint{{V{100, 100}, 5}, {V{130, 160}, 0}}}
+	vines := []Vine{parent, branch}
+	// Even the dark outer bands of the child inherit the red parent face at
+	// the join instead of drawing a black cut through its highlight.
+	for _, x := range []float64{96, 100, 104} {
+		p := V{x, 100}
+		want := vineBandColor((100 - x) / 8)
+		got := vineJoinColor(vines, 1, p, vineColors[0])
+		if got != want {
+			t.Fatalf("fork seam at %v: got %v, want parent material %v", p, got, want)
+		}
+	}
+	if got := vineJoinColor(vines, 1, V{130, 160}, vineColors[3]); got != vineColors[3] {
+		t.Fatal("parent shading extends beyond the fork")
 	}
 }

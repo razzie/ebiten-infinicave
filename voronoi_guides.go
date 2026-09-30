@@ -9,23 +9,22 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"sort"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
 const (
 	W = 1000
-	H = 1000
+	H = 3 * W // local generation window: a section plus padding above and below
 
-	seedCount      = 1000
 	cellSpacing    = 29.0
 	guideSpacing   = 20.0
 	guideInfluence = 180.0
 	noiseScale     = 0.0034
-
-	showGuides = false
 )
 
 //go:embed grain.kage
@@ -61,6 +60,8 @@ type Guide struct {
 	Pts        []V
 	S          []float64 // cumulative arc length
 	BrightSign float64   // selects a continuous lit side, including around curls
+	Seed       int64     // stable random stream for streamed world guides
+	Min, Max   V
 }
 
 // Each spline segment is a cubic Bezier with matching tangents at its joins.
@@ -95,10 +96,29 @@ func splineGuide(knots []V, sign float64) Guide {
 	for i := 1; i < len(pts); i++ {
 		ss[i] = ss[i-1] + pts[i].Sub(pts[i-1]).Len()
 	}
-	return Guide{Pts: pts, S: ss, BrightSign: sign}
+	lo, hi := pts[0], pts[0]
+	for _, p := range pts {
+		lo.X = math.Min(lo.X, p.X)
+		lo.Y = math.Min(lo.Y, p.Y)
+		hi.X = math.Max(hi.X, p.X)
+		hi.Y = math.Max(hi.Y, p.Y)
+	}
+	return Guide{Pts: pts, S: ss, BrightSign: sign, Min: lo, Max: hi}
 }
 
 func generateGuides(rng *rand.Rand) []Guide {
+	var guides []Guide
+	for top := 0; top < H; top += W {
+		section := generateGuideSection(rng)
+		for i := range section {
+			section[i].translateY(float64(top))
+		}
+		guides = append(guides, section...)
+	}
+	return guides
+}
+
+func generateGuideSection(rng *rand.Rand) []Guide {
 	// Unequal compositional anchors leave large pockets of negative space.
 	// Curves may cross regions or leave the canvas. Knot order sets the lit side.
 	templates := [][]V{
@@ -115,6 +135,7 @@ func generateGuides(rng *rand.Rand) []Guide {
 		{{.56, .75}, {.60, .82}, {.68, .86}, {.80, .94}},
 	}
 	guides := make([]Guide, 0, len(templates))
+
 	for _, template := range templates {
 		center := V{}
 		for _, p := range template {
@@ -129,7 +150,7 @@ func generateGuides(rng *rand.Rand) []Guide {
 			d := p.Sub(center).Mul(scale)
 			d = V{d.X*math.Cos(angle) - d.Y*math.Sin(angle), d.X*math.Sin(angle) + d.Y*math.Cos(angle)}
 			q := center.Add(shift).Add(d)
-			knots[i] = V{q.X * W, q.Y * H}
+			knots[i] = V{q.X * W, q.Y * W}
 		}
 		guides = append(guides, splineGuide(knots, 1))
 	}
@@ -144,8 +165,24 @@ type Projection struct {
 	Dist   float64
 }
 
+func (g *Guide) translateY(offset float64) {
+	for i := range g.Pts {
+		g.Pts[i].Y += offset
+	}
+	g.Min.Y += offset
+	g.Max.Y += offset
+}
+
+func (g *Guide) distanceBound2(p V) float64 {
+	dx := math.Max(0, math.Max(g.Min.X-p.X, p.X-g.Max.X))
+	dy := math.Max(0, math.Max(g.Min.Y-p.Y, p.Y-g.Max.Y))
+	return dx*dx + dy*dy
+}
+
 func (g *Guide) project(p V) Projection {
-	best := Projection{Dist: math.Inf(1)}
+	best2 := math.Inf(1)
+	segment, u := 0, 0.0
+	var q V
 	for i := 0; i < len(g.Pts)-1; i++ {
 		a, b := g.Pts[i], g.Pts[i+1]
 		d := b.Sub(a)
@@ -154,26 +191,15 @@ func (g *Guide) project(p V) Projection {
 			continue
 		}
 		t := clamp(p.Sub(a).Dot(d)/l2, 0, 1)
-		q := a.Add(d.Mul(t))
-		delta := p.Sub(q)
-		dist := delta.Len()
-		if dist >= best.Dist {
-			continue
-		}
-
-		tan := g.segmentTangent(i, t)
-		n := tan.Perp().Mul(g.BrightSign)
-		segLen := math.Sqrt(l2)
-		best = Projection{
-			Q:      q,
-			T:      tan,
-			N:      n,
-			S:      g.S[i] + t*segLen,
-			Signed: delta.Dot(n),
-			Dist:   dist,
+		point := a.Add(d.Mul(t))
+		distance2 := p.Sub(point).Len2()
+		if distance2 < best2 {
+			best2, segment, u, q = distance2, i, t, point
 		}
 	}
-	return best
+	tangent := g.segmentTangent(segment, u)
+	normal := tangent.Perp().Mul(g.BrightSign)
+	return Projection{Q: q, T: tangent, N: normal, S: lerp(g.S[segment], g.S[segment+1], u), Signed: p.Sub(q).Dot(normal), Dist: math.Sqrt(best2)}
 }
 
 // Interpolate vertex tangents so offset rows do not kink at sample boundaries.
@@ -211,6 +237,9 @@ func nearestGuide(p V, guides []Guide) (int, Projection) {
 	bestI := -1
 	best := Projection{Dist: math.Inf(1)}
 	for i := range guides {
+		if guides[i].distanceBound2(p) >= best.Dist*best.Dist {
+			continue
+		}
 		pr := guides[i].project(p)
 		if pr.Dist < best.Dist {
 			bestI, best = i, pr
@@ -285,6 +314,9 @@ func addGuideSeeds(seeds []V, guides []Guide, rng *rand.Rand) []V {
 	seeds = background
 	for i := range guides {
 		g := &guides[i]
+		if g.Seed != 0 {
+			rng = rand.New(rand.NewSource(g.Seed))
+		}
 		crest := guideSamples(g, guideSideSpacing(1), rng)
 		for _, side := range []float64{-1, 1} {
 			offsets := []float64{.4, 1.4, 2.2}
@@ -437,7 +469,10 @@ func relaxSeeds(seeds []V, guides []Guide, noise *Perlin) {
 }
 
 // Classic gradient Perlin noise.
-type Perlin struct{ p [512]int }
+type Perlin struct {
+	p       [512]int
+	OffsetY float64
+}
 
 func NewPerlin(rng *rand.Rand) *Perlin {
 	q := rng.Perm(256)
@@ -491,6 +526,7 @@ func (n *Perlin) Noise(x, y float64) float64 {
 }
 
 func fbm(n *Perlin, p V) float64 {
+	p.Y += n.OffsetY
 	a, f, sum, norm := 1.0, noiseScale, 0.0, 0.0
 	for i := 0; i < 4; i++ {
 		sum += a * n.Noise(p.X*f, p.Y*f)
@@ -505,6 +541,9 @@ func guideBias(p V, guides []Guide, noise *Perlin, branches []BranchSegment) flo
 	light, shadow := 0.0, 0.0
 	branchLight := branchBias(p, branches)
 	for i := range guides {
+		if guides[i].distanceBound2(p) >= guideInfluence*guideInfluence {
+			continue
+		}
 		pr := guides[i].project(p)
 		if pr.Dist >= guideInfluence {
 			continue
@@ -576,6 +615,20 @@ func clipHalfPlane(poly []V, n V, c float64) []V {
 	if len(poly) == 0 {
 		return poly
 	}
+	// Most sites cannot cut an already small cell. Return the existing
+	// polygon unchanged instead of allocating for every distant half-plane.
+	inside := 0
+	for _, p := range poly {
+		if p.Dot(n) <= c+1e-9 {
+			inside++
+		}
+	}
+	if inside == len(poly) {
+		return poly
+	}
+	if inside == 0 {
+		return nil
+	}
 	out := make([]V, 0, len(poly)+1)
 	prev := poly[len(poly)-1]
 	prevIn := prev.Dot(n) <= c+1e-9
@@ -610,6 +663,17 @@ func voronoiCell(i int, pts []V) []V {
 		if len(poly) == 0 {
 			break
 		}
+	}
+	if len(poly) > 0 {
+		first := 0
+		for j := 1; j < len(poly); j++ {
+			ax, bx := math.Round(poly[j].X*1e6), math.Round(poly[first].X*1e6)
+			if ax < bx || (ax == bx && poly[j].Y < poly[first].Y) {
+				first = j
+			}
+		}
+		ordered := append([]V{}, poly[first:]...)
+		poly = append(ordered, poly[:first]...)
 	}
 	return poly
 }
@@ -673,7 +737,9 @@ func edgeKey(a, b V) [4]int64 {
 }
 
 type Game struct {
-	canvas    *ebiten.Image
+	camera    Camera
+	world     *World
+	loading   bool
 	material  *ebiten.Shader
 	texture   float64
 	seed      int64
@@ -684,7 +750,7 @@ type Game struct {
 
 // Render each tessellation separately so transparent guide cells contribute
 // neither faces nor outlines, and the foreground covers the background mesh.
-func (g *Game) drawGrid(img *ebiten.Image, grid RockGrid, rng *rand.Rand) {
+func (g *Game) drawGrid(img *ebiten.Image, grid RockGrid, top float64) {
 	vertices := make([]ebiten.Vertex, 0, len(grid)*18)
 	indices := make([]uint32, 0, len(grid)*18)
 	type cellEdge struct {
@@ -698,7 +764,7 @@ func (g *Game) drawGrid(img *ebiten.Image, grid RockGrid, rng *rand.Rand) {
 		if clr.A == 0 {
 			continue
 		}
-		vertices, indices = appendCellMesh(vertices, indices, poly, s, clr, rng)
+		vertices, indices = appendCellMesh(vertices, indices, poly, s, clr, rand.New(rand.NewSource(cellSeed(g.seed, s, top))))
 		for j, a := range poly {
 			b := poly[(j+1)%len(poly)]
 			key := edgeKey(a, b)
@@ -720,14 +786,28 @@ func (g *Game) drawGrid(img *ebiten.Image, grid RockGrid, rng *rand.Rand) {
 		AntiAlias: true,
 		Uniforms: map[string]any{
 			"Texture": float32(g.texture),
-			"Offset":  []float32{rng.Float32() * 1000, rng.Float32() * 1000},
+			"Offset":  []float32{317, float32(top) + 791},
 		},
 	})
 
 	// Shared edges are stroked once, using the more visible adjacent cell.
 	// Outline opacity follows the faces, including at transparent boundaries.
 	var paths [56]*vector.Path
-	for key, edge := range edges {
+	// Stable path order also keeps antialiasing identical after cache eviction.
+	keys := make([][4]int64, 0, len(edges))
+	for key := range edges {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		for k := 0; k < 4; k++ {
+			if keys[i][k] != keys[j][k] {
+				return keys[i][k] < keys[j][k]
+			}
+		}
+		return false
+	})
+	for _, key := range keys {
+		edge := edges[key]
 		if hiddenEdges[key] || edge.alpha == 0 {
 			continue
 		}
@@ -746,55 +826,10 @@ func (g *Game) drawGrid(img *ebiten.Image, grid RockGrid, rng *rand.Rand) {
 }
 
 func (g *Game) regenerate() {
-	// Separate random streams keep the dark grid independent of guide edits.
-	backgroundRNG := rand.New(rand.NewSource(g.seed ^ 0x62617365))
-	backgroundNoise := NewPerlin(backgroundRNG)
-	backgroundSeeds := generateSeeds(backgroundRNG, seedCount, nil, backgroundNoise)
-	relaxSeeds(backgroundSeeds, nil, backgroundNoise)
-
-	rng := rand.New(rand.NewSource(g.seed))
-	guides := generateGuides(rng)
-	noise := NewPerlin(rng)
-	seeds := generateSeeds(rng, seedCount, guides, noise)
-	warpSeeds(seeds, guides)
-	relaxSeeds(seeds, guides, noise)
-	seeds = addGuideSeeds(seeds, guides, rng)
-	branches := generateBranches(guides, noise, rand.New(rand.NewSource(g.seed^0x6272616e6368)))
-
-	backgroundGrid := newRockGrid(backgroundSeeds, func(p V) color.NRGBA {
-		return backgroundCellColor(p, backgroundNoise)
-	})
-	foregroundGrid := newRockGrid(seeds, func(p V) color.NRGBA {
-		return guideCellColor(p, guides, noise, branches)
-	})
-	vines := generateVines(newVineTerrain(backgroundGrid, foregroundGrid), rand.New(rand.NewSource(g.seed^0x76696e6573)))
-
-	img := ebiten.NewImage(W, H)
-	img.Fill(color.Black)
-	g.drawGrid(img, backgroundGrid, backgroundRNG)
-
-	foreground := ebiten.NewImage(W, H)
-	g.drawGrid(foreground, foregroundGrid, rng)
-	img.DrawImage(foreground, nil)
-	foreground.Deallocate()
-	drawVines(img, vines)
-
-	if showGuides {
-		blue := color.NRGBA{R: 0, G: 160, B: 250, A: 255}
-		for i := range guides {
-			p := &vector.Path{}
-			p.MoveTo(float32(guides[i].Pts[0].X), float32(guides[i].Pts[0].Y))
-			for _, q := range guides[i].Pts[1:] {
-				p.LineTo(float32(q.X), float32(q.Y))
-			}
-			strokePath(img, p, 7.5, blue)
-		}
+	if g.world != nil {
+		g.world.close()
 	}
-
-	if g.canvas != nil {
-		g.canvas.Deallocate()
-	}
-	g.canvas = img
+	g.world = newWorld(g.seed)
 }
 
 func (g *Game) Update() error {
@@ -808,30 +843,41 @@ func (g *Game) Update() error {
 		g.seed++
 		g.regenerate()
 	}
+	g.world.receive(g)
+	g.updateCamera()
+	g.loading = !g.world.ensure(g.camera.Target, g.camera.Height)
+	if !g.loading {
+		g.camera.Y = g.camera.Target
+	}
+	g.world.prune(g.camera.Y, g.camera.Target, g.camera.Height)
 	return nil
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	screen.DrawImage(g.canvas, nil)
-	if g.output != "" && !g.exported {
+	g.world.draw(screen, g.camera.Y, g.camera.Height)
+	if g.loading {
+		ebitenutil.DebugPrint(screen, "Growing upward...")
+	}
+	if g.output != "" && !g.exported && !g.loading {
 		g.exported = true
+		img := ebiten.NewImage(W, exportHeight)
+		defer img.Deallocate()
+		g.world.draw(img, -exportHeight, exportHeight)
 		f, err := os.Create(g.output)
 		if err != nil {
 			g.exportErr = err
 			return
 		}
-		g.exportErr = png.Encode(f, g.canvas)
+		g.exportErr = png.Encode(f, img)
 		if err := f.Close(); g.exportErr == nil {
 			g.exportErr = err
 		}
 	}
 }
 
-func (g *Game) Layout(_, _ int) (int, int) { return W, H }
-
 func main() {
 	seed := flag.Int64("seed", rand.Int63(), "random seed (random by default)")
-	output := flag.String("output", "", "save a PNG to this path and exit")
+	output := flag.String("output", "", "save the bottom 2400 pixels as a PNG and exit")
 	texture := flag.Float64("texture", 2, "surface texture strength (0 disables it, range 0-2)")
 	flag.Parse()
 	if math.IsNaN(*texture) || *texture < 0 || *texture > 8 {
@@ -845,9 +891,11 @@ func main() {
 
 	g := &Game{seed: *seed, output: *output, material: material, texture: *texture}
 	g.regenerate()
+	defer func() { g.world.close() }()
 
-	ebiten.SetWindowSize(W, H)
-	ebiten.SetWindowTitle("Perlin + guide-warped Voronoi")
+	ebiten.SetWindowSize(W, 800)
+	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
+	ebiten.SetWindowTitle("Perlin + guide-warped Voronoi | Scroll / Up / Down | R: regenerate")
 	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)
 	}
