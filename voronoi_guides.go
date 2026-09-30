@@ -498,15 +498,16 @@ func fbm(n *Perlin, p V) float64 {
 	return 0.5 + 0.5*sum/norm
 }
 
-func guideBias(p V, guides []Guide, noise *Perlin) float64 {
+func guideBias(p V, guides []Guide, noise *Perlin, branches []BranchSegment) float64 {
 	light, shadow := 0.0, 0.0
+	branchLight := branchBias(p, branches)
 	for i := range guides {
 		pr := guides[i].project(p)
 		if pr.Dist >= guideInfluence {
 			continue
 		}
-		// Broad noise makes the shoulder branch and widen independently of the
-		// narrow highlight. The normal stays continuous around tight curves.
+		// Broad noise varies the shoulder beneath the branching light field.
+		// The normal stays continuous around tight curves.
 		variation := smoothstep(.32, .66, fbm(noise, p.Add(V{317, 791})))
 		width := lerp(48, guideInfluence, variation)
 		along := math.Sqrt(math.Max(0, pr.Dist*pr.Dist-pr.Signed*pr.Signed))
@@ -516,10 +517,13 @@ func guideBias(p V, guides []Guide, noise *Perlin) float64 {
 			shoulder := .25 * (1 - smoothstep(0, width, pr.Dist))
 			light = math.Max(light, (crest+shoulder)*endFade)
 		} else {
+			// Offshoots can approach another ridge, but must not light its
+			// dense shadow cells or spill across the original crest.
+			branchLight *= smoothstep(guideSpacing*2.7, guideSpacing*5, pr.Dist)
 			shadow = math.Max(shadow, .24*(1-smoothstep(0, width*.8, pr.Dist))*endFade)
 		}
 	}
-	return light - shadow
+	return math.Max(light, branchLight) - shadow
 }
 
 func cellColor(v float64) color.NRGBA {
@@ -684,6 +688,7 @@ func (g *Game) regenerate() {
 	warpSeeds(seeds, guides)
 	relaxSeeds(seeds, guides, noise)
 	seeds = addGuideSeeds(seeds, guides, rng)
+	branches := generateBranches(guides, noise, rand.New(rand.NewSource(g.seed^0x6272616e6368)))
 
 	img := ebiten.NewImage(W, H)
 	img.Fill(color.Black)
@@ -696,7 +701,7 @@ func (g *Game) regenerate() {
 	for i, s := range seeds {
 		poly := voronoiCell(i, seeds)
 		polys[i] = poly
-		v := .015 + .27*smoothstep(.39, .58, fbm(noise, s)) + guideBias(s, guides, noise)
+		v := .015 + .27*smoothstep(.39, .58, fbm(noise, s)) + guideBias(s, guides, noise, branches)
 		clr := cellColor(v)
 		if hideSmallShadowCell(poly, s, v, guides) {
 			// Keep the seed and polygon to preserve the smooth bright ridge.
