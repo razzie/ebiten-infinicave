@@ -832,10 +832,10 @@ func (g *Game) Layout(_, _ int) (int, int) { return W, H }
 func main() {
 	seed := flag.Int64("seed", rand.Int63(), "random seed (random by default)")
 	output := flag.String("output", "", "save a PNG to this path and exit")
-	texture := flag.Float64("texture", 1, "surface texture strength (0 disables it, range 0-2)")
+	texture := flag.Float64("texture", 2, "surface texture strength (0 disables it, range 0-2)")
 	flag.Parse()
-	if math.IsNaN(*texture) || *texture < 0 || *texture > 2 {
-		log.Fatal("texture must be between 0 and 2")
+	if math.IsNaN(*texture) || *texture < 0 || *texture > 8 {
+		log.Fatal("texture must be between 0 and 8")
 	}
 	material, err := ebiten.NewShader(materialShaderSource)
 	if err != nil {
