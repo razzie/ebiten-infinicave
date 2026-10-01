@@ -51,7 +51,7 @@ func TestVineTerrainReadsBothVoronoiGrids(t *testing.T) {
 	}
 }
 
-func TestVinesBranchCurlAndStayOnDarkFaces(t *testing.T) {
+func TestVinesBranchCurlAndLimitTerrainIntrusion(t *testing.T) {
 	background := testRockGrid([]V{{500, 500}}, []color.NRGBA{{30, 30, 30, 255}})
 	// A vertical light barrier divides two large dark growth regions.
 	foreground := testRockGrid([]V{{100, 500}, {500, 500}, {900, 500}}, []color.NRGBA{{}, {180, 180, 170, 255}, {}})
@@ -81,19 +81,22 @@ func TestVinesBranchCurlAndStayOnDarkFaces(t *testing.T) {
 		}
 		turn := 0.0
 		for i, p := range vine.Points {
+			if length <= vineThickLength && p.Radius > vineThinRadius+1e-9 {
+				t.Fatalf("short vine grew thick: length %.1f, radius %.2f", length, p.Radius)
+			}
 			// Check against the known Voronoi boundaries independently of the
 			// sampled clearance used by growth, including the ribbon edges.
-			if p.P.X+p.Radius >= 300 && p.P.X-p.Radius <= 700 {
-				t.Fatalf("vine overlaps the light face at %+v", p)
+			if p.P.X+p.Radius > 300+vineMaxIntrusion && p.P.X-p.Radius < 700-vineMaxIntrusion {
+				t.Fatalf("vine goes too deep into the light face at %+v", p)
 			}
-			if math.IsNaN(p.Radius) || math.IsNaN(p.P.X) || field.space(p.P) < p.Radius {
-				t.Fatalf("vine leaves dark terrain at %+v", p)
+			if math.IsNaN(p.Radius) || math.IsNaN(p.P.X) || field.growthSpace(p.P) < p.Radius {
+				t.Fatalf("vine exceeds terrain intrusion limit at %+v", p)
 			}
 			if i > 0 {
 				a := vine.Points[i-1]
 				for u := 0.0; u <= 1; u += .25 {
-					if field.space(lerpV(a.P, p.P, u)) < lerp(a.Radius, p.Radius, u) {
-						t.Fatal("vine width crosses light barrier")
+					if field.growthSpace(lerpV(a.P, p.P, u)) < lerp(a.Radius, p.Radius, u) {
+						t.Fatal("vine width exceeds shallow barrier allowance")
 					}
 				}
 			}
@@ -216,5 +219,91 @@ func TestForkShadingMeetsParent(t *testing.T) {
 	}
 	if got := vineJoinColor(vines, 1, V{130, 160}, vineColors[3]); got != vineColors[3] {
 		t.Fatal("parent shading extends beyond the fork")
+	}
+}
+
+func TestVinesCrossNarrowBlackAndBrightGaps(t *testing.T) {
+	for _, tone := range []uint8{0, 180} {
+		for _, width := range []float64{14, 180} {
+			background := testRockGrid([]V{{500, 500}}, []color.NRGBA{{30, 30, 30, 255}})
+			foreground := RockGrid{{Polygon: []V{{500, 0}, {500 + width, 0}, {500 + width, H}, {500, H}}, Color: color.NRGBA{tone, tone, tone, 255}}}
+			field := newVineTerrain(background, foreground)
+			vine := growVine(field, V{450, 500}, V{1, 0}, 4, 260, 0, 0, 0)
+			entered, crossed := false, false
+			for _, p := range vine.Points {
+				entered = entered || p.P.X > 500
+				crossed = crossed || p.P.X > 500+width+10
+				if width == 180 && p.P.X+p.Radius > 500+vineMaxIntrusion {
+					t.Fatalf("tone %d: vine entered too deeply: %+v", tone, p)
+				}
+			}
+			if !entered || crossed != (width == 14) {
+				t.Fatalf("tone %d, gap %.0f: entered=%v, crossed=%v", tone, width, entered, crossed)
+			}
+		}
+	}
+}
+
+func TestBlockedEndsTaperOverStemThickness(t *testing.T) {
+	root := V{500, 500}
+	// Full-width geometry models a trunk stopped early by terrain.
+	stem := Vine{Parent: -1}
+	for i := 0; i <= 120; i++ {
+		stem.Points = append(stem.Points, VinePoint{root.Add(V{float64(i) * 2.5, 0}), 8})
+	}
+	blocked := Vine{Parent: -1, Points: []VinePoint{{root, 0}}}
+	for _, halves := range [][2]Vine{{stem, blocked}, {blocked, stem}} {
+		v, _ := joinVineHalves(halves[0], halves[1])
+		for i, p := range v.Points {
+			distance := float64(min(i, len(v.Points)-1-i)) * 2.5
+			if distance <= 40 && p.Radius > 1.6 {
+				t.Fatalf("thick exposed end %.1f pixels from tip: radius %.2f", distance, p.Radius)
+			}
+		}
+		if v.Points[len(v.Points)/2].Radius != 8 {
+			t.Fatal("taper thinned the middle of the trunk")
+		}
+	}
+}
+
+func TestVineThicknessRequiresCompletedLength(t *testing.T) {
+	previous := 0.0
+	for _, length := range []float64{320, 700, 950, 1200, 1450} {
+		vine := Vine{Points: []VinePoint{
+			{V{0, 0}, 0}, {V{length / 2, 0}, 9}, {V{length, 0}, 0},
+		}}
+		vine.limitThickness()
+		radius := vine.Points[1].Radius
+		if length <= 700 && radius > 3 {
+			t.Fatalf("short trunk of length %.0f retained radius %.1f", length, radius)
+		}
+		if length >= 1200 && radius != 9 {
+			t.Fatal("very long trunk lost its full thickness")
+		}
+		if radius < previous || vine.Points[0].Radius != 0 || vine.Points[2].Radius != 0 {
+			t.Fatal("thickness must increase with length and preserve tapered tips")
+		}
+		previous = radius
+	}
+}
+
+func TestThickVineSectionsBendMoreGently(t *testing.T) {
+	field := newVineTerrain(testRockGrid([]V{{500, 500}}, []color.NRGBA{{30, 30, 30, 255}}), nil)
+	turnNearRoot := func(radius float64) float64 {
+		vine := growVine(field, V{500, 500}, V{1, 0}, radius, 800, math.Pi/2, 0, 0)
+		if len(vine.Points) < 41 {
+			t.Fatal("fixture stopped before the bend could be measured")
+		}
+		turn := 0.0
+		for i := 2; i <= 40; i++ {
+			a := vine.Points[i-1].P.Sub(vine.Points[i-2].P).Norm()
+			b := vine.Points[i].P.Sub(vine.Points[i-1].P).Norm()
+			turn += math.Abs(math.Atan2(a.X*b.Y-a.Y*b.X, a.Dot(b)))
+		}
+		return turn
+	}
+	thin, thick := turnNearRoot(3), turnNearRoot(9)
+	if thin < .1 || thick >= thin*.85 || thick < thin*.5 {
+		t.Fatalf("expected a moderately broader thick bend, got thin %.3f and thick %.3f radians", thin, thick)
 	}
 }
