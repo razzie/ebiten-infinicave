@@ -5,8 +5,8 @@ import (
 	"math/rand"
 )
 
-// BranchSegment carries a tapering ribbon of light through the existing cells.
-// Branches affect whole faces, leaving the guide's paired crest seeds intact.
+// BranchSegment carries a tapering raised spur through the existing cells.
+// LightA/B are the historical strength values, now used as relief amplitude.
 type BranchSegment struct {
 	A, B           V
 	WidthA, WidthB float64
@@ -83,6 +83,13 @@ func appendBranchFork(branches []BranchSegment, p, direction V, reach, width, li
 func branchBias(p V, branches []BranchSegment) float64 {
 	light := 0.0
 	for _, b := range branches {
+		// Contour refinement samples this field densely. A spur contributes
+		// nothing outside its maximum support, so reject distant segments.
+		pad := math.Max(b.WidthA, b.WidthB) * 1.8
+		if p.X < math.Min(b.A.X, b.B.X)-pad || p.X > math.Max(b.A.X, b.B.X)+pad ||
+			p.Y < math.Min(b.A.Y, b.B.Y)-pad || p.Y > math.Max(b.A.Y, b.B.Y)+pad {
+			continue
+		}
 		delta := b.B.Sub(b.A)
 		u := 0.0
 		if delta.Len2() > 0 {

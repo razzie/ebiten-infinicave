@@ -19,31 +19,35 @@ func smoothNoise(p vec2) float {
 	return mix(a, b, f.y)
 }
 
-// Only cell faces pass through this shader. The wireframe and blue guides are
-// drawn afterward. Source coordinates anchor the texture to the artwork.
-// custom: distance to outer edge, face tilt, facet tone, edge light direction.
+// Only cell faces pass through this shader; outlines are drawn afterward.
+// Source coordinates anchor the texture to the artwork.
+// custom.y is continuous face tilt; custom.zw is the face normal in screen space.
 func Fragment(dst vec4, src vec2, color vec4, custom vec4) vec4 {
 	rgb := color.rgb
 	luminance := dot(rgb, vec3(.30, .59, .11))
 	visible := smoothstep(.008, .13, luminance)
 	p := src + Offset
 
-	// Quiet mineral variation at several scales, with a slight planar tilt
-	// and faint triangular facets. Avoid turning the faces into rounded tiles.
+	// One continuous plane per rock. The triangles filling a concave or
+	// merged face must not introduce their own wedge-shaped tonal seams.
 	mineral := (smoothNoise(p/83.0)-.5)*.055
 	mineral += (smoothNoise(p/21.0)-.5)*.035
 	mineral += (smoothNoise(p/5.0)-.5)*.012
-	plane := custom.y*.055 + custom.z*.035
+	// Faint mineral strokes run along the facet, with broad warping to avoid
+	// repetitive stripes. Normal channels are constant across a whole face.
+	n := custom.zw
+	n = n / max(length(n), .15)
+	t := vec2(-n.y, n.x)
+	warp := smoothNoise(p/57.0)*3.0
+	strokes := smoothNoise(vec2(dot(p,t)/63.0, dot(p,n)/8.0 + warp)) - .5
+	mineral += strokes*.028
+	plane := custom.y*.012
 	rgb *= 1.0 + (mineral+plane)*Texture*visible
 
 	// Fine matte grain stays static and fades out in the black pockets.
 	grain := noise(floor(p)) - .5
 	rgb += vec3(grain) * (.004+luminance*.009) * Texture * visible
 
-	// A narrow directional rim gives lit cell boundaries a little relief.
-	// It follows only the polygon perimeter, never the internal fan edges.
-	rim := 1.0 - smoothstep(.10, 1.15, custom.x)
-	rgb += vec3(1, .98, .92) * rim * custom.w * .025 * Texture * visible
 	// Shader output uses premultiplied alpha for the transparent guide layer.
 	return vec4(clamp(rgb, vec3(0), vec3(1)) * color.a, color.a)
 }

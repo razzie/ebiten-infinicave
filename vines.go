@@ -10,9 +10,13 @@ import (
 // RockCell is shared by rendering and vine growth; colors belong to entire
 // Voronoi faces, not a second approximation of the original noise field.
 type RockCell struct {
-	Center  V
-	Polygon []V
-	Color   color.NRGBA
+	Center          V
+	Polygon         []V
+	Color           color.NRGBA
+	Z               float64 // height toward the camera at the control point
+	Normal          V3
+	Raised          bool
+	Shadow, Ambient float64
 }
 
 type RockGrid []RockCell
@@ -22,7 +26,7 @@ func newRockGrid(seeds []V, colorAt func(V) color.NRGBA) RockGrid {
 	for i, p := range seeds {
 		clr := colorAt(p)
 		if clr.A != 0 {
-			grid = append(grid, RockCell{p, voronoiCell(i, seeds), clr})
+			grid = append(grid, RockCell{Center: p, Polygon: voronoiCell(i, seeds), Color: clr})
 		}
 	}
 	return grid
@@ -69,20 +73,25 @@ func newVineTerrain(background, foreground RockGrid) *VineTerrain {
 			}
 			alpha := float64(cell.Color.A) / 255
 			tone := .30*float64(cell.Color.R) + .59*float64(cell.Color.G) + .11*float64(cell.Color.B)
-			// Convex polygons have a single span on each scanline.
+			// Curved guide cuts can make concave faces with multiple spans.
+			var crossings []float64
 			for y := max(0, int(minY/vineFieldStep)); y < min(vineFieldHeight, int(maxY/vineFieldStep)+1); y++ {
 				py := (float64(y) + .5) * vineFieldStep
-				left, right := float64(W), 0.0
+				crossings = crossings[:0]
 				for i, a := range cell.Polygon {
 					b := cell.Polygon[(i+1)%len(cell.Polygon)]
 					if (a.Y <= py && b.Y > py) || (b.Y <= py && a.Y > py) {
 						x := a.X + (b.X-a.X)*(py-a.Y)/(b.Y-a.Y)
-						left, right = math.Min(left, x), math.Max(right, x)
+						crossings = append(crossings, x)
 					}
 				}
-				for x := max(0, int(math.Ceil(left/vineFieldStep-.5))); x < min(vineFieldWidth, int(math.Ceil(right/vineFieldStep-.5))); x++ {
-					i := y*vineFieldWidth + x
-					tones[i] = lerp(tones[i], tone, alpha)
+				sort.Float64s(crossings)
+				for span := 0; span+1 < len(crossings); span += 2 {
+					left, right := crossings[span], crossings[span+1]
+					for x := max(0, int(math.Ceil(left/vineFieldStep-.5))); x < min(vineFieldWidth, int(math.Ceil(right/vineFieldStep-.5))); x++ {
+						i := y*vineFieldWidth + x
+						tones[i] = lerp(tones[i], tone, alpha)
+					}
 				}
 			}
 		}

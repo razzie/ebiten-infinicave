@@ -14,9 +14,9 @@ func TestWorldSeedsMatchOverlappingWindows(t *testing.T) {
 	aTop, bTop := sectionWindowTop(0), sectionWindowTop(1)
 	noise := NewPerlin(rand.New(rand.NewSource(seed)))
 	noise.OffsetY = aTop
-	a := worldSeeds(seed, aTop, nil, noise)
+	a := worldSeeds(seed, aTop, noise)
 	noise.OffsetY = bTop
-	b := worldSeeds(seed, bTop, nil, noise)
+	b := worldSeeds(seed, bTop, noise)
 	collect := func(seeds []V, top float64) []V {
 		var result []V
 		for _, p := range seeds {
@@ -41,11 +41,14 @@ func TestWorldSeedsMatchOverlappingWindows(t *testing.T) {
 func TestWorldSectionSeam(t *testing.T) {
 	a, b := buildSection(42, 0), buildSection(42, 1)
 	// Compare whole rock faces in a strip around the shared seam, not just
-	// sample colors. Faces, alpha, and random material must all agree.
+	// sample colors. Geometry, relief, shadowing, and material must agree.
 	type face struct {
-		color   [4]uint8
-		polygon []V
-		seed    int64
+		color           [4]uint8
+		polygon         []V
+		seed            int64
+		z               float64
+		normal          V3
+		shadow, ambient float64
 	}
 	collect := func(grid RockGrid, top float64) map[[2]int64]face {
 		result := make(map[[2]int64]face)
@@ -59,7 +62,7 @@ func TestWorldSectionSeam(t *testing.T) {
 				poly[i] = V{p.X, p.Y + top}
 			}
 			key := [2]int64{int64(math.Round(c.Center.X * 1e5)), int64(math.Round(y * 1e5))}
-			result[key] = face{[4]uint8{c.Color.R, c.Color.G, c.Color.B, c.Color.A}, poly, cellSeed(42, c.Center, top)}
+			result[key] = face{[4]uint8{c.Color.R, c.Color.G, c.Color.B, c.Color.A}, poly, cellSeed(42, c.Center, top), c.Z, c.Normal, c.Shadow, c.Ambient}
 		}
 		return result
 	}
@@ -73,6 +76,9 @@ func TestWorldSectionSeam(t *testing.T) {
 			if !ok || x.color != y.color || x.seed != y.seed || len(x.polygon) != len(y.polygon) {
 				t.Fatalf("layer %d: mismatched face at %v", i, key)
 			}
+			if math.Abs(x.shadow-y.shadow) > 1e-8 || math.Abs(x.ambient-y.ambient) > 1e-8 || math.Abs(x.z-y.z) > 1e-8 || math.Abs(x.normal.X-y.normal.X)+math.Abs(x.normal.Y-y.normal.Y)+math.Abs(x.normal.Z-y.normal.Z) > 1e-8 {
+				t.Fatalf("layer %d: height, normal, or lighting seam at %v", i, key)
+			}
 			for j, p := range x.polygon {
 				if p.Sub(y.polygon[j]).Len() > 1e-6 {
 					t.Fatalf("layer %d: polygon seam at %v: %v vs %v", i, key, p, y.polygon[j])
@@ -80,28 +86,30 @@ func TestWorldSectionSeam(t *testing.T) {
 			}
 		}
 	}
-	// At least one full vine must actually span a section boundary; its
+	// At least one full vine in the adjacent sections must span a boundary; its
 	// offshoots must remain attached even outside the owner's core section.
 	crossing := false
-	for i, v := range a.vines {
-		for j, p := range v.Points {
-			if j == 0 {
-				continue
-			}
-			prev := v.Points[j-1]
-			for _, edge := range []float64{W, 2 * W} {
-				if (prev.P.Y-edge)*(p.P.Y-edge) < 0 && prev.Radius > 0 && p.Radius > 0 {
-					crossing = true
+	for _, section := range []sectionData{a, b} {
+		for i, v := range section.vines {
+			for j, p := range v.Points {
+				if j == 0 {
+					continue
+				}
+				prev := v.Points[j-1]
+				for _, edge := range []float64{W, 2 * W} {
+					if (prev.P.Y-edge)*(p.P.Y-edge) < 0 && prev.Radius > 0 && p.Radius > 0 {
+						crossing = true
+					}
 				}
 			}
-		}
-		if v.Depth > 0 {
-			if v.Parent < 0 || v.Parent >= i {
-				t.Fatal("cross-section vine lost its parent")
-			}
-			parent := a.vines[v.Parent]
-			if parent.Points[v.Joint].P != v.Points[0].P {
-				t.Fatal("cross-section vine branch is detached")
+			if v.Depth > 0 {
+				if v.Parent < 0 || v.Parent >= i {
+					t.Fatal("cross-section vine lost its parent")
+				}
+				parent := section.vines[v.Parent]
+				if parent.Points[v.Joint].P != v.Points[0].P {
+					t.Fatal("cross-section vine branch is detached")
+				}
 			}
 		}
 	}

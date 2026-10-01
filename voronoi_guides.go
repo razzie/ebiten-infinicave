@@ -21,7 +21,6 @@ const (
 	W = 1000
 	H = 3 * W // local generation window: a section plus padding above and below
 
-	cellSpacing    = 29.0
 	guideSpacing   = 20.0
 	guideInfluence = 180.0
 	noiseScale     = 0.0034
@@ -152,7 +151,10 @@ func generateGuideSection(rng *rand.Rand) []Guide {
 			q := center.Add(shift).Add(d)
 			knots[i] = V{q.X * W, q.Y * W}
 		}
-		guides = append(guides, splineGuide(knots, 1))
+		// Derive a separate stream without changing the compositional anchors.
+		g := splineGuide(knots, 1)
+		seed := sectionSeed(int64(math.Round(knots[0].X*1000)), int64(math.Round(knots[0].Y*1000)))
+		guides = append(guides, ridgedGuide(g, seed))
 	}
 	return guides
 }
@@ -202,7 +204,7 @@ func (g *Guide) project(p V) Projection {
 	return Projection{Q: q, T: tangent, N: normal, S: lerp(g.S[segment], g.S[segment+1], u), Signed: p.Sub(q).Dot(normal), Dist: math.Sqrt(best2)}
 }
 
-// Interpolate vertex tangents so offset rows do not kink at sample boundaries.
+// Interpolate vertex tangents so lighting and branches stay smooth at sample boundaries.
 func (g *Guide) segmentTangent(i int, u float64) V {
 	t := g.Pts[i+1].Sub(g.Pts[i]).Norm()
 	a, b := t, t
@@ -248,126 +250,13 @@ func nearestGuide(p V, guides []Guide) (int, Projection) {
 	return bestI, best
 }
 
-// Negative signed distance is the shadow side selected by the guide normal.
-func guideSideSpacing(signed float64) float64 {
-	if signed < 0 {
-		return guideSpacing * .6
-	}
-	return guideSpacing * 2.4
+// Site density follows terrain only; guides cut faces without adding sites.
+func desiredSpacing(p V, noise *Perlin) float64 {
+	return lerp(43, 30, smoothstep(.39, .58, fbm(noise, p)))
 }
 
-func desiredSpacing(p V, guides []Guide, noise *Perlin) float64 {
-	gi, pr := nearestGuide(p, guides)
-	terrain := smoothstep(.39, .58, fbm(noise, p))
-	spacing := lerp(43, 30, terrain)
-	if gi < 0 {
-		return spacing
-	}
-	return lerp(guideSideSpacing(pr.Signed), spacing, smoothstep(0, 85, pr.Dist))
-}
-
-// Follow bends with short polygon edges, without subdividing them into tiny
-// slivers. The concept uses broad rock faces even around curled ridges.
-func guideSamples(g *Guide, spacing float64, rng *rand.Rand) []float64 {
-	length := g.S[len(g.S)-1]
-	samples := []float64{0}
-	for s := 0.0; s < length; {
-		step := math.Min(spacing*lerp(.7, 1, rng.Float64()), length-s)
-		for step > 2 {
-			a, ta, _ := g.frameAt(s)
-			b, tb, _ := g.frameAt(s + step)
-			mid, _, _ := g.frameAt(s + step*.5)
-			if mid.Sub(lerpV(a, b, .5)).Len() <= 1.2 && ta.Dot(tb) >= math.Cos(.45) {
-				break
-			}
-			step *= .75
-		}
-		s += step
-		samples = append(samples, s)
-	}
-	// Avoid a tiny final cell at the end of an otherwise regular row.
-	if len(samples) > 2 {
-		n := len(samples)
-		if samples[n-1]-samples[n-2] < .5*(samples[n-2]-samples[n-3]) {
-			samples[n-2] = (samples[n-3] + samples[n-1]) * .5
-		}
-	}
-	return samples
-}
-
-// Keep a paired crest for a smooth silhouette, then scatter independent bands
-// behind it. Unequal lengths and depths produce thin, irregular rock faces
-// without continuous horizontal courses or aligned vertical joints.
-func addGuideSeeds(seeds []V, guides []Guide, rng *rand.Rand) []V {
-	background := make([]V, 0, len(seeds))
-	for _, p := range seeds {
-		_, pr := nearestGuide(p, guides)
-		width := guideSpacing * 2.7
-		if pr.Signed >= 0 {
-			width = guideSpacing * 4.4
-		}
-		along := math.Abs(p.Sub(pr.Q).Dot(pr.T))
-		if pr.Dist >= width || along > guideSpacing*.5 {
-			background = append(background, p)
-		}
-	}
-	seeds = background
-	for i := range guides {
-		g := &guides[i]
-		if g.Seed != 0 {
-			rng = rand.New(rand.NewSource(g.Seed))
-		}
-		crest := guideSamples(g, guideSideSpacing(1), rng)
-		for _, side := range []float64{-1, 1} {
-			offsets := []float64{.4, 1.4, 2.2}
-			if side > 0 {
-				offsets = []float64{.4, 1.4, 2.5, 3.8}
-			}
-			for row, offset := range offsets {
-				rowSamples := crest
-				if row > 0 {
-					// Resample every band independently so neighboring cells
-					// meet at staggered, irregular polygon edges.
-					spacing := guideSideSpacing(side) * (1 + .2*float64(row))
-					rowSamples = guideSamples(g, spacing, rng)
-				}
-				for _, s := range rowSamples {
-					depth := guideSpacing * offset
-					if row > 0 {
-						// Gradually release the normal constraint away from the
-						// crest, retaining the flattened shape near the guide.
-						depth += guideSpacing * .075 * float64(row) * (2*rng.Float64() - 1)
-					}
-					q, _, n := g.frameAt(s)
-					p := q.Add(n.Mul(side * depth))
-					if p.X < 1 || p.X > W-1 || p.Y < 1 || p.Y > H-1 {
-						continue
-					}
-					// Offset curves can fold inside tight curls or meet another
-					// guide. Let the nearest guide own that part of the band.
-					gi, pr := nearestGuide(p, guides)
-					if gi != i || pr.Signed*side <= 0 || math.Abs(pr.S-s) > guideSideSpacing(side) {
-						continue
-					}
-					crowded := false
-					for _, seed := range seeds {
-						if p.Sub(seed).Len2() < 4 {
-							crowded = true
-							break
-						}
-					}
-					if !crowded {
-						seeds = append(seeds, p)
-					}
-				}
-			}
-		}
-	}
-	return seeds
-}
-
-func generateSeeds(rng *rand.Rand, count int, guides []Guide, noise *Perlin) []V {
-	// Weighted sampling follows guide-side spacing and background terrain.
+func generateSeeds(rng *rand.Rand, count int, noise *Perlin) []V {
+	// Weighted sampling follows background terrain.
 	pts := make([]V, 0, count)
 	for len(pts) < count {
 		best := V{}
@@ -385,7 +274,7 @@ func generateSeeds(rng *rand.Rand, count int, guides []Guide, noise *Perlin) []V
 					minD2 = d2
 				}
 			}
-			spacing := desiredSpacing(p, guides, noise)
+			spacing := desiredSpacing(p, noise)
 			minD2 /= spacing * spacing
 			if minD2 > bestD2 {
 				best, bestD2 = p, minD2
@@ -396,54 +285,11 @@ func generateSeeds(rng *rand.Rand, count int, guides []Guide, noise *Perlin) []V
 	return pts
 }
 
-func warpSeeds(seeds []V, guides []Guide) {
-	row := cellSpacing * 0.92
-
-	for i, p := range seeds {
-		gi, pr := nearestGuide(p, guides)
-		if gi < 0 || pr.Dist >= guideInfluence {
-			continue
-		}
-
-		// Guide alignment fades smoothly into the surrounding irregular cells.
-		w := 1 - smoothstep(0.35*guideInfluence, guideInfluence, pr.Dist)
-		absD := math.Abs(pr.Signed)
-		side := 1.0
-		if pr.Signed < 0 {
-			side = -1
-		}
-
-		// Snap normal distance into rows parallel to the guide. The first row is
-		// half a cell away, so the guide itself becomes a Voronoi boundary-ish seam.
-		rowIndex := math.Max(0, math.Round(absD/row-0.5))
-		targetD := side * (rowIndex + 0.5) * row
-
-		// Weak tangent snapping prevents a perfectly crystalline lattice but makes
-		// neighboring centers flow smoothly along the guide.
-		phase := 0.0
-		if int(rowIndex)&1 != 0 {
-			phase = 0.5 * row
-		}
-		targetS := math.Round((pr.S-phase)/row)*row + phase
-		q, t, n := guides[gi].frameAt(targetS)
-		target := q.Add(n.Mul(targetD))
-
-		// Keep more of the original tangential randomness than normal randomness.
-		delta := target.Sub(p)
-		nShift := n.Mul(delta.Dot(n) * 0.32 * w)
-		tShift := t.Mul(delta.Dot(t) * 0.08 * w)
-		p = p.Add(nShift).Add(tShift)
-		p.X = clamp(p.X, 2, W-2)
-		p.Y = clamp(p.Y, 2, H-2)
-		seeds[i] = p
-	}
-}
-
-// Repel crowded seeds after warping without forcing a regular lattice.
-func relaxSeeds(seeds []V, guides []Guide, noise *Perlin) {
+// Repel crowded seeds without forcing a regular lattice.
+func relaxSeeds(seeds []V, noise *Perlin) {
 	spacing := make([]float64, len(seeds))
 	for i, p := range seeds {
-		spacing[i] = desiredSpacing(p, guides, noise) * .48
+		spacing[i] = desiredSpacing(p, noise) * .48
 	}
 	for pass := 0; pass < 4; pass++ {
 		shifts := make([]V, len(seeds))
@@ -537,37 +383,6 @@ func fbm(n *Perlin, p V) float64 {
 	return 0.5 + 0.5*sum/norm
 }
 
-func guideBias(p V, guides []Guide, noise *Perlin, branches []BranchSegment) float64 {
-	light, shadow := 0.0, 0.0
-	branchLight := branchBias(p, branches)
-	for i := range guides {
-		if guides[i].distanceBound2(p) >= guideInfluence*guideInfluence {
-			continue
-		}
-		pr := guides[i].project(p)
-		if pr.Dist >= guideInfluence {
-			continue
-		}
-		// Broad noise varies the shoulder beneath the branching light field.
-		// The normal stays continuous around tight curves.
-		variation := smoothstep(.32, .66, fbm(noise, p.Add(V{317, 791})))
-		width := lerp(48, guideInfluence, variation)
-		along := math.Sqrt(math.Max(0, pr.Dist*pr.Dist-pr.Signed*pr.Signed))
-		endFade := 1 - smoothstep(0, width*.45, along)
-		if pr.Signed >= 0 {
-			crest := .64 * math.Exp(-pr.Dist/lerp(15, 23, variation))
-			shoulder := .25 * (1 - smoothstep(0, width, pr.Dist))
-			light = math.Max(light, (crest+shoulder)*endFade)
-		} else {
-			// Offshoots can approach another ridge, but must not light its
-			// dense shadow cells or spill across the original crest.
-			branchLight *= smoothstep(guideSpacing*2.7, guideSpacing*5, pr.Dist)
-			shadow = math.Max(shadow, .24*(1-smoothstep(0, width*.8, pr.Dist))*endFade)
-		}
-	}
-	return math.Max(light, branchLight) - shadow
-}
-
 func cellColor(v float64) color.NRGBA {
 	// Base tones for the material: charcoal, gray, and warm ivory.
 	stops := []struct {
@@ -596,19 +411,26 @@ func cellColor(v float64) color.NRGBA {
 // The underlying tessellation has no guide influence. Low Perlin values map
 // to exact black; the remaining cells stay within the charcoal palette.
 func backgroundCellColor(p V, noise *Perlin) color.NRGBA {
-	return cellColor(.30 * smoothstep(.43, .59, fbm(noise, p)))
+	return backgroundSurfaceColor(p, noise, V3{Z: 1})
 }
 
-// Unlit foreground cells are absent. Fade the outer shoulders and branch tips
-// per cell so the independent dark tessellation shows through their faces.
+func backgroundSurfaceColor(p V, noise *Perlin, normal V3) color.NRGBA {
+	return cellColor(.30 * smoothstep(.43, .59, fbm(noise, p)) * (.4 + .6*surfaceLight(normal)))
+}
+
+// Rock occupancy follows relief, independently of light. Every existing face
+// is opaque, including its dark flank and the tapered ends of raised spurs.
 func guideCellColor(p V, guides []Guide, noise *Perlin, branches []BranchSegment) color.NRGBA {
-	strength := guideBias(p, guides, noise, branches)
-	if strength <= 0 {
+	dx := reliefHeight(p.Add(V{2, 0}), guides, noise, branches) - reliefHeight(p.Sub(V{2, 0}), guides, noise, branches)
+	dy := reliefHeight(p.Add(V{0, 2}), guides, noise, branches) - reliefHeight(p.Sub(V{0, 2}), guides, noise, branches)
+	return guideSurfaceColor(p, guides, noise, branches, (V3{-dx / 4, -dy / 4, 1}).Norm())
+}
+
+func guideSurfaceColor(p V, guides []Guide, noise *Perlin, branches []BranchSegment, normal V3) color.NRGBA {
+	if reliefHeight(p, guides, noise, branches) <= rockContourHeight {
 		return color.NRGBA{}
 	}
-	clr := cellColor(.18 + strength)
-	clr.A = uint8(math.Round(255 * smoothstep(0, .24, strength)))
-	return clr
+	return rockSurfaceColor(normal, 1, 1)
 }
 
 func clipHalfPlane(poly []V, n V, c float64) []V {
@@ -664,6 +486,10 @@ func voronoiCell(i int, pts []V) []V {
 			break
 		}
 	}
+	return orderPolygon(poly)
+}
+
+func orderPolygon(poly []V) []V {
 	if len(poly) > 0 {
 		first := 0
 		for j := 1; j < len(poly); j++ {
@@ -678,9 +504,9 @@ func voronoiCell(i int, pts []V) []V {
 	return poly
 }
 
-// Convex Voronoi cells are triangulated around their interior seed. Each
-// triangle carries its distance to the outer edge for the narrow material rim.
-func appendCellMesh(vertices []ebiten.Vertex, indices []uint32, poly []V, center V, clr color.NRGBA, rng *rand.Rand) ([]ebiten.Vertex, []uint32) {
+// Faces visible from their center use a triangle fan. Deep concave guide
+// cuts use ear clipping, with material rims only on the actual perimeter.
+func appendCellMesh(vertices []ebiten.Vertex, indices []uint32, poly []V, center V, clr color.NRGBA, surface V3) ([]ebiten.Vertex, []uint32) {
 	if len(poly) < 3 {
 		return vertices, indices
 	}
@@ -689,27 +515,53 @@ func appendCellMesh(vertices []ebiten.Vertex, indices []uint32, poly []V, center
 		radius = math.Max(radius, p.Sub(center).Len())
 	}
 	radius = math.Max(radius, 1)
-	angle := rng.Float64() * 2 * math.Pi
-	tilt := V{math.Cos(angle), math.Sin(angle)}
-	light := V{-.6, -.8}
+	tilt := V{surface.X, surface.Y}
+	type facetTriangle struct {
+		center, a, b V
+		boundary     bool
+	}
+	var facets []facetTriangle
+	fan := true
 	for i, a := range poly {
-		b := poly[(i+1)%len(poly)]
+		if cross(poly[(i+1)%len(poly)].Sub(a), center.Sub(a)) < -1e-9 {
+			fan = false
+			break
+		}
+	}
+	if fan {
+		for i, a := range poly {
+			facets = append(facets, facetTriangle{center, a, poly[(i+1)%len(poly)], true})
+		}
+	} else {
+		for _, tri := range faceTriangles(poly) {
+			mid := poly[tri[0]].Add(poly[tri[1]]).Add(poly[tri[2]]).Mul(1.0 / 3)
+			for i, a := range tri {
+				b := tri[(i+1)%3]
+				facets = append(facets, facetTriangle{mid, poly[a], poly[b], (a+1)%len(poly) == b})
+			}
+		}
+	}
+	for _, triangle := range facets {
+		a, b := triangle.a, triangle.b
 		normal := b.Sub(a).Perp().Norm()
-		if center.Sub(a).Dot(normal) < 0 {
+		if triangle.center.Sub(a).Dot(normal) < 0 {
 			normal = normal.Mul(-1)
 		}
-		facet := rng.Float64() - .5
 		first := uint32(len(vertices))
-		for _, p := range []V{center, a, b} {
+		for _, p := range []V{triangle.center, a, b} {
+			edgeDistance := 2.0 // Internal triangulation edges have no rim.
+			if triangle.boundary {
+				edgeDistance = math.Max(0, p.Sub(a).Dot(normal))
+			}
 			vertices = append(vertices, ebiten.Vertex{
 				DstX: float32(p.X), DstY: float32(p.Y),
 				SrcX: float32(p.X), SrcY: float32(p.Y),
 				ColorR: float32(clr.R) / 255, ColorG: float32(clr.G) / 255,
 				ColorB: float32(clr.B) / 255, ColorA: float32(clr.A) / 255,
-				Custom0: float32(math.Max(0, p.Sub(a).Dot(normal))),
+				Custom0: float32(edgeDistance),
 				Custom1: float32(p.Sub(center).Dot(tilt) / radius),
-				Custom2: float32(facet),
-				Custom3: float32(-normal.Dot(light)),
+				Custom2: float32(surface.X),
+				Custom3: float32(surface.Y),
 			})
 		}
 		indices = append(indices, first, first+1, first+2)
@@ -737,15 +589,16 @@ func edgeKey(a, b V) [4]int64 {
 }
 
 type Game struct {
-	camera    Camera
-	world     *World
-	loading   bool
-	material  *ebiten.Shader
-	texture   float64
-	seed      int64
-	output    string
-	exported  bool
-	exportErr error
+	camera      Camera
+	world       *World
+	loading     bool
+	material    *ebiten.Shader
+	texture     float64
+	seed        int64
+	output      string
+	study, view string
+	exported    bool
+	exportErr   error
 }
 
 // Render each tessellation separately so transparent guide cells contribute
@@ -753,6 +606,11 @@ type Game struct {
 func (g *Game) drawGrid(img *ebiten.Image, grid RockGrid, top float64) {
 	vertices := make([]ebiten.Vertex, 0, len(grid)*18)
 	indices := make([]uint32, 0, len(grid)*18)
+	var boundary []rockEdge
+	if len(grid) > 0 && grid[0].Raised && (g.view == "shaded" || g.view == "" || g.view == "clay") {
+		boundary = exposedRockEdges(grid)
+		vertices, indices = appendRockWalls(vertices, indices, grid, boundary, g.view)
+	}
 	type cellEdge struct {
 		a, b  V
 		alpha uint8
@@ -760,11 +618,11 @@ func (g *Game) drawGrid(img *ebiten.Image, grid RockGrid, top float64) {
 	edges := make(map[[4]int64]cellEdge)
 	hiddenEdges := make(map[[4]int64]bool)
 	for _, cell := range grid {
-		s, clr, poly := cell.Center, cell.Color, cell.Polygon
+		s, clr, poly := cell.Center, rockViewColor(cell, g.view), cell.Polygon
 		if clr.A == 0 {
 			continue
 		}
-		vertices, indices = appendCellMesh(vertices, indices, poly, s, clr, rand.New(rand.NewSource(cellSeed(g.seed, s, top))))
+		vertices, indices = appendCellMesh(vertices, indices, poly, s, clr, cell.Normal)
 		for j, a := range poly {
 			b := poly[(j+1)%len(poly)]
 			key := edgeKey(a, b)
@@ -772,13 +630,17 @@ func (g *Game) drawGrid(img *ebiten.Image, grid RockGrid, top float64) {
 			if clr.A == 255 && clr.R <= 3 && clr.G <= 3 && clr.B <= 3 {
 				hiddenEdges[key] = true
 			}
-			alpha := uint8(math.Round(55 * float64(clr.A) / 255))
+			alpha := uint8(math.Round(10 * surfaceLight(cell.Normal) * float64(clr.A) / 255))
+			if g.view != "shaded" && g.view != "" {
+				alpha = 0
+			}
 			if previous, ok := edges[key]; !ok || alpha > previous.alpha {
 				edges[key] = cellEdge{a, b, alpha}
 			}
 		}
 	}
 
+	vertices, indices = appendRockBevels(vertices, indices, grid, boundary, g.view)
 	if len(indices) == 0 {
 		return
 	}
@@ -829,7 +691,7 @@ func (g *Game) regenerate() {
 	if g.world != nil {
 		g.world.close()
 	}
-	g.world = newWorld(g.seed)
+	g.world = newWorld(g.seed, g.study)
 }
 
 func (g *Game) Update() error {
@@ -879,7 +741,20 @@ func main() {
 	seed := flag.Int64("seed", rand.Int63(), "random seed (random by default)")
 	output := flag.String("output", "", "save the bottom 2400 pixels as a PNG and exit")
 	texture := flag.Float64("texture", 2, "surface texture strength (0 disables it, range 0-2)")
+	study := flag.String("study", "", "isolated rock study: ledge or curl (no vines)")
+	view := flag.String("view", "shaded", "terrain view: shaded, clay, height, normals, shadows")
 	flag.Parse()
+	if *study != "" && *study != "ledge" && *study != "curl" {
+		log.Fatal("study must be ledge or curl")
+	}
+	switch *view {
+	case "shaded", "clay", "height", "normals", "shadows":
+	default:
+		log.Fatal("unknown terrain view")
+	}
+	if *view != "shaded" {
+		*texture = 0
+	}
 	if math.IsNaN(*texture) || *texture < 0 || *texture > 8 {
 		log.Fatal("texture must be between 0 and 8")
 	}
@@ -889,7 +764,7 @@ func main() {
 	}
 	defer material.Deallocate()
 
-	g := &Game{seed: *seed, output: *output, material: material, texture: *texture}
+	g := &Game{seed: *seed, output: *output, material: material, texture: *texture, study: *study, view: *view}
 	g.regenerate()
 	defer func() { g.world.close() }()
 

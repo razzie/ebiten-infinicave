@@ -69,7 +69,7 @@ func worldGuides(seed, id int64) []Guide {
 
 // Jittered world-space sites give neighboring generation windows exactly the
 // same rocks in their overlap, independent of load order or cache eviction.
-func worldSeeds(seed int64, top float64, guides []Guide, noise *Perlin) []V {
+func worldSeeds(seed int64, top float64, noise *Perlin) []V {
 	const step = 32.0
 	var seeds []V
 	first := int64(math.Floor(top / step))
@@ -82,7 +82,7 @@ func worldSeeds(seed int64, top float64, guides []Guide, noise *Perlin) []V {
 			if p.X <= 1 || p.X >= W-1 || p.Y <= 1 || p.Y >= H-1 {
 				continue
 			}
-			spacing := desiredSpacing(p, guides, noise)
+			spacing := desiredSpacing(p, noise)
 			if rng.Float64() < math.Min(1, step*step/(spacing*spacing)) {
 				seeds = append(seeds, p)
 			}
@@ -92,25 +92,44 @@ func worldSeeds(seed int64, top float64, guides []Guide, noise *Perlin) []V {
 }
 
 func buildSection(seed, id int64) sectionData {
+	return buildSectionMode(seed, id, "")
+}
+
+func buildSectionMode(seed, id int64, study string) sectionData {
 	top := sectionWindowTop(id)
 	backgroundNoise := NewPerlin(rand.New(rand.NewSource(seed ^ 0x62617365)))
 	backgroundNoise.OffsetY = top
 	noise := NewPerlin(rand.New(rand.NewSource(seed)))
 	noise.OffsetY = top
 	guides := worldGuides(seed, id)
-	backgroundSeeds := worldSeeds(seed^0x62617365, top, nil, backgroundNoise)
-	seeds := worldSeeds(seed, top, guides, noise)
-	warpSeeds(seeds, guides)
-	// The paired crest and independent rows use each guide's own stable stream.
-	seeds = addGuideSeeds(seeds, guides, rand.New(rand.NewSource(seed)))
-	branches := generateBranches(guides, noise, rand.New(rand.NewSource(seed)))
-	background := newRockGrid(backgroundSeeds, func(p V) color.NRGBA { return backgroundCellColor(p, backgroundNoise) })
-	foreground := newRockGrid(seeds, func(p V) color.NRGBA { return guideCellColor(p, guides, noise, branches) })
-	vines := generateVinesInBand(newVineTerrain(background, foreground), rand.New(rand.NewSource(sectionSeed(seed^0x76696e6573, id))), W, 2*W, 5)
+	if study != "" {
+		guides = studyGuides(id, study)
+	}
+	backgroundSeeds := worldSeeds(seed^0x62617365, top, backgroundNoise)
+	seeds := artisticRockSeeds(worldSeeds(seed, top, noise), guides, seed, top)
+	var branches []BranchSegment
+	if study == "" {
+		branches = generateBranches(guides, noise, rand.New(rand.NewSource(seed)))
+	}
+	background := newRockGrid(backgroundSeeds, func(V) color.NRGBA { return color.NRGBA{A: 255} })
+	foreground := guideRockFaces(seeds, guides)
+	shapeRockGrid(background, nil, backgroundNoise)
+	shapeReliefGrid(foreground, guides, noise, branches)
+	foreground = contourRockGrid(foreground, func(p V) float64 {
+		return reliefHeight(p, guides, noise, branches)
+	})
+	polishRockContours(foreground, guides, func(p V) float64 {
+		return reliefHeight(p, guides, noise, branches)
+	})
+	shadeRockGrids(background, foreground, backgroundNoise)
+	var vines []Vine
+	if study == "" {
+		vines = generateVinesInBand(newVineTerrain(background, foreground), rand.New(rand.NewSource(sectionSeed(seed^0x76696e6573, id))), W, 2*W, 5)
+	}
 	return sectionData{id, background, foreground, vines}
 }
 
-func newWorld(seed int64) *World {
+func newWorld(seed int64, study string) *World {
 	w := &World{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1), results: make(chan sectionData, 1), done: make(chan struct{})}
 	go func() {
 		for {
@@ -118,7 +137,7 @@ func newWorld(seed int64) *World {
 			case <-w.done:
 				return
 			case id := <-w.jobs:
-				data := buildSection(seed, id)
+				data := buildSectionMode(seed, id, study)
 				select {
 				case <-w.done:
 					return
@@ -161,7 +180,9 @@ func (w *World) receive(g *Game) {
 		terrain.DrawImage(img, op)
 		img.Deallocate()
 		vines := newSectionImage(H)
-		drawVines(vines, data.vines)
+		if g.view == "shaded" || g.view == "" {
+			drawVines(vines, data.vines)
+		}
 		w.sections[data.id] = &worldSection{terrain, vines}
 	default:
 	}

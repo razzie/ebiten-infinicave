@@ -24,7 +24,7 @@ func TestBackgroundContainsBlackAndDarkCells(t *testing.T) {
 	}
 }
 
-func TestGuideLayerIsTransparentOutsideLight(t *testing.T) {
+func TestGuideLayerOccupancyIsOpaqueAndIndependentOfLight(t *testing.T) {
 	noise := NewPerlin(rand.New(rand.NewSource(42)))
 	guides := []Guide{splineGuide([]V{{100, 400}, {900, 400}}, 1)}
 	for _, p := range []V{{500, 100}, {500, 390}, {500, 900}} {
@@ -39,24 +39,29 @@ func TestGuideLayerIsTransparentOutsideLight(t *testing.T) {
 	if crest.A != 255 || crest.R < 145 {
 		t.Errorf("crest must remain bright and opaque, got %v", crest)
 	}
-	fading := 0
-	for y := 420.0; y < 580; y += 5 {
+	solid, empty := 0, 0
+	for y := 420.0; y < 680; y += 5 {
 		clr := guideCellColor(V{500, y}, guides, noise, nil)
-		if clr.A > 0 && clr.A < 255 {
-			fading++
+		switch clr.A {
+		case 0:
+			empty++
+		case 255:
+			solid++
+		default:
+			t.Fatal("solid rock must not fade through the background")
 		}
 	}
-	if fading == 0 {
-		t.Fatal("guide shoulder must fade into the underlying grid")
+	if solid == 0 || empty == 0 {
+		t.Fatal("relief must have an opaque shoulder and a finite footprint")
 	}
 
-	// An isolated offshoot lights the otherwise transparent distant grid.
+	// An isolated offshoot remains visible in the subdued flank palette.
 	p := V{500, 650}
 	branches := []BranchSegment{{
 		A: V{500, 620}, B: V{500, 680},
 		WidthA: 30, WidthB: 20, LightA: .4, LightB: .3,
 	}}
-	if clr := guideCellColor(p, guides, noise, branches); clr.A != 255 || clr.R < 83 {
+	if clr := guideCellColor(p, guides, noise, branches); clr.A != 255 || clr.R < 50 {
 		t.Errorf("branch must reveal foreground faces beyond the guide band, got %v", clr)
 	}
 }
@@ -64,10 +69,10 @@ func TestGuideLayerIsTransparentOutsideLight(t *testing.T) {
 func TestBackgroundSeedsWorkWithoutGuides(t *testing.T) {
 	rng := rand.New(rand.NewSource(42))
 	noise := NewPerlin(rng)
-	seeds := generateSeeds(rng, 80, nil, noise)
-	relaxSeeds(seeds, nil, noise)
+	seeds := generateSeeds(rng, 80, noise)
+	relaxSeeds(seeds, noise)
 	for _, p := range seeds {
-		spacing := desiredSpacing(p, nil, noise)
+		spacing := desiredSpacing(p, noise)
 		if math.IsNaN(p.X) || math.IsNaN(p.Y) || p.X < 0 || p.X > W || p.Y < 0 || p.Y > H {
 			t.Fatalf("invalid background seed: %v", p)
 		}

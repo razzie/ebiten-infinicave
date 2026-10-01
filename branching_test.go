@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestBranchesExtendBeyondGuideBandAndLeaveDarkGaps(t *testing.T) {
+func TestBranchesExtendReliefBeyondGuideBandAndLeaveGaps(t *testing.T) {
 	guides := []Guide{splineGuide([]V{{100, 400}, {900, 400}}, 1)}
 	noise := NewPerlin(rand.New(rand.NewSource(42)))
 	branches := generateBranches(guides, noise, rand.New(rand.NewSource(42)))
@@ -15,9 +15,9 @@ func TestBranchesExtendBeyondGuideBandAndLeaveDarkGaps(t *testing.T) {
 	for y := 400 + guideInfluence; y <= 400+guideInfluence+40; y += 10 {
 		for x := 100.0; x <= 900; x += 10 {
 			p := V{x, y}
-			base := guideBias(p, guides, noise, nil)
-			got := guideBias(p, guides, noise, branches)
-			if got > base+.06 {
+			base := reliefHeight(p, guides, noise, nil)
+			got := reliefHeight(p, guides, noise, branches)
+			if got > base+6 {
 				lit++
 			}
 			if got < .01 {
@@ -41,8 +41,8 @@ func TestBranchesPreserveGuideShadows(t *testing.T) {
 	for _, y := range []float64{392, 375, 350, 562, 545, 520} {
 		for x := 120.0; x <= 880; x += 10 {
 			p := V{x, y}
-			want := guideBias(p, guides, noise, nil)
-			got := guideBias(p, guides, noise, branches)
+			want := reliefHeight(p, guides, noise, nil)
+			got := reliefHeight(p, guides, noise, branches)
 			if math.Abs(got-want) > 1e-12 {
 				t.Fatalf("branch spills onto shadow at %v: got %v, want %v", p, got, want)
 			}
