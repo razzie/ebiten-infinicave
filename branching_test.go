@@ -10,7 +10,7 @@ import (
 func TestBranchesExtendReliefBeyondGuideBandAndLeaveGaps(t *testing.T) {
 	guides := []Guide{splineGuide([]V{{100, 400}, {900, 400}}, 1)}
 	noise := NewPerlin(rand.New(rand.NewSource(42)))
-	branches := generateBranches(guides, noise, rand.New(rand.NewSource(42)))
+	branches := newBranchField(generateBranches(guides, noise, rand.New(rand.NewSource(42))))
 	lit, dark := 0, 0
 	for y := 400 + guideInfluence; y <= 400+guideInfluence+40; y += 10 {
 		for x := 100.0; x <= 900; x += 10 {
@@ -37,7 +37,7 @@ func TestBranchesPreserveGuideShadows(t *testing.T) {
 		splineGuide([]V{{100, 570}, {900, 570}}, 1),
 	}
 	noise := NewPerlin(rand.New(rand.NewSource(42)))
-	branches := generateBranches(guides, noise, rand.New(rand.NewSource(42)))
+	branches := newBranchField(generateBranches(guides, noise, rand.New(rand.NewSource(42))))
 	for _, y := range []float64{392, 375, 350, 562, 545, 520} {
 		for x := 120.0; x <= 880; x += 10 {
 			p := V{x, y}

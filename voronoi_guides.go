@@ -39,7 +39,7 @@ func (a V) Len2() float64           { return a.Dot(a) }
 func (a V) Len() float64            { return math.Sqrt(a.Len2()) }
 func (a V) Perp() V                 { return V{-a.Y, a.X} }
 func lerpV(a, b V, t float64) V     { return a.Mul(1 - t).Add(b.Mul(t)) }
-func clamp(x, a, b float64) float64 { return math.Max(a, math.Min(b, x)) }
+func clamp(x, a, b float64) float64 { return max(a, min(b, x)) }
 func lerp(a, b, t float64) float64  { return a + (b-a)*t }
 
 func (a V) Norm() V {
@@ -176,8 +176,8 @@ func (g *Guide) translateY(offset float64) {
 }
 
 func (g *Guide) distanceBound2(p V) float64 {
-	dx := math.Max(0, math.Max(g.Min.X-p.X, p.X-g.Max.X))
-	dy := math.Max(0, math.Max(g.Min.Y-p.Y, p.Y-g.Max.Y))
+	dx := max(0, g.Min.X-p.X, p.X-g.Max.X)
+	dy := max(0, g.Min.Y-p.Y, p.Y-g.Max.Y)
 	return dx*dx + dy*dy
 }
 
@@ -420,13 +420,13 @@ func backgroundSurfaceColor(p V, noise *Perlin, normal V3) color.NRGBA {
 
 // Rock occupancy follows relief, independently of light. Every existing face
 // is opaque, including its dark flank and the tapered ends of raised spurs.
-func guideCellColor(p V, guides []Guide, noise *Perlin, branches []BranchSegment) color.NRGBA {
+func guideCellColor(p V, guides []Guide, noise *Perlin, branches *BranchField) color.NRGBA {
 	dx := reliefHeight(p.Add(V{2, 0}), guides, noise, branches) - reliefHeight(p.Sub(V{2, 0}), guides, noise, branches)
 	dy := reliefHeight(p.Add(V{0, 2}), guides, noise, branches) - reliefHeight(p.Sub(V{0, 2}), guides, noise, branches)
 	return guideSurfaceColor(p, guides, noise, branches, (V3{-dx / 4, -dy / 4, 1}).Norm())
 }
 
-func guideSurfaceColor(p V, guides []Guide, noise *Perlin, branches []BranchSegment, normal V3) color.NRGBA {
+func guideSurfaceColor(p V, guides []Guide, noise *Perlin, branches *BranchField, normal V3) color.NRGBA {
 	if reliefHeight(p, guides, noise, branches) <= rockContourHeight {
 		return color.NRGBA{}
 	}

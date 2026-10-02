@@ -22,7 +22,7 @@ func ridgeProfile(distance, width, height, bevel float64) float64 {
 	return height * math.Pow(1-(distance-bevel)/(width-bevel), .72)
 }
 
-func reliefHeight(p V, guides []Guide, noise *Perlin, branches []BranchSegment) float64 {
+func reliefHeight(p V, guides []Guide, noise *Perlin, branches *BranchField) float64 {
 	height, branchMask := 0.0, 1.0
 	for i := range guides {
 		g := &guides[i]
@@ -69,18 +69,18 @@ func reliefSeeds(seeds []V, guides []Guide) []V {
 	return out
 }
 
-func shapeReliefGrid(grid RockGrid, guides []Guide, noise *Perlin, branches []BranchSegment) {
-	for i := range grid {
+func shapeReliefGrid(grid RockGrid, guides []Guide, noise *Perlin, branches *BranchField) {
+	parallelFor(len(grid), func(i int) {
 		grid[i].Z = reliefHeight(grid[i].Center, guides, noise, branches)
 		grid[i].Raised = true
-	}
+	})
 	neighbors := rockNeighbors(grid)
-	for i := range grid {
+	parallelFor(len(grid), func(i int) {
 		grid[i].Normal = rockNormal(grid, i, neighbors[i])
 		if toward, ok := guideFacing(grid[i], guides); ok {
 			grid[i].Normal = (V3{toward.X * 1.4, toward.Y * 1.4, 1}).Norm()
 		}
-	}
+	})
 }
 
 func rockSurfaceColor(normal V3, shadow, ambient float64) color.NRGBA {
@@ -93,7 +93,7 @@ func rockSurfaceColor(normal V3, shadow, ambient float64) color.NRGBA {
 func shadeRockGrids(background, foreground RockGrid, noise *Perlin) {
 	depth := newRockDepth(background, foreground)
 	for layer, grid := range []RockGrid{background, foreground} {
-		for i := range grid {
+		parallelFor(len(grid), func(i int) {
 			c := &grid[i]
 			c.Shadow, c.Ambient = depth.illumination(*c)
 			if layer == 1 {
@@ -113,7 +113,7 @@ func shadeRockGrids(background, foreground RockGrid, noise *Perlin) {
 				c.Color.G = uint8(math.Round(float64(c.Color.G) * factor))
 				c.Color.B = uint8(math.Round(float64(c.Color.B) * factor))
 			}
-		}
+		})
 	}
 }
 

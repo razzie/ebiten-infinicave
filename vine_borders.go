@@ -11,6 +11,12 @@ func newVineBorders(background RockGrid) []float64 {
 	for i := range distances {
 		distances[i] = vineBorderRange * vineBorderRange
 	}
+	type borderEdge struct {
+		a, d                   V
+		invLength2             float64
+		minX, maxX, minY, maxY int
+	}
+	var edges []borderEdge
 	seen := make(map[[4]int64]bool)
 	for _, cell := range background {
 		for i, a := range cell.Polygon {
@@ -25,22 +31,32 @@ func newVineBorders(background RockGrid) []float64 {
 				continue
 			}
 			seen[key] = true
-			invLength2 := 1 / d.Len2()
-			minX := max(0, int(math.Floor((math.Min(a.X, b.X)-vineBorderRange)/vineFieldStep)))
-			maxX := min(vineFieldWidth-1, int(math.Ceil((math.Max(a.X, b.X)+vineBorderRange)/vineFieldStep)))
-			minY := max(0, int(math.Floor((math.Min(a.Y, b.Y)-vineBorderRange)/vineFieldStep)))
-			maxY := min(vineFieldHeight-1, int(math.Ceil((math.Max(a.Y, b.Y)+vineBorderRange)/vineFieldStep)))
-			for y := minY; y <= maxY; y++ {
-				for x := minX; x <= maxX; x++ {
+			edges = append(edges, borderEdge{a, d, 1 / d.Len2(),
+				max(0, int(math.Floor((math.Min(a.X, b.X)-vineBorderRange)/vineFieldStep))),
+				min(vineFieldWidth-1, int(math.Ceil((math.Max(a.X, b.X)+vineBorderRange)/vineFieldStep))),
+				max(0, int(math.Floor((math.Min(a.Y, b.Y)-vineBorderRange)/vineFieldStep))),
+				min(vineFieldHeight-1, int(math.Ceil((math.Max(a.Y, b.Y)+vineBorderRange)/vineFieldStep)))})
+		}
+	}
+	// Bands own disjoint rows; min is order independent, so the result is exact.
+	const band = 16
+	parallelFor((vineFieldHeight+band-1)/band, func(n int) {
+		y0, y1 := n*band, min((n+1)*band, vineFieldHeight)-1
+		for _, e := range edges {
+			if e.maxY < y0 || e.minY > y1 {
+				continue
+			}
+			for y := max(y0, e.minY); y <= min(y1, e.maxY); y++ {
+				for x := e.minX; x <= e.maxX; x++ {
 					p := V{(float64(x) + .5) * vineFieldStep, (float64(y) + .5) * vineFieldStep}
-					t := clamp(p.Sub(a).Dot(d)*invLength2, 0, 1)
-					distance2 := p.Sub(a.Add(d.Mul(t))).Len2()
+					t := clamp(p.Sub(e.a).Dot(e.d)*e.invLength2, 0, 1)
+					distance2 := p.Sub(e.a.Add(e.d.Mul(t))).Len2()
 					index := y*vineFieldWidth + x
 					distances[index] = math.Min(distances[index], distance2)
 				}
 			}
 		}
-	}
+	})
 	for i := range distances {
 		distances[i] = math.Sqrt(distances[i])
 	}

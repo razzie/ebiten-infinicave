@@ -81,14 +81,58 @@ func appendBranchFork(branches []BranchSegment, p, direction V, reach, width, li
 	return branches
 }
 
-func branchBias(p V, branches []BranchSegment) float64 {
-	light := 0.0
-	for _, b := range branches {
-		// Contour refinement samples this field densely. A spur contributes
-		// nothing outside its maximum support, so reject distant segments.
+const branchCell = 32.0
+
+// BranchField buckets segments by padded bounds; a spur contributes nothing
+// outside its support, and the max in branchBias is order independent.
+type BranchField struct {
+	segs       []BranchSegment
+	lo, hi     []V
+	cols, rows int
+	origin     V
+	cells      [][]int32
+}
+
+func newBranchField(segs []BranchSegment) *BranchField {
+	f := &BranchField{segs: segs, lo: make([]V, len(segs)), hi: make([]V, len(segs))}
+	if len(segs) == 0 {
+		return f
+	}
+	min, max := V{math.Inf(1), math.Inf(1)}, V{math.Inf(-1), math.Inf(-1)}
+	for i, b := range segs {
 		pad := math.Max(b.WidthA, b.WidthB) * 1.8
-		if p.X < math.Min(b.A.X, b.B.X)-pad || p.X > math.Max(b.A.X, b.B.X)+pad ||
-			p.Y < math.Min(b.A.Y, b.B.Y)-pad || p.Y > math.Max(b.A.Y, b.B.Y)+pad {
+		f.lo[i] = V{math.Min(b.A.X, b.B.X) - pad, math.Min(b.A.Y, b.B.Y) - pad}
+		f.hi[i] = V{math.Max(b.A.X, b.B.X) + pad, math.Max(b.A.Y, b.B.Y) + pad}
+		min = V{math.Min(min.X, f.lo[i].X), math.Min(min.Y, f.lo[i].Y)}
+		max = V{math.Max(max.X, f.hi[i].X), math.Max(max.Y, f.hi[i].Y)}
+	}
+	f.origin = min
+	f.cols, f.rows = int((max.X-min.X)/branchCell)+1, int((max.Y-min.Y)/branchCell)+1
+	f.cells = make([][]int32, f.cols*f.rows)
+	for i := range segs {
+		x0, x1 := int((f.lo[i].X-min.X)/branchCell), int((f.hi[i].X-min.X)/branchCell)
+		y0, y1 := int((f.lo[i].Y-min.Y)/branchCell), int((f.hi[i].Y-min.Y)/branchCell)
+		for y := y0; y <= y1; y++ {
+			for x := x0; x <= x1; x++ {
+				f.cells[y*f.cols+x] = append(f.cells[y*f.cols+x], int32(i))
+			}
+		}
+	}
+	return f
+}
+
+func branchBias(p V, field *BranchField) float64 {
+	light := 0.0
+	if field == nil || len(field.segs) == 0 {
+		return light
+	}
+	x, y := int(math.Floor((p.X-field.origin.X)/branchCell)), int(math.Floor((p.Y-field.origin.Y)/branchCell))
+	if x < 0 || y < 0 || x >= field.cols || y >= field.rows {
+		return light
+	}
+	for _, idx := range field.cells[y*field.cols+x] {
+		b := field.segs[idx]
+		if p.X < field.lo[idx].X || p.X > field.hi[idx].X || p.Y < field.lo[idx].Y || p.Y > field.hi[idx].Y {
 			continue
 		}
 		delta := b.B.Sub(b.A)

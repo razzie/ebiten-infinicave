@@ -8,10 +8,10 @@ const rockContourHeight = 8.0
 // of complete Voronoi tiles. Keep the original face normal and material so
 // clipping/triangulation cannot introduce extra wedges of light.
 func contourRockGrid(grid RockGrid, heightAt func(V) float64) RockGrid {
-	var out RockGrid
-	for _, c := range grid {
-		faces := contourRockFace(c.Polygon, c.Center, heightAt)
-		for _, poly := range faces {
+	parts := make([]RockGrid, len(grid))
+	parallelFor(len(grid), func(n int) {
+		c := grid[n]
+		for _, poly := range contourRockFace(c.Polygon, c.Center, heightAt) {
 			if len(poly) < 3 || faceArea(poly) < 6 {
 				continue
 			}
@@ -21,8 +21,12 @@ func contourRockGrid(grid RockGrid, heightAt func(V) float64) RockGrid {
 				face.Center = faceCenter(poly)
 				face.Z = heightAt(face.Center)
 			}
-			out = append(out, face)
+			parts[n] = append(parts[n], face)
 		}
+	})
+	var out RockGrid
+	for _, part := range parts {
+		out = append(out, part...)
 	}
 	return out
 }
@@ -141,13 +145,21 @@ func polishRockContours(grid RockGrid, guides []Guide, heightAt func(V) float64)
 		adjacent[b] = append(adjacent[b], edge.A)
 	}
 	moves := make(map[key]V)
-	for k, p := range points {
+	keys := make([]key, 0, len(points))
+	for k := range points {
+		keys = append(keys, k)
+	}
+	projected := make([]V, len(keys))
+	accepted := make([]bool, len(keys))
+	parallelFor(len(keys), func(n int) {
+		k := keys[n]
+		p := points[k]
 		if len(adjacent[k]) != 2 {
-			continue
+			return
 		}
 		_, pr := nearestGuide(p, guides)
 		if pr.Dist < 4 || math.Abs(heightAt(p)-rockContourHeight) > 18 {
-			continue
+			return
 		}
 		q := lerpV(p, adjacent[k][0].Add(adjacent[k][1]).Mul(.5), .18)
 		for iteration := 0; iteration < 6; iteration++ {
@@ -164,14 +176,20 @@ func polishRockContours(grid RockGrid, guides []Guide, heightAt func(V) float64)
 			q = q.Sub(step)
 		}
 		if q.Sub(p).Len() <= 9 && math.Abs(heightAt(q)-rockContourHeight) < .25 {
-			moves[k] = q
+			projected[n], accepted[n] = q, true
+		}
+	})
+	for n, k := range keys {
+		if accepted[n] {
+			moves[k] = projected[n]
 		}
 	}
 	// Reject a move everywhere if it would fold or erase any incident face.
 	// Applying the same accepted map to all cells avoids cracks at junctions.
 	for {
-		reject := make(map[key]bool)
-		for _, c := range grid {
+		rejected := make([][]key, len(grid))
+		parallelFor(len(grid), func(n int) {
+			c := grid[n]
 			poly := append([]V(nil), c.Polygon...)
 			changed := false
 			for i, p := range poly {
@@ -182,16 +200,20 @@ func polishRockContours(grid RockGrid, guides []Guide, heightAt func(V) float64)
 			if changed && (faceArea(poly) < 1 || len(faceTriangles(poly)) != len(poly)-2 || !simpleRockOutline(poly)) {
 				for _, p := range c.Polygon {
 					if _, ok := moves[keyAt(p)]; ok {
-						reject[keyAt(p)] = true
+						rejected[n] = append(rejected[n], keyAt(p))
 					}
 				}
 			}
+		})
+		found := false
+		for _, list := range rejected {
+			for _, k := range list {
+				delete(moves, k)
+				found = true
+			}
 		}
-		if len(reject) == 0 {
+		if !found {
 			break
-		}
-		for k := range reject {
-			delete(moves, k)
 		}
 	}
 	for i := range grid {

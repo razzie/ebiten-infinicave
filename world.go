@@ -71,10 +71,11 @@ func worldGuides(seed, id int64) []Guide {
 // same rocks in their overlap, independent of load order or cache eviction.
 func worldSeeds(seed int64, top float64, noise *Perlin) []V {
 	const step = 22.0
-	var seeds []V
 	first := int64(math.Floor(top / step))
 	last := int64(math.Ceil((top + H) / step))
-	for row := first; row < last; row++ {
+	rows := make([][]V, last-first)
+	parallelFor(len(rows), func(n int) {
+		row := first + int64(n)
 		for col := int64(0); float64(col)*step < W; col++ {
 			rng := rand.New(rand.NewSource(sectionSeed(sectionSeed(seed, row), col)))
 			p := V{(float64(col)+.5)*step + (rng.Float64()-.5)*step*.85,
@@ -84,9 +85,13 @@ func worldSeeds(seed int64, top float64, noise *Perlin) []V {
 			}
 			spacing := desiredSpacing(p, noise)
 			if rng.Float64() < math.Min(1, step*step/(spacing*spacing)) {
-				seeds = append(seeds, p)
+				rows[n] = append(rows[n], p)
 			}
 		}
+	})
+	var seeds []V
+	for _, r := range rows {
+		seeds = append(seeds, r...)
 	}
 	return seeds
 }
@@ -107,9 +112,9 @@ func buildSectionMode(seed, id int64, study string) sectionData {
 	}
 	backgroundSeeds := worldSeeds(seed^0x62617365, top, backgroundNoise)
 	seeds := artisticRockSeeds(worldSeeds(seed, top, noise), guides, seed, top)
-	var branches []BranchSegment
+	var branches *BranchField
 	if study == "" {
-		branches = generateBranches(guides, noise, rand.New(rand.NewSource(seed)))
+		branches = newBranchField(generateBranches(guides, noise, rand.New(rand.NewSource(seed))))
 	}
 	background := newRockGrid(backgroundSeeds, func(V) color.NRGBA { return color.NRGBA{A: 255} })
 	foreground := guideRockFaces(seeds, guides)

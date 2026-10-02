@@ -22,9 +22,10 @@ func newGuideRockGrid(seeds []V, guides []Guide, colorAt func(V) color.NRGBA) Ro
 
 // Retain invisible neighbors until heights and normals have been computed.
 func guideRockFaces(seeds []V, guides []Guide) RockGrid {
-	var fragments []guideFragment
-	for i, site := range seeds {
-		poly := voronoiCell(i, seeds)
+	cells := voronoiCells(seeds)
+	perSite := make([][]guideFragment, len(seeds))
+	parallelFor(len(seeds), func(i int) {
+		site, poly := seeds[i], cells[i]
 		faces := [][]V{poly}
 		lo, hi := V{W, H}, V{}
 		for _, p := range poly {
@@ -50,8 +51,12 @@ func guideRockFaces(seeds []V, guides []Guide) RockGrid {
 			if len(faces) > 1 {
 				center = faceCenter(face)
 			}
-			fragments = append(fragments, makeGuideFragment(face, center, len(faces) > 1))
+			perSite[i] = append(perSite[i], makeGuideFragment(face, center, len(faces) > 1))
 		}
+	})
+	var fragments []guideFragment
+	for _, f := range perSite {
+		fragments = append(fragments, f...)
 	}
 	mergeGuideFragments(fragments, guides)
 	var grid RockGrid

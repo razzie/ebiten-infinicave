@@ -23,10 +23,11 @@ type RockGrid []RockCell
 
 func newRockGrid(seeds []V, colorAt func(V) color.NRGBA) RockGrid {
 	grid := make(RockGrid, 0, len(seeds))
+	cells := voronoiCells(seeds)
 	for i, p := range seeds {
 		clr := colorAt(p)
 		if clr.A != 0 {
-			grid = append(grid, RockCell{Center: p, Polygon: voronoiCell(i, seeds), Color: clr})
+			grid = append(grid, RockCell{Center: p, Polygon: cells[i], Color: clr})
 		}
 	}
 	return grid
@@ -118,7 +119,9 @@ func newVineTerrain(background, foreground RockGrid) *VineTerrain {
 		}
 	}
 	// Chamfer distance, with a conservative correction when sampled below.
-	for _, distances := range [][]float64{field.clearance, field.unsupported, field.foreground} {
+	chamfer := [][]float64{field.clearance, field.unsupported, field.foreground}
+	parallelFor(len(chamfer), func(n int) {
+		distances := chamfer[n]
 		for _, dir := range []int{1, -1} {
 			for yy := 0; yy < vineFieldHeight; yy++ {
 				y := yy
@@ -144,7 +147,7 @@ func newVineTerrain(background, foreground RockGrid) *VineTerrain {
 				}
 			}
 		}
-	}
+	})
 	return field
 }
 

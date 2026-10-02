@@ -57,10 +57,10 @@ func TestGuideLayerOccupancyIsOpaqueAndIndependentOfLight(t *testing.T) {
 
 	// An isolated offshoot remains visible in the subdued flank palette.
 	p := V{500, 650}
-	branches := []BranchSegment{{
+	branches := newBranchField([]BranchSegment{{
 		A: V{500, 620}, B: V{500, 680},
 		WidthA: 30, WidthB: 20, LightA: .4, LightB: .3,
-	}}
+	}})
 	if clr := guideCellColor(p, guides, noise, branches); clr.A != 255 || clr.R < 25 {
 		t.Errorf("branch must reveal foreground faces beyond the guide band, got %v", clr)
 	}
