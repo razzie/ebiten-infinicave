@@ -5,6 +5,8 @@ import (
 	"math"
 )
 
+const foregroundEdgeFadeWidth = 140.0
+
 // All terrain lighting, including exposed walls, uses this one light.
 var rockLight = (V3{-.28, -.86, .65}).Norm()
 
@@ -49,7 +51,8 @@ func reliefHeight(p V, guides []Guide, noise *Perlin, branches *BranchField) flo
 	height = math.Max(height, 80*branchBias(p, branches)*branchMask)
 	world := V{p.X, p.Y + noise.OffsetY}
 	chips := 1.2 * noise.Noise(world.X*.035+43, world.Y*.035+97)
-	return math.Max(0, height+chips*smoothstep(0, 15, height))
+	edgeFade := smoothstep(0, foregroundEdgeFadeWidth, math.Min(p.X, W-p.X))
+	return math.Max(0, height+chips*smoothstep(0, 15, height)) * edgeFade
 }
 
 // Compress site spacing across the lip and stretch it into the flank. The

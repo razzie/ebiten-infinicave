@@ -38,6 +38,34 @@ func TestWorldSeedsMatchOverlappingWindows(t *testing.T) {
 	}
 }
 
+func TestForegroundGridStaysInsideHorizontalScreenInset(t *testing.T) {
+	grid := RockGrid{
+		{Center: V{10, 50}, Polygon: []V{{0, 0}, {40, 0}, {40, 100}, {0, 100}}, Raised: true},
+		{Center: V{W - 10, 50}, Polygon: []V{{W - 40, 0}, {W, 0}, {W, 100}, {W - 40, 100}}, Raised: true},
+	}
+	original := make([][]V, len(grid))
+	for i := range grid {
+		original[i] = append([]V(nil), grid[i].Polygon...)
+	}
+
+	clipped := insetForegroundGrid(grid)
+	if len(clipped) != len(grid) {
+		t.Fatalf("inset retained %d cells, want %d", len(clipped), len(grid))
+	}
+	for _, cell := range clipped {
+		for _, p := range cell.Polygon {
+			if p.X < foregroundScreenInset-1e-9 || p.X > W-foregroundScreenInset+1e-9 {
+				t.Fatalf("foreground vertex reaches horizontal screen edge: %v", p)
+			}
+		}
+	}
+	for i := range grid {
+		if !reflect.DeepEqual(grid[i].Polygon, original[i]) {
+			t.Fatal("render inset mutated the source geometry")
+		}
+	}
+}
+
 func TestWorldSectionSeam(t *testing.T) {
 	a, b := buildSection(42, 0), buildSection(42, 1)
 	// Compare whole rock faces in a strip around the shared seam, not just

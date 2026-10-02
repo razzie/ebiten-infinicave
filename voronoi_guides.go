@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	W = 1000
-	H = 3 * W // local generation window: a section plus padding above and below
+	W                     = 1000
+	H                     = 3 * W // local generation window: a section plus padding above and below
+	foregroundScreenInset = 18.0
 
 	guideSpacing   = 20.0
 	guideInfluence = 180.0
@@ -604,6 +605,9 @@ type Game struct {
 // Render each tessellation separately so transparent guide cells contribute
 // neither faces nor outlines, and the foreground covers the background mesh.
 func (g *Game) drawGrid(img *ebiten.Image, grid RockGrid, top float64) {
+	if len(grid) > 0 && grid[0].Raised {
+		grid = insetForegroundGrid(grid)
+	}
 	vertices := make([]ebiten.Vertex, 0, len(grid)*18)
 	indices := make([]uint32, 0, len(grid)*18)
 	var boundary []rockEdge
@@ -685,6 +689,23 @@ func (g *Game) drawGrid(img *ebiten.Image, grid RockGrid, top float64) {
 			strokePath(img, path, 1.05, color.NRGBA{R: 18, G: 18, B: 17, A: uint8(alpha)})
 		}
 	}
+}
+
+func insetForegroundGrid(grid RockGrid) RockGrid {
+	clipped := make(RockGrid, 0, len(grid))
+	for _, cell := range grid {
+		poly := clipHalfPlane(cell.Polygon, V{-1, 0}, -foregroundScreenInset)
+		poly = clipHalfPlane(poly, V{1, 0}, W-foregroundScreenInset)
+		if len(poly) < 3 || faceArea(poly) < 1e-9 {
+			continue
+		}
+		cell.Polygon = poly
+		if !insideFace(cell.Center, poly) {
+			cell.Center = faceCenter(poly)
+		}
+		clipped = append(clipped, cell)
+	}
+	return clipped
 }
 
 func (g *Game) regenerate() {

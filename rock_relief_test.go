@@ -42,6 +42,20 @@ func TestReliefHeightAndSiteDeformationUseWorldCoordinates(t *testing.T) {
 	}
 }
 
+func TestReliefFadesBeforeHorizontalScreenInset(t *testing.T) {
+	guides := []Guide{splineGuide([]V{{-100, 500}, {900, 500}}, 1)}
+	noise := NewPerlin(rand.New(rand.NewSource(42)))
+	atEdge := reliefHeight(V{0, 500}, guides, noise, nil)
+	atInset := reliefHeight(V{foregroundScreenInset, 500}, guides, noise, nil)
+	inset := reliefHeight(V{90, 500}, guides, noise, nil)
+	if atEdge != 0 || atInset >= rockContourHeight {
+		t.Fatalf("foreground relief survives at the screen edge: edge=%v inset=%v", atEdge, atInset)
+	}
+	if inset <= rockContourHeight {
+		t.Fatalf("edge fade erased interior foreground relief: %v", inset)
+	}
+}
+
 func TestRaisedRockCastsShadowAndOccludesAmbientLight(t *testing.T) {
 	background := RockGrid{{Center: V{500, 1500}, Polygon: []V{{0, 0}, {W, 0}, {W, H}, {0, H}}, Normal: V3{Z: 1}}}
 	block := RockGrid{{Center: V{500, 500}, Polygon: []V{{470, 470}, {530, 470}, {530, 530}, {470, 530}}, Z: 70, Normal: V3{Z: 1}, Raised: true}}

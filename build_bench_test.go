@@ -19,12 +19,12 @@ func statsOf(s sectionData) sectionStats {
 	return st
 }
 
-// Recorded from the serial O(n^2) implementation; roundoff in clipping order
-// may nudge polished contours, so areas compare with a tolerance.
+// Areas compare with a tolerance because contour clipping order can nudge
+// polished contours slightly.
 func TestSectionStatsStable(t *testing.T) {
 	want := map[int64]sectionStats{
-		1:  {4809, 2607, 29, 1345222.4912},
-		42: {4910, 2511, 11, 1342311.9005},
+		1:  {4809, 2461, 29, 1238284.8963},
+		42: {4910, 2361, 15, 1232149.2999},
 	}
 	for seed, w := range want {
 		got := statsOf(buildSection(seed, 0))
