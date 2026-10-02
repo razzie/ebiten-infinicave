@@ -10,6 +10,7 @@ func studyGuides(id int64, study string) []Guide {
 			knots = []V{{80, 650}, {380, 520}, {650, 410}, {710, 260}, {570, 190}, {450, 290}, {520, 370}}
 		}
 		g := ridgedGuide(splineGuide(knots, 1), 42)
+		g.Seed = sectionSeed(42, owner)
 		g.translateY(sectionTop(owner) - sectionWindowTop(id))
 		guides = append(guides, g)
 	}

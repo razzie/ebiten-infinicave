@@ -22,6 +22,7 @@ type sectionData struct {
 	id                     int64
 	background, foreground RockGrid
 	vines                  []Vine
+	mushrooms              []MushroomGroup
 }
 
 type worldSection struct {
@@ -127,11 +128,12 @@ func buildSectionMode(seed, id int64, study string) sectionData {
 		return reliefHeight(p, guides, noise, branches)
 	})
 	shadeRockGrids(background, foreground, backgroundNoise)
+	mushrooms := mushroomsForGuides(guides, insetForegroundGrid(foreground))
 	var vines []Vine
 	if study == "" {
 		vines = generateVinesInBand(newVineTerrain(background, foreground), rand.New(rand.NewSource(sectionSeed(seed^0x76696e6573, id))), W, 2*W, 5)
 	}
-	return sectionData{id, background, foreground, vines}
+	return sectionData{id, background, foreground, vines, mushrooms}
 }
 
 func newWorld(seed int64, study string) *World {
@@ -178,6 +180,9 @@ func (w *World) receive(g *Game) {
 		img.Fill(color.Black)
 		top := sectionWindowTop(data.id)
 		g.drawGrid(img, data.background, top)
+		if g.view == "shaded" || g.view == "" {
+			drawMushrooms(img, data.mushrooms)
+		}
 		g.drawGrid(img, data.foreground, top)
 		terrain := newSectionImage(sectionHeight)
 		op := &ebiten.DrawImageOptions{}
