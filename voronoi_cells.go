@@ -10,7 +10,8 @@ import (
 // parallelFor runs fn over [0,n) in contiguous chunks. fn must only write
 // state owned by its index so results never depend on scheduling.
 func parallelFor(n int, fn func(i int)) {
-	workers := min(runtime.GOMAXPROCS(0), n)
+	// Leave a core for the game loop so generation cannot stall rendering.
+	workers := min(max(1, runtime.GOMAXPROCS(0)-1), n)
 	if workers <= 1 {
 		for i := 0; i < n; i++ {
 			fn(i)

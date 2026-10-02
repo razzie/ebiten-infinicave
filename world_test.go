@@ -153,14 +153,14 @@ func TestWorldSectionSeam(t *testing.T) {
 
 func TestStreamingRequestsAndCacheStayBounded(t *testing.T) {
 	w := &World{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1)}
-	if w.ensure(-800, 800) {
+	if w.ensure(-800, 800, 0) {
 		t.Fatal("unloaded viewport reported ready")
 	}
 	if id := <-w.jobs; id != 0 {
 		t.Fatalf("first request is %d, want floor section", id)
 	}
 	// Repeated frames must not enqueue duplicate work while the worker is busy.
-	w.ensure(-800, 800)
+	w.ensure(-800, 800, 0)
 	if len(w.jobs) != 0 {
 		t.Fatal("duplicate generation request")
 	}
@@ -168,18 +168,18 @@ func TestStreamingRequestsAndCacheStayBounded(t *testing.T) {
 	for id := int64(0); id < 100; id++ {
 		w.sections[id] = &worldSection{terrain: ebiten.NewImage(1, 1), vines: ebiten.NewImage(1, 1)}
 	}
-	w.prune(-10800, -10800, 800)
+	w.prune(-10800, 800, 0)
 	if len(w.sections) > 6 {
 		t.Fatalf("cache grew with distance: %d sections", len(w.sections))
 	}
 	if w.sections[0] != nil || w.sections[10] == nil {
 		t.Fatal("cache discarded the viewport or retained distant sections")
 	}
-	if !w.ensure(-10800, 800) {
+	if !w.ensure(-10800, 800, 0) {
 		t.Fatal("loaded far-up viewport cannot be reached")
 	}
-	w.prune(-10800, -800, 800)
-	if w.ensure(-800, 800) {
+	w.prune(-800, 800, 0)
+	if w.ensure(-800, 800, 0) {
 		t.Fatal("evicted starting area was not requested again")
 	}
 	for _, s := range w.sections {

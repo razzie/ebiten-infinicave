@@ -36,6 +36,14 @@ type World struct {
 	done     chan struct{}
 	closing  sync.Once
 	working  bool
+	upload   *sectionUpload
+}
+
+// sectionUpload spreads one section's GPU work over several frames.
+type sectionUpload struct {
+	data  sectionData
+	img   *ebiten.Image
+	stage int
 }
 
 func sectionSeed(seed, id int64) int64 {
@@ -158,6 +166,10 @@ func newWorld(seed int64, study string) *World {
 
 func (w *World) close() {
 	w.closing.Do(func() { close(w.done) })
+	if w.upload != nil && w.upload.img != nil {
+		w.upload.img.Deallocate()
+	}
+	w.upload = nil
 	for id, section := range w.sections {
 		section.terrain.Deallocate()
 		section.vines.Deallocate()
@@ -172,30 +184,47 @@ func newSectionImage(height int) *ebiten.Image {
 }
 
 // GPU work stays on the game thread; the worker only builds CPU geometry.
+// One stage runs per frame so a finished section never stalls scrolling.
 func (w *World) receive(g *Game) {
-	select {
-	case data := <-w.results:
-		w.working = false
-		img := newSectionImage(H)
-		img.Fill(color.Black)
-		top := sectionWindowTop(data.id)
-		g.drawGrid(img, data.background, top)
-		if g.view == "shaded" || g.view == "" {
-			drawMushrooms(img, data.mushrooms)
+	if w.upload == nil {
+		select {
+		case data := <-w.results:
+			w.working = false
+			w.upload = &sectionUpload{data: data}
+		default:
 		}
-		g.drawGrid(img, data.foreground, top)
+		return
+	}
+	u := w.upload
+	shaded := g.view == "shaded" || g.view == ""
+	top := sectionWindowTop(u.data.id)
+	switch u.stage {
+	case 0:
+		u.img = newSectionImage(H)
+		u.img.Fill(color.Black)
+		g.drawGrid(u.img, u.data.background, top)
+	case 1:
+		if shaded {
+			drawMushrooms(u.img, u.data.mushrooms)
+		}
+		g.drawGrid(u.img, u.data.foreground, top)
+	case 2:
 		terrain := newSectionImage(sectionHeight)
 		op := &ebiten.DrawImageOptions{}
 		op.GeoM.Translate(0, -sectionHeight)
-		terrain.DrawImage(img, op)
-		img.Deallocate()
-		vines := newSectionImage(H)
-		if g.view == "shaded" || g.view == "" {
-			drawVines(vines, data.vines)
-		}
-		w.sections[data.id] = &worldSection{terrain, vines}
+		terrain.DrawImage(u.img, op)
+		u.img.Deallocate()
+		u.img = terrain
 	default:
+		vines := newSectionImage(H)
+		if shaded {
+			drawVines(vines, u.data.vines)
+		}
+		w.sections[u.data.id] = &worldSection{u.img, vines}
+		w.upload = nil
+		return
 	}
+	u.stage++
 }
 
 func visibleSections(y float64, height int) (low, high int64) {
@@ -211,32 +240,62 @@ func (w *World) request(id int64) {
 	}
 }
 
-func (w *World) ensure(y float64, height int) bool {
+// prefetch lists sections to keep, nearest first: the viewport, its neighbors
+// (their vines may reach in), then lookahead in the direction of travel.
+func prefetch(y float64, height int, velocity float64) (ids []int64, required int) {
 	low, high := visibleSections(y, height)
-	// Neighbor-owned vines may extend into the viewport from either side.
-	for id := max(0, low-1); id <= high+1; id++ {
-		if w.sections[id] == nil {
-			w.request(id)
-			return false
-		}
+	for id := low; id <= high; id++ {
+		ids = append(ids, id)
 	}
-	// Prefetch in the growth direction, with one section behind for returning.
-	for _, id := range []int64{high + 2, high + 3, low - 2} {
-		if id >= 0 && w.sections[id] == nil {
-			w.request(id)
-			break
+	ids = append(ids, low-1, high+1)
+	required = len(ids)
+	ahead := 2 + min(2, int(math.Abs(velocity)/8))
+	if velocity <= 0 {
+		for i := 0; i < ahead; i++ {
+			ids = append(ids, high+2+int64(i))
 		}
+		ids = append(ids, low-2)
+	} else {
+		for i := 0; i < ahead; i++ {
+			ids = append(ids, low-2-int64(i))
+		}
+		ids = append(ids, high+2)
 	}
-	return true
+	return
 }
 
-func (w *World) prune(y, target float64, height int) {
+// ensure never blocks: it queues the most useful missing section and reports
+// whether everything the viewport needs is already built.
+func (w *World) ensure(y float64, height int, velocity float64) bool {
+	ids, required := prefetch(y, height, velocity)
+	ready := true
+	for i, id := range ids {
+		if id < 0 || w.sections[id] != nil {
+			continue
+		}
+		if w.upload != nil && w.upload.data.id == id {
+			ready = ready && i >= required
+			continue
+		}
+		w.request(id)
+		if i < required {
+			ready = false
+		}
+		break
+	}
+	return ready
+}
+
+func (w *World) prune(y float64, height int, velocity float64) {
 	low, high := visibleSections(y, height)
-	targetLow, targetHigh := visibleSections(target, height)
+	ids, _ := prefetch(y, height, velocity)
+	keep := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		keep[id] = true
+	}
 	for id, section := range w.sections {
 		current := id >= max(0, low-2) && id <= high+3
-		requested := id >= max(0, targetLow-2) && id <= targetHigh+3
-		if !current && !requested {
+		if !current && !keep[id] {
 			section.terrain.Deallocate()
 			section.vines.Deallocate()
 			delete(w.sections, id)
@@ -245,6 +304,7 @@ func (w *World) prune(y, target float64, height int) {
 }
 
 func (w *World) draw(dst *ebiten.Image, y float64, height int) {
+	y = math.Round(y)
 	low, high := visibleSections(y, height)
 	for id := low; id <= high; id++ {
 		if section := w.sections[id]; section != nil {

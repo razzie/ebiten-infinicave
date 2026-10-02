@@ -728,11 +728,9 @@ func (g *Game) Update() error {
 	}
 	g.world.receive(g)
 	g.updateCamera()
-	g.loading = !g.world.ensure(g.camera.Target, g.camera.Height)
-	if !g.loading {
-		g.camera.Y = g.camera.Target
-	}
-	g.world.prune(g.camera.Y, g.camera.Target, g.camera.Height)
+	g.camera.step()
+	g.loading = !g.world.ensure(g.camera.Y, g.camera.Height, g.camera.Velocity)
+	g.world.prune(g.camera.Y, g.camera.Height, g.camera.Velocity)
 	return nil
 }
 
