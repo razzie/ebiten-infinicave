@@ -207,11 +207,12 @@ func TestForkShadingMeetsParent(t *testing.T) {
 	parent := Vine{Parent: -1, Points: []VinePoint{{V{100, 80}, 8}, {V{100, 100}, 8}, {V{100, 120}, 8}}}
 	branch := Vine{Depth: 1, Parent: 0, Joint: 1, Points: []VinePoint{{V{100, 100}, 5}, {V{130, 160}, 0}}}
 	vines := []Vine{parent, branch}
-	// Even the dark outer bands of the child inherit the red parent face at
+	parentPalette := vinePalette(vines, 0)
+	// Even the dark outer bands of the child inherit the parent material at
 	// the join instead of drawing a black cut through its highlight.
 	for _, x := range []float64{96, 100, 104} {
 		p := V{x, 100}
-		want := vineBandColor((100 - x) / 8)
+		want := vineBandColorFrom(parentPalette, (100-x)/8)
 		got := vineJoinColor(vines, 1, p, vineColors[0])
 		if got != want {
 			t.Fatalf("fork seam at %v: got %v, want parent material %v", p, got, want)
@@ -219,6 +220,33 @@ func TestForkShadingMeetsParent(t *testing.T) {
 	}
 	if got := vineJoinColor(vines, 1, V{130, 160}, vineColors[3]); got != vineColors[3] {
 		t.Fatal("parent shading extends beyond the fork")
+	}
+}
+
+func TestVinePalettesVaryAndStayMuted(t *testing.T) {
+	vines := []Vine{{Parent: -1}, {Parent: -1}, {Parent: -1}, {Depth: 1, Parent: 0}}
+	palettes := [...]([len(vineColors)]color.NRGBA){
+		vinePalette(vines, 0),
+		vinePalette(vines, 1),
+		vinePalette(vines, 2),
+	}
+	if reflect.DeepEqual(palettes[0], palettes[1]) || reflect.DeepEqual(palettes[1], palettes[2]) || reflect.DeepEqual(palettes[0], palettes[2]) {
+		t.Fatal("separate trunks should use varied palettes")
+	}
+	if child := vinePalette(vines, 3); child != palettes[0] {
+		t.Fatal("branches should retain their trunk's palette")
+	}
+	for _, palette := range palettes {
+		for i, muted := range palette {
+			original := vineColors[i]
+			mutedTone := .30*float64(muted.R) + .59*float64(muted.G) + .11*float64(muted.B)
+			originalTone := .30*float64(original.R) + .59*float64(original.G) + .11*float64(original.B)
+			mutedRange := max(int(muted.R), int(muted.G), int(muted.B)) - min(int(muted.R), int(muted.G), int(muted.B))
+			originalRange := max(int(original.R), int(original.G), int(original.B)) - min(int(original.R), int(original.G), int(original.B))
+			if mutedTone >= originalTone || mutedRange >= originalRange {
+				t.Fatalf("palette band %d is not dimmer and less saturated: got %v, original %v", i, muted, original)
+			}
+		}
 	}
 }
 

@@ -19,7 +19,8 @@ func drawVines(dst *ebiten.Image, vines []Vine) {
 		var vertices []ebiten.Vertex
 		var indices []uint32
 		bands := vineBands[:]
-		colors := vineColors[:]
+		palette := vinePalette(vines, index)
+		colors := palette[:]
 		if shadow {
 			bands = []float64{-1, 1}
 			colors = []color.NRGBA{{0, 0, 0, 125}, {0, 0, 0, 125}}
@@ -62,6 +63,26 @@ func drawVines(dst *ebiten.Image, vines []Vine) {
 var vineBands = [...]float64{-1, -.78, -.46, -.2, .04, .3, .65, 1}
 var vineColors = [...]color.NRGBA{{42, 0, 3, 255}, {116, 1, 8, 255}, {200, 4, 13, 255}, {245, 16, 23, 255}, {210, 5, 12, 255}, {155, 1, 8, 255}, {92, 0, 5, 255}, {34, 0, 3, 255}}
 
+func vinePalette(vines []Vine, index int) [len(vineColors)]color.NRGBA {
+	family := index
+	for vines[family].Parent >= 0 && vines[family].Parent < family {
+		family = vines[family].Parent
+	}
+	tints := [...][3]int{{0, 0, 0}, {7, 2, -3}, {-4, 1, 5}}
+	tint := tints[family%len(tints)]
+	var palette [len(vineColors)]color.NRGBA
+	for i, base := range vineColors {
+		gray := .30*float64(base.R) + .59*float64(base.G) + .11*float64(base.B)
+		palette[i] = color.NRGBA{
+			R: uint8(clamp(math.Round((lerp(float64(base.R), gray, .48)+float64(tint[0]))*.72), 0, 255)),
+			G: uint8(clamp(math.Round((lerp(float64(base.G), gray, .48)+float64(tint[1]))*.72), 0, 255)),
+			B: uint8(clamp(math.Round((lerp(float64(base.B), gray, .48)+float64(tint[2]))*.72), 0, 255)),
+			A: 255,
+		}
+	}
+	return palette
+}
+
 func mixVineColor(a, b color.NRGBA, t float64) color.NRGBA {
 	return color.NRGBA{
 		R: uint8(math.Round(lerp(float64(a.R), float64(b.R), t))),
@@ -71,13 +92,17 @@ func mixVineColor(a, b color.NRGBA, t float64) color.NRGBA {
 }
 
 func vineBandColor(band float64) color.NRGBA {
+	return vineBandColorFrom(vineColors, band)
+}
+
+func vineBandColorFrom(palette [len(vineColors)]color.NRGBA, band float64) color.NRGBA {
 	band = clamp(band, -1, 1)
 	for i := 1; i < len(vineBands); i++ {
 		if band <= vineBands[i] {
-			return mixVineColor(vineColors[i-1], vineColors[i], (band-vineBands[i-1])/(vineBands[i]-vineBands[i-1]))
+			return mixVineColor(palette[i-1], palette[i], (band-vineBands[i-1])/(vineBands[i]-vineBands[i-1]))
 		}
 	}
-	return vineColors[len(vineColors)-1]
+	return palette[len(palette)-1]
 }
 
 // Match the parent's material across the entire root cross-section and blend
@@ -101,6 +126,6 @@ func vineJoinColor(vines []Vine, index int, p V, own color.NRGBA) color.NRGBA {
 	after := parent.Points[min(len(parent.Points)-1, vine.Joint+1)].P
 	normal := after.Sub(before).Norm().Perp()
 	band := p.Sub(root.P).Dot(normal) / root.Radius
-	inherited := vineJoinColor(vines, vine.Parent, p, vineBandColor(band))
+	inherited := vineJoinColor(vines, vine.Parent, p, vineBandColorFrom(vinePalette(vines, vine.Parent), band))
 	return mixVineColor(inherited, own, blend)
 }
