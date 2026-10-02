@@ -26,10 +26,11 @@ func generateBranches(guides []Guide, noise *Perlin, rng *rand.Rand) []BranchSeg
 			// Stratified roots leave gaps between the spreading shoulders.
 			s := length * (float64(j) + lerp(.25, .75, rng.Float64())) / float64(count)
 			q, tangent, normal := g.frameAt(s)
-			root := q.Add(normal.Mul(guideSpacing * .65))
+			// The ridge flank reaches 70-140 from the guide; spurs must emerge from its foot.
+			root := q.Add(normal.Mul(lerp(70, 95, rng.Float64())))
 			direction := normal.Add(tangent.Mul(lerp(-.65, .65, rng.Float64()))).Norm()
-			reach := lerp(155, 285, rng.Float64())
-			width := lerp(32, 49, rng.Float64())
+			reach := lerp(170, 300, rng.Float64())
+			width := lerp(26, 40, rng.Float64())
 			phase := rng.Float64() * 1000
 			forkAt := lerp(.38, .60, rng.Float64())
 			forked := false

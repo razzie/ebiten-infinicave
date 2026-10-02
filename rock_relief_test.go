@@ -102,7 +102,7 @@ func TestLightingSeparatesShapeFromMaterialAndVisibility(t *testing.T) {
 	front := rockSurfaceColor(V3{Z: 1}, 1, 1)
 	down := rockSurfaceColor((V3{0, 1, .3}).Norm(), 1, 1)
 	shadow := rockSurfaceColor(rockLight, 0, .5)
-	if up.R <= front.R || front.R <= down.R || shadow.R >= front.R || down.R > 25 {
+	if up.R <= front.R || front.R <= down.R || shadow.R >= front.R || down.R <= 8 || down.R > 40 || up.R-shadow.R > 160 {
 		t.Fatalf("lighting does not describe the relief: up=%v front=%v down=%v shadow=%v", up, front, down, shadow)
 	}
 	for _, c := range []color.NRGBA{up, front, down, shadow} {

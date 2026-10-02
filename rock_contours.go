@@ -12,7 +12,7 @@ func contourRockGrid(grid RockGrid, heightAt func(V) float64) RockGrid {
 	for _, c := range grid {
 		faces := contourRockFace(c.Polygon, c.Center, heightAt)
 		for _, poly := range faces {
-			if len(poly) < 3 || faceArea(poly) < 1 {
+			if len(poly) < 3 || faceArea(poly) < 6 {
 				continue
 			}
 			face := c

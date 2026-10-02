@@ -252,7 +252,7 @@ func nearestGuide(p V, guides []Guide) (int, Projection) {
 
 // Site density follows terrain only; guides cut faces without adding sites.
 func desiredSpacing(p V, noise *Perlin) float64 {
-	return lerp(43, 30, smoothstep(.39, .58, fbm(noise, p)))
+	return lerp(30, 22, smoothstep(.39, .58, fbm(noise, p)))
 }
 
 func generateSeeds(rng *rand.Rand, count int, noise *Perlin) []V {
@@ -384,18 +384,18 @@ func fbm(n *Perlin, p V) float64 {
 }
 
 func cellColor(v float64) color.NRGBA {
-	// Base tones for the material: charcoal, gray, and warm ivory.
+	// Sampled rock colors stay charcoal, with restrained warm-gray highlights.
 	stops := []struct {
 		value   float64
 		r, g, b float64
 	}{
 		{0, 0, 0, 0},
-		{.10, 3, 3, 3},
-		{.25, 37, 38, 37},
-		{.43, 83, 83, 79},
-		{.65, 145, 143, 133},
-		{.85, 197, 192, 177},
-		{1, 221, 215, 200},
+		{.10, 8, 8, 7},
+		{.25, 18, 18, 16},
+		{.43, 38, 37, 34},
+		{.65, 120, 116, 106},
+		{.85, 165, 158, 142},
+		{1, 190, 182, 164},
 	}
 	v = clamp(v, 0, 1)
 	for i := 1; i < len(stops); i++ {
@@ -630,7 +630,7 @@ func (g *Game) drawGrid(img *ebiten.Image, grid RockGrid, top float64) {
 			if clr.A == 255 && clr.R <= 3 && clr.G <= 3 && clr.B <= 3 {
 				hiddenEdges[key] = true
 			}
-			alpha := uint8(math.Round(10 * surfaceLight(cell.Normal) * float64(clr.A) / 255))
+			alpha := uint8(math.Round((96 + 28*surfaceLight(cell.Normal)) * float64(clr.A) / 255))
 			if g.view != "shaded" && g.view != "" {
 				alpha = 0
 			}
@@ -654,7 +654,7 @@ func (g *Game) drawGrid(img *ebiten.Image, grid RockGrid, top float64) {
 
 	// Shared edges are stroked once, using the more visible adjacent cell.
 	// Outline opacity follows the faces, including at transparent boundaries.
-	var paths [56]*vector.Path
+	var paths [256]*vector.Path
 	// Stable path order also keeps antialiasing identical after cache eviction.
 	keys := make([][4]int64, 0, len(edges))
 	for key := range edges {
@@ -682,7 +682,7 @@ func (g *Game) drawGrid(img *ebiten.Image, grid RockGrid, top float64) {
 	}
 	for alpha, path := range paths {
 		if path != nil {
-			strokePath(img, path, .55, color.NRGBA{R: 158, G: 158, B: 151, A: uint8(alpha)})
+			strokePath(img, path, 1.05, color.NRGBA{R: 18, G: 18, B: 17, A: uint8(alpha)})
 		}
 	}
 }

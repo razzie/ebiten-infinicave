@@ -70,7 +70,7 @@ func worldGuides(seed, id int64) []Guide {
 // Jittered world-space sites give neighboring generation windows exactly the
 // same rocks in their overlap, independent of load order or cache eviction.
 func worldSeeds(seed int64, top float64, noise *Perlin) []V {
-	const step = 32.0
+	const step = 22.0
 	var seeds []V
 	first := int64(math.Floor(top / step))
 	last := int64(math.Ceil((top + H) / step))

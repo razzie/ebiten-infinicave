@@ -26,7 +26,7 @@ func reliefHeight(p V, guides []Guide, noise *Perlin, branches []BranchSegment) 
 	height, branchMask := 0.0, 1.0
 	for i := range guides {
 		g := &guides[i]
-		if g.distanceBound2(p) > 240*240 {
+		if g.distanceBound2(p) > 160*160 {
 			continue
 		}
 		pr := g.project(p)
@@ -38,15 +38,15 @@ func reliefHeight(p V, guides []Guide, noise *Perlin, branches []BranchSegment) 
 		q := pr.Q
 		q.Y += noise.OffsetY
 		variation := noise.Noise(q.X*.004+17, q.Y*.004+31)
-		width := 185 + 60*variation
-		elevation := 72 + 18*variation
+		width := 105 + 35*variation
+		elevation := 62 + 14*variation
 		bevel := 16 + 4*variation
 		along := math.Sqrt(math.Max(0, pr.Dist*pr.Dist-pr.Signed*pr.Signed))
 		end := 1 - smoothstep(0, 38, along)
 		height = math.Max(height, ridgeProfile(pr.Dist, width, elevation, bevel)*end)
 	}
 	// Offshoots carry low connected spurs of the same solid rock surface.
-	height = math.Max(height, 110*branchBias(p, branches)*branchMask)
+	height = math.Max(height, 80*branchBias(p, branches)*branchMask)
 	world := V{p.X, p.Y + noise.OffsetY}
 	chips := 1.2 * noise.Noise(world.X*.035+43, world.Y*.035+97)
 	return math.Max(0, height+chips*smoothstep(0, 15, height))
@@ -58,10 +58,10 @@ func reliefSeeds(seeds []V, guides []Guide) []V {
 	out := append([]V(nil), seeds...)
 	for i, p := range out {
 		gi, pr := nearestGuide(p, guides)
-		if gi < 0 || pr.Signed <= 0 || pr.Dist >= 150 {
+		if gi < 0 || pr.Signed <= 0 || pr.Dist >= 110 {
 			continue
 		}
-		shift := -21 * math.Sin(math.Pi*pr.Dist/150)
+		shift := -15 * math.Sin(math.Pi*pr.Dist/110)
 		out[i] = p.Add(pr.N.Mul(shift))
 		out[i].X = clamp(out[i].X, 1, W-1)
 		out[i].Y = clamp(out[i].Y, 1, H-1)
@@ -85,9 +85,9 @@ func shapeReliefGrid(grid RockGrid, guides []Guide, noise *Perlin, branches []Br
 
 func rockSurfaceColor(normal V3, shadow, ambient float64) color.NRGBA {
 	// Material reflectance is separate from visibility and distance to a guide.
-	// Low ambient light allows the broad flanks to turn almost black.
+	// A low ambient floor keeps flanks charcoal; only lit faces reach warm tan.
 	diffuse := math.Pow(surfaceLight(normal), 1.25)
-	return cellColor(.10 + .055*ambient + .61*diffuse*shadow)
+	return cellColor(.12 + .05*ambient + .66*diffuse*shadow)
 }
 
 func shadeRockGrids(background, foreground RockGrid, noise *Perlin) {
@@ -125,7 +125,7 @@ func artisticRockSeeds(seeds []V, guides []Guide, seed int64, top float64) []V {
 		gi, pr := nearestGuide(p, guides)
 		remove := 0.0
 		if gi >= 0 && pr.Signed > 0 {
-			remove = .32 * smoothstep(25, 95, pr.Dist) * (1 - smoothstep(190, 260, pr.Dist))
+			remove = .15 * smoothstep(25, 95, pr.Dist) * (1 - smoothstep(190, 260, pr.Dist))
 		}
 		r := float64(uint64(cellSeed(seed^0x617274, p, top))>>11) / (1 << 53)
 		if r >= remove {

@@ -36,7 +36,7 @@ func TestGuideLayerOccupancyIsOpaqueAndIndependentOfLight(t *testing.T) {
 		t.Errorf("empty guide grid must be transparent, got %v", clr)
 	}
 	crest := guideCellColor(V{500, 408}, guides, noise, nil)
-	if crest.A != 255 || crest.R < 145 {
+	if crest.A != 255 || crest.R < 75 || crest.R > 175 {
 		t.Errorf("crest must remain bright and opaque, got %v", crest)
 	}
 	solid, empty := 0, 0
@@ -61,7 +61,7 @@ func TestGuideLayerOccupancyIsOpaqueAndIndependentOfLight(t *testing.T) {
 		A: V{500, 620}, B: V{500, 680},
 		WidthA: 30, WidthB: 20, LightA: .4, LightB: .3,
 	}}
-	if clr := guideCellColor(p, guides, noise, branches); clr.A != 255 || clr.R < 50 {
+	if clr := guideCellColor(p, guides, noise, branches); clr.A != 255 || clr.R < 25 {
 		t.Errorf("branch must reveal foreground faces beyond the guide band, got %v", clr)
 	}
 }
@@ -76,7 +76,7 @@ func TestBackgroundSeedsWorkWithoutGuides(t *testing.T) {
 		if math.IsNaN(p.X) || math.IsNaN(p.Y) || p.X < 0 || p.X > W || p.Y < 0 || p.Y > H {
 			t.Fatalf("invalid background seed: %v", p)
 		}
-		if math.IsNaN(spacing) || spacing < 30 || spacing > 43 {
+		if math.IsNaN(spacing) || spacing < 22 || spacing > 30 {
 			t.Fatalf("invalid background spacing at %v: %v", p, spacing)
 		}
 	}

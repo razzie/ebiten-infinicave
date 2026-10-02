@@ -80,12 +80,15 @@ func TestRockLightingPreservesOccupancyAndDarkFlanks(t *testing.T) {
 		for x := 0.0; x < W; x += 20 {
 			p := V{x, y}
 			darkForeground := guideSurfaceColor(p, guides, noise, nil, V3{Y: 1})
-			if darkForeground.A != 0 && darkForeground.R > 25 {
-				t.Fatalf("unlit flank is too bright: %v", darkForeground)
+			if darkForeground.A != 0 && (darkForeground.R <= 8 || darkForeground.R > 40) {
+				t.Fatalf("foreground flank brightness is outside the raised palette: %v", darkForeground)
 			}
 			lit := guideSurfaceColor(p, guides, noise, nil, V3{0, -.8, .6})
 			if lit.A != darkForeground.A {
 				t.Fatal("surface lighting changed guide transparency")
+			}
+			if lit.A != 0 && lit.R <= darkForeground.R {
+				t.Fatalf("guide-facing foreground is not brighter: lit=%v flank=%v", lit, darkForeground)
 			}
 		}
 	}

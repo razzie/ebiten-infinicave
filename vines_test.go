@@ -222,23 +222,22 @@ func TestForkShadingMeetsParent(t *testing.T) {
 	}
 }
 
-func TestVinesCrossNarrowBlackAndBrightGaps(t *testing.T) {
+func TestVinesOnlyTouchForegroundCells(t *testing.T) {
 	for _, tone := range []uint8{0, 180} {
 		for _, width := range []float64{14, 180} {
 			background := testRockGrid([]V{{500, 500}}, []color.NRGBA{{30, 30, 30, 255}})
 			foreground := RockGrid{{Polygon: []V{{500, 0}, {500 + width, 0}, {500 + width, H}, {500, H}}, Color: color.NRGBA{tone, tone, tone, 255}}}
 			field := newVineTerrain(background, foreground)
 			vine := growVine(field, V{450, 500}, V{1, 0}, 4, 260, 0, 0, 0)
-			entered, crossed := false, false
+			furthest := 0.0
 			for _, p := range vine.Points {
-				entered = entered || p.P.X > 500
-				crossed = crossed || p.P.X > 500+width+10
-				if width == 180 && p.P.X+p.Radius > 500+vineMaxIntrusion {
-					t.Fatalf("tone %d: vine entered too deeply: %+v", tone, p)
+				furthest = math.Max(furthest, p.P.X+p.Radius)
+				if p.P.X+p.Radius > 500+vineForegroundTouch+vineFieldStep*2 {
+					t.Fatalf("tone %d, gap %.0f: vine crossed foreground boundary: %+v", tone, width, p)
 				}
 			}
-			if !entered || crossed != (width == 14) {
-				t.Fatalf("tone %d, gap %.0f: entered=%v, crossed=%v", tone, width, entered, crossed)
+			if furthest < 497 {
+				t.Fatalf("tone %d, gap %.0f: vine stopped short of foreground edge at %.1f", tone, width, furthest)
 			}
 		}
 	}

@@ -40,6 +40,7 @@ const (
 	vineVoidTone        = 3.0
 	vineLightTone       = 72.0
 	vineMaxIntrusion    = 18.0
+	vineForegroundTouch = 2.0
 	vineMaxExcursion    = 65.0
 	vineMinTrunkLength  = 320.0
 	vineMinTrunkSpan    = 190.0
@@ -58,11 +59,17 @@ type VineTerrain struct {
 	unsupported []float64
 	// Distance to the actual background cell edges, independent of face tone.
 	borders []float64
+	// Distance to foreground cells, which vines may approach but not cross.
+	foreground []float64
 }
 
 func newVineTerrain(background, foreground RockGrid) *VineTerrain {
 	tones := make([]float64, vineFieldWidth*vineFieldHeight)
-	for _, grid := range []RockGrid{background, foreground} {
+	foregroundDistance := make([]float64, len(tones))
+	for i := range foregroundDistance {
+		foregroundDistance[i] = math.Inf(1)
+	}
+	for gridIndex, grid := range []RockGrid{background, foreground} {
 		for _, cell := range grid {
 			if len(cell.Polygon) < 3 {
 				continue
@@ -91,12 +98,15 @@ func newVineTerrain(background, foreground RockGrid) *VineTerrain {
 					for x := max(0, int(math.Ceil(left/vineFieldStep-.5))); x < min(vineFieldWidth, int(math.Ceil(right/vineFieldStep-.5))); x++ {
 						i := y*vineFieldWidth + x
 						tones[i] = lerp(tones[i], tone, alpha)
+						if gridIndex == 1 {
+							foregroundDistance[i] = 0
+						}
 					}
 				}
 			}
 		}
 	}
-	field := &VineTerrain{clearance: make([]float64, len(tones)), unsupported: make([]float64, len(tones)), borders: newVineBorders(background)}
+	field := &VineTerrain{clearance: make([]float64, len(tones)), unsupported: make([]float64, len(tones)), borders: newVineBorders(background), foreground: foregroundDistance}
 	for y := 0; y < vineFieldHeight; y++ {
 		for x := 0; x < vineFieldWidth; x++ {
 			i := y*vineFieldWidth + x
@@ -108,7 +118,7 @@ func newVineTerrain(background, foreground RockGrid) *VineTerrain {
 		}
 	}
 	// Chamfer distance, with a conservative correction when sampled below.
-	for _, distances := range [][]float64{field.clearance, field.unsupported} {
+	for _, distances := range [][]float64{field.clearance, field.unsupported, field.foreground} {
 		for _, dir := range []int{1, -1} {
 			for yy := 0; yy < vineFieldHeight; yy++ {
 				y := yy
@@ -147,6 +157,7 @@ func (f *VineTerrain) growthSpace(p V) float64 {
 	}
 	i := y*vineFieldWidth + x
 	space := f.clearance[i]*.92 - f.unsupported[i] - 3 + vineMaxIntrusion
+	space = math.Min(space, f.foreground[i]+vineForegroundTouch)
 	edge := math.Min(math.Min(p.X, W-p.X), math.Min(p.Y, H-p.Y))
 	return math.Max(0, math.Min(space, edge))
 }
