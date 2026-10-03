@@ -360,7 +360,7 @@ func backgroundCellColor(p V, noise *Perlin) color.NRGBA {
 }
 
 func backgroundSurfaceColor(p V, noise *Perlin, normal V3) color.NRGBA {
-	return cellColor(.30 * smoothstep(.43, .59, fbm(noise, p)) * (.4 + .6*surfaceLight(normal)))
+	return cellColor(.38 * smoothstep(.43, .59, fbm(noise, p)) * (.28 + .72*surfaceLight(normal)))
 }
 
 // Rock occupancy follows relief, independently of light. Every existing face

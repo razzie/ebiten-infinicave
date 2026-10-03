@@ -22,6 +22,17 @@ func TestBackgroundContainsBlackAndDarkCells(t *testing.T) {
 	if !tones[color.NRGBA{A: 255}] || len(tones) < 10 {
 		t.Fatalf("expected exact black and varied charcoal cells, got %d tones", len(tones))
 	}
+	for y := 0.0; y < H; y += 20 {
+		for x := 0.0; x < W; x += 20 {
+			p := V{x, y}
+			lit := backgroundSurfaceColor(p, noise, V3{0, -1, 0})
+			shadowed := backgroundSurfaceColor(p, noise, V3{0, 1, 0})
+			if lit.R > shadowed.R {
+				return
+			}
+		}
+	}
+	t.Fatal("background directional lighting has no visible contrast")
 }
 
 func TestGuideLayerOccupancyIsOpaqueAndIndependentOfLight(t *testing.T) {

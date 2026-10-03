@@ -90,7 +90,7 @@ func rockSurfaceColor(normal V3, shadow, ambient float64) color.NRGBA {
 	// Material reflectance is separate from visibility and distance to a guide.
 	// A low ambient floor keeps flanks charcoal; only lit faces reach warm tan.
 	diffuse := math.Pow(surfaceLight(normal), 1.25)
-	return cellColor(.12 + .05*ambient + .66*diffuse*shadow)
+	return cellColor(.16 + .05*ambient + .66*diffuse*shadow)
 }
 
 func shadeRockGrids(background, foreground RockGrid, noise *Perlin) {
