@@ -23,8 +23,8 @@ func statsOf(s sectionData) sectionStats {
 // polished contours slightly.
 func TestSectionStatsStable(t *testing.T) {
 	want := map[int64]sectionStats{
-		1:  {4809, 2461, 29, 1238284.8963},
-		42: {4910, 2361, 15, 1232149.2999},
+		1:  {4809, 2064, 24, 1098988.6594},
+		42: {4910, 1948, 26, 993373.1121},
 	}
 	for seed, w := range want {
 		got := statsOf(buildSection(seed, 0))

@@ -104,60 +104,6 @@ func splineGuide(knots []V, sign float64) Guide {
 	return Guide{Pts: pts, S: ss, BrightSign: sign, Min: lo, Max: hi}
 }
 
-func generateGuides(rng *rand.Rand) []Guide {
-	var guides []Guide
-	for top := 0; top < H; top += W {
-		section := generateGuideSection(rng)
-		for i := range section {
-			section[i].translateY(float64(top))
-		}
-		guides = append(guides, section...)
-	}
-	return guides
-}
-
-func generateGuideSection(rng *rand.Rand) []Guide {
-	// Unequal compositional anchors leave large pockets of negative space.
-	// Curves may cross regions or leave the canvas. Knot order sets the lit side.
-	templates := [][]V{
-		{{.24, .38}, {.43, .30}, {.62, .21}, {.73, .12}, {.76, .02}},
-		{{.26, .08}, {.34, .05}, {.43, -.015}},
-		{{.035, .15}, {.10, .19}, {.18, .205}},
-		{{.80, .125}, {.85, .08}, {.90, .025}},
-		{{-.025, .45}, {.095, .49}, {.15, .52}},
-		{{.10, .65}, {.26, .625}, {.44, .60}},
-		{{.50, .62}, {.55, .56}, {.565, .48}, {.545, .44}, {.505, .415}, {.535, .38}, {.585, .35}},
-		{{.76, .595}, {.84, .525}, {.90, .455}, {.87, .385}},
-		{{.635, .785}, {.602, .748}, {.615, .705}, {.65, .677}, {.71, .697}},
-		{{.445, .925}, {.49, .83}, {.535, .735}},
-		{{.56, .75}, {.60, .82}, {.68, .86}, {.80, .94}},
-	}
-	guides := make([]Guide, 0, len(templates))
-
-	for _, template := range templates {
-		center := V{}
-		for _, p := range template {
-			center = center.Add(p)
-		}
-		center = center.Mul(1 / float64(len(template)))
-		shift := V{lerp(-.018, .018, rng.Float64()), lerp(-.018, .018, rng.Float64())}
-		scale := lerp(.91, 1.09, rng.Float64())
-		angle := lerp(-.07, .07, rng.Float64())
-		knots := make([]V, len(template))
-		for i, p := range template {
-			d := p.Sub(center).Mul(scale)
-			d = V{d.X*math.Cos(angle) - d.Y*math.Sin(angle), d.X*math.Sin(angle) + d.Y*math.Cos(angle)}
-			q := center.Add(shift).Add(d)
-			knots[i] = V{q.X * W, q.Y * W}
-		}
-		// Derive a separate stream without changing the compositional anchors.
-		g := splineGuide(knots, 1)
-		seed := sectionSeed(int64(math.Round(knots[0].X*1000)), int64(math.Round(knots[0].Y*1000)))
-		guides = append(guides, ridgedGuide(g, seed))
-	}
-	return guides
-}
-
 type Projection struct {
 	Q      V
 	T, N   V

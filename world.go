@@ -63,13 +63,16 @@ func sectionWindowTop(id int64) float64 { return sectionTop(id) - sectionHeight 
 func worldGuides(seed, id int64) []Guide {
 	var guides []Guide
 	top := sectionWindowTop(id)
+	proposals := make(map[int64][]Guide)
+	for owner := id - 3; owner <= id+3; owner++ {
+		proposals[owner] = generateGuideSection(rand.New(rand.NewSource(sectionSeed(seed, owner))))
+	}
 	// Include guides outside the window whose shoulders could reach inside.
 	for owner := id + 2; owner >= id-2; owner-- {
-		rng := rand.New(rand.NewSource(sectionSeed(seed, owner)))
-		section := generateGuideSection(rng)
+		section := spacedWorldGuideSection(seed, owner, proposals)
 		for i := range section {
 			section[i].Seed = sectionSeed(sectionSeed(seed, owner), int64(i+1)) | 1
-			section[i].translateY(sectionTop(owner) - top)
+			section[i] = shiftedGuide(section[i], sectionTop(owner)-top)
 		}
 		guides = append(guides, section...)
 	}
