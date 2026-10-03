@@ -26,7 +26,7 @@ type sectionData struct {
 }
 
 type worldSection struct {
-	terrain, vines *ebiten.Image
+	terrain, vines, mushrooms, foreground *ebiten.Image
 }
 
 type World struct {
@@ -41,9 +41,10 @@ type World struct {
 
 // sectionUpload spreads one section's GPU work over several frames.
 type sectionUpload struct {
-	data  sectionData
-	img   *ebiten.Image
-	stage int
+	data       sectionData
+	img        *ebiten.Image
+	foreground *ebiten.Image
+	stage      int
 }
 
 func sectionSeed(seed, id int64) int64 {
@@ -172,10 +173,19 @@ func (w *World) close() {
 	if w.upload != nil && w.upload.img != nil {
 		w.upload.img.Deallocate()
 	}
+	if w.upload != nil && w.upload.foreground != nil {
+		w.upload.foreground.Deallocate()
+	}
 	w.upload = nil
 	for id, section := range w.sections {
 		section.terrain.Deallocate()
 		section.vines.Deallocate()
+		if section.foreground != nil {
+			section.foreground.Deallocate()
+		}
+		if section.mushrooms != nil {
+			section.mushrooms.Deallocate()
+		}
 		delete(w.sections, id)
 	}
 }
@@ -207,10 +217,8 @@ func (w *World) receive(g *Game) {
 		u.img.Fill(color.Black)
 		g.drawGrid(u.img, u.data.background, top)
 	case 1:
-		if shaded {
-			drawMushrooms(u.img, u.data.mushrooms)
-		}
-		g.drawGrid(u.img, u.data.foreground, top)
+		u.foreground = newSectionImage(H)
+		g.drawGrid(u.foreground, u.data.foreground, top)
 	case 2:
 		terrain := newSectionImage(sectionHeight)
 		op := &ebiten.DrawImageOptions{}
@@ -218,12 +226,21 @@ func (w *World) receive(g *Game) {
 		terrain.DrawImage(u.img, op)
 		u.img.Deallocate()
 		u.img = terrain
+		foreground := newSectionImage(sectionHeight)
+		foreground.DrawImage(u.foreground, op)
+		u.foreground.Deallocate()
+		u.foreground = foreground
 	default:
 		vines := newSectionImage(H)
 		if shaded {
 			drawVines(vines, u.data.vines)
 		}
-		w.sections[u.data.id] = &worldSection{u.img, vines}
+		var mushrooms *ebiten.Image
+		if shaded {
+			mushrooms = newSectionImage(H)
+			drawMushrooms(mushrooms, u.data.mushrooms)
+		}
+		w.sections[u.data.id] = &worldSection{terrain: u.img, vines: vines, mushrooms: mushrooms, foreground: u.foreground}
 		w.upload = nil
 		return
 	}
@@ -301,6 +318,12 @@ func (w *World) prune(y float64, height int, velocity float64) {
 		if !current && !keep[id] {
 			section.terrain.Deallocate()
 			section.vines.Deallocate()
+			if section.foreground != nil {
+				section.foreground.Deallocate()
+			}
+			if section.mushrooms != nil {
+				section.mushrooms.Deallocate()
+			}
 			delete(w.sections, id)
 		}
 	}
@@ -322,6 +345,20 @@ func (w *World) draw(dst *ebiten.Image, y float64, height int) {
 			op := &ebiten.DrawImageOptions{}
 			op.GeoM.Translate(0, sectionWindowTop(id)-y)
 			dst.DrawImage(section.vines, op)
+		}
+	}
+	for id := max(0, low-1); id <= high+1; id++ {
+		if section := w.sections[id]; section != nil && section.mushrooms != nil {
+			op := &ebiten.DrawImageOptions{}
+			op.GeoM.Translate(0, sectionWindowTop(id)-y)
+			dst.DrawImage(section.mushrooms, op)
+		}
+	}
+	for id := low; id <= high; id++ {
+		if section := w.sections[id]; section != nil {
+			op := &ebiten.DrawImageOptions{}
+			op.GeoM.Translate(0, sectionTop(id)-y)
+			dst.DrawImage(section.foreground, op)
 		}
 	}
 }
