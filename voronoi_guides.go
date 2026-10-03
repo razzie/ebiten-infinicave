@@ -7,12 +7,10 @@ import (
 	"math"
 	"math/rand"
 	"os"
-	"sort"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
-	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
 const (
@@ -514,16 +512,6 @@ func appendCellMesh(vertices []ebiten.Vertex, indices []uint32, poly []V, center
 	return vertices, indices
 }
 
-func strokePath(dst *ebiten.Image, p *vector.Path, width float32, clr color.Color) {
-	op := &vector.DrawPathOptions{AntiAlias: true}
-	op.ColorScale.ScaleWithColor(clr)
-	vector.StrokePath(dst, p, &vector.StrokeOptions{
-		Width:    width,
-		LineCap:  vector.LineCapButt,
-		LineJoin: vector.LineJoinRound,
-	}, op)
-}
-
 func edgeKey(a, b V) [4]int64 {
 	ax, ay := int64(math.Round(a.X*1e4)), int64(math.Round(a.Y*1e4))
 	bx, by := int64(math.Round(b.X*1e4)), int64(math.Round(b.Y*1e4))
@@ -544,95 +532,6 @@ type Game struct {
 	study, view string
 	exported    bool
 	exportErr   error
-}
-
-// Render each tessellation separately so transparent guide cells contribute
-// neither faces nor outlines, and the foreground covers the background mesh.
-func (g *Game) drawGrid(img *ebiten.Image, grid RockGrid, top float64) {
-	if len(grid) > 0 && grid[0].Raised {
-		grid = insetForegroundGrid(grid)
-	}
-	vertices := make([]ebiten.Vertex, 0, len(grid)*18)
-	indices := make([]uint32, 0, len(grid)*18)
-	var boundary []rockEdge
-	if len(grid) > 0 && grid[0].Raised && (g.view == "shaded" || g.view == "" || g.view == "clay") {
-		boundary = exposedRockEdges(grid)
-		vertices, indices = appendRockWalls(vertices, indices, grid, boundary, g.view)
-	}
-	type cellEdge struct {
-		a, b  V
-		alpha uint8
-	}
-	edges := make(map[[4]int64]cellEdge)
-	hiddenEdges := make(map[[4]int64]bool)
-	for _, cell := range grid {
-		s, clr, poly := cell.Center, rockViewColor(cell, g.view), cell.Polygon
-		if clr.A == 0 {
-			continue
-		}
-		vertices, indices = appendCellMesh(vertices, indices, poly, s, clr, cell.Normal)
-		for j, a := range poly {
-			b := poly[(j+1)%len(poly)]
-			key := edgeKey(a, b)
-			// Preserve quiet black pockets in the underlying grid.
-			if clr.A == 255 && clr.R <= 3 && clr.G <= 3 && clr.B <= 3 {
-				hiddenEdges[key] = true
-			}
-			alpha := uint8(math.Round((96 + 28*surfaceLight(cell.Normal)) * float64(clr.A) / 255))
-			if g.view != "shaded" && g.view != "" {
-				alpha = 0
-			}
-			if previous, ok := edges[key]; !ok || alpha > previous.alpha {
-				edges[key] = cellEdge{a, b, alpha}
-			}
-		}
-	}
-
-	vertices, indices = appendRockBevels(vertices, indices, grid, boundary, g.view)
-	if len(indices) == 0 {
-		return
-	}
-	img.DrawTrianglesShader32(vertices, indices, g.material, &ebiten.DrawTrianglesShaderOptions{
-		AntiAlias: true,
-		Uniforms: map[string]any{
-			"Texture": float32(g.texture),
-			"Offset":  []float32{317, float32(top) + 791},
-		},
-	})
-
-	// Shared edges are stroked once, using the more visible adjacent cell.
-	// Outline opacity follows the faces, including at transparent boundaries.
-	var paths [256]*vector.Path
-	// Stable path order also keeps antialiasing identical after cache eviction.
-	keys := make([][4]int64, 0, len(edges))
-	for key := range edges {
-		keys = append(keys, key)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		for k := 0; k < 4; k++ {
-			if keys[i][k] != keys[j][k] {
-				return keys[i][k] < keys[j][k]
-			}
-		}
-		return false
-	})
-	for _, key := range keys {
-		edge := edges[key]
-		if hiddenEdges[key] || edge.alpha == 0 {
-			continue
-		}
-		if paths[edge.alpha] == nil {
-			paths[edge.alpha] = &vector.Path{}
-		}
-		path := paths[edge.alpha]
-		path.MoveTo(float32(edge.a.X), float32(edge.a.Y))
-		path.LineTo(float32(edge.b.X), float32(edge.b.Y))
-	}
-	for alpha, path := range paths {
-		if path != nil {
-			strokePath(img, path, 1.05, color.NRGBA{R: 18, G: 18, B: 17, A: uint8(alpha)})
-		}
-	}
 }
 
 func insetForegroundGrid(grid RockGrid) RockGrid {
@@ -656,7 +555,7 @@ func (g *Game) regenerate() {
 	if g.world != nil {
 		g.world.close()
 	}
-	g.world = newWorld(g.seed, g.study)
+	g.world = newWorld(g.seed, g.study, g.view)
 }
 
 func (g *Game) Update() error {

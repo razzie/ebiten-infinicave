@@ -10,11 +10,9 @@ import (
 // Shaded ribbons provide a dark outline, scarlet body and narrow longitudinal
 // highlights. Shadows precede every body. Children inherit the parent shading
 // at their attachment, so a dark ribbon edge cannot cut across a fork.
-func drawVines(dst *ebiten.Image, vines []Vine) {
-	white := ebiten.NewImage(1, 1)
-	white.Fill(color.White)
-	defer white.Deallocate()
-	draw := func(index int, shadow bool) {
+func prepareVines(vines []Vine) []triangleMesh {
+	meshes := make([]triangleMesh, 0, len(vines)*2)
+	prepare := func(index int, shadow bool) {
 		vine := vines[index]
 		var vertices []ebiten.Vertex
 		var indices []uint32
@@ -49,15 +47,16 @@ func drawVines(dst *ebiten.Image, vines []Vine) {
 				}
 			}
 		}
-		dst.DrawTriangles32(vertices, indices, white, &ebiten.DrawTrianglesOptions{AntiAlias: true})
+		meshes = append(meshes, triangleMesh{vertices: vertices, indices: indices})
 	}
 	for i := range vines {
-		draw(i, true)
+		prepare(i, true)
 	}
 	// Generation stores each parent before its children.
 	for i := range vines {
-		draw(i, false)
+		prepare(i, false)
 	}
+	return meshes
 }
 
 var vineBands = [...]float64{-1, -.78, -.46, -.2, .04, .3, .65, 1}

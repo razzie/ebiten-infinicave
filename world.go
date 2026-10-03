@@ -32,19 +32,23 @@ type worldSection struct {
 type World struct {
 	sections map[int64]*worldSection
 	jobs     chan int64
-	results  chan sectionData
+	results  chan sectionMesh
 	done     chan struct{}
 	closing  sync.Once
 	working  bool
 	upload   *sectionUpload
+	white    *ebiten.Image
 }
 
 // sectionUpload spreads one section's GPU work over several frames.
 type sectionUpload struct {
-	data       sectionData
+	data       sectionMesh
 	img        *ebiten.Image
 	foreground *ebiten.Image
+	vines      *ebiten.Image
+	mushrooms  *ebiten.Image
 	stage      int
+	next       int
 }
 
 func sectionSeed(seed, id int64) int64 {
@@ -148,8 +152,8 @@ func buildSectionMode(seed, id int64, study string) sectionData {
 	return sectionData{id, background, foreground, vines, mushrooms}
 }
 
-func newWorld(seed int64, study string) *World {
-	w := &World{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1), results: make(chan sectionData, 1), done: make(chan struct{})}
+func newWorld(seed int64, study, view string) *World {
+	w := &World{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1), results: make(chan sectionMesh, 1), done: make(chan struct{})}
 	go func() {
 		for {
 			select {
@@ -160,7 +164,13 @@ func newWorld(seed int64, study string) *World {
 				select {
 				case <-w.done:
 					return
-				case w.results <- data:
+				default:
+				}
+				mesh := prepareSection(data, view)
+				select {
+				case <-w.done:
+					return
+				case w.results <- mesh:
 				}
 			}
 		}
@@ -176,7 +186,17 @@ func (w *World) close() {
 	if w.upload != nil && w.upload.foreground != nil {
 		w.upload.foreground.Deallocate()
 	}
+	if w.upload != nil && w.upload.vines != nil {
+		w.upload.vines.Deallocate()
+	}
+	if w.upload != nil && w.upload.mushrooms != nil {
+		w.upload.mushrooms.Deallocate()
+	}
 	w.upload = nil
+	if w.white != nil {
+		w.white.Deallocate()
+		w.white = nil
+	}
 	for id, section := range w.sections {
 		section.terrain.Deallocate()
 		section.vines.Deallocate()
@@ -196,8 +216,21 @@ func newSectionImage(height int) *ebiten.Image {
 	return ebiten.NewImageWithOptions(image.Rect(0, 0, W, height), &ebiten.NewImageOptions{Unmanaged: true})
 }
 
-// GPU work stays on the game thread; the worker only builds CPU geometry.
-// One stage runs per frame so a finished section never stalls scrolling.
+// Limit draw submissions per tick as well as separating the large layer
+// uploads. CPU tessellation has already finished before a result arrives.
+const uploadDrawsPerTick = 4
+
+func (w *World) uploadMeshes(dst *ebiten.Image, meshes []triangleMesh) bool {
+	u := w.upload
+	end := min(u.next+uploadDrawsPerTick, len(meshes))
+	for ; u.next < end; u.next++ {
+		meshes[u.next].draw(dst, w.white)
+	}
+	return u.next == len(meshes)
+}
+
+// GPU resources stay on the game thread. Publish all layers together only
+// after their uploads finish, so drawing never sees a partial section.
 func (w *World) receive(g *Game) {
 	if w.upload == nil {
 		select {
@@ -209,17 +242,28 @@ func (w *World) receive(g *Game) {
 		return
 	}
 	u := w.upload
-	shaded := g.view == "shaded" || g.view == ""
 	top := sectionWindowTop(u.data.id)
+	if w.white == nil {
+		w.white = ebiten.NewImage(1, 1)
+		w.white.Fill(color.White)
+	}
 	switch u.stage {
 	case 0:
 		u.img = newSectionImage(H)
 		u.img.Fill(color.Black)
-		g.drawGrid(u.img, u.data.background, top)
+		g.drawGridFaces(u.img, u.data.background.faces, top)
 	case 1:
-		u.foreground = newSectionImage(H)
-		g.drawGrid(u.foreground, u.data.foreground, top)
+		if !w.uploadMeshes(u.img, u.data.background.outlines) {
+			return
+		}
 	case 2:
+		u.foreground = newSectionImage(H)
+		g.drawGridFaces(u.foreground, u.data.foreground.faces, top)
+	case 3:
+		if !w.uploadMeshes(u.foreground, u.data.foreground.outlines) {
+			return
+		}
+	case 4:
 		terrain := newSectionImage(sectionHeight)
 		op := &ebiten.DrawImageOptions{}
 		op.GeoM.Translate(0, -sectionHeight)
@@ -230,21 +274,25 @@ func (w *World) receive(g *Game) {
 		foreground.DrawImage(u.foreground, op)
 		u.foreground.Deallocate()
 		u.foreground = foreground
+	case 5:
+		if u.vines == nil {
+			u.vines = newSectionImage(H)
+		}
+		if !w.uploadMeshes(u.vines, u.data.vines) {
+			return
+		}
+	case 6:
+		if g.view == "shaded" || g.view == "" {
+			u.mushrooms = newSectionImage(H)
+			u.data.mushrooms.draw(u.mushrooms, w.white)
+		}
 	default:
-		vines := newSectionImage(H)
-		if shaded {
-			drawVines(vines, u.data.vines)
-		}
-		var mushrooms *ebiten.Image
-		if shaded {
-			mushrooms = newSectionImage(H)
-			drawMushrooms(mushrooms, u.data.mushrooms)
-		}
-		w.sections[u.data.id] = &worldSection{terrain: u.img, vines: vines, mushrooms: mushrooms, foreground: u.foreground}
+		w.sections[u.data.id] = &worldSection{terrain: u.img, vines: u.vines, mushrooms: u.mushrooms, foreground: u.foreground}
 		w.upload = nil
 		return
 	}
 	u.stage++
+	u.next = 0
 }
 
 func visibleSections(y float64, height int) (low, high int64) {

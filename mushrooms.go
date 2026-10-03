@@ -149,7 +149,7 @@ func mushroomWithinForegroundInset(m Mushroom) bool {
 }
 
 // One batched draw: per-mushroom vector paths allocated gigabytes per section.
-func drawMushrooms(dst *ebiten.Image, groups []MushroomGroup) {
+func prepareMushrooms(groups []MushroomGroup) triangleMesh {
 	var vertices []ebiten.Vertex
 	var indices []uint32
 	vertex := func(p V, c color.NRGBA) uint32 {
@@ -189,13 +189,7 @@ func drawMushrooms(dst *ebiten.Image, groups []MushroomGroup) {
 			fan(center, outline, 0, m.Color)
 		}
 	}
-	if len(indices) == 0 {
-		return
-	}
-	white := ebiten.NewImage(1, 1)
-	white.Fill(color.White)
-	defer white.Deallocate()
-	dst.DrawTriangles32(vertices, indices, white, &ebiten.DrawTrianglesOptions{AntiAlias: true})
+	return triangleMesh{vertices: vertices, indices: indices}
 }
 
 func (m Mushroom) capOutline() []V {

@@ -16,7 +16,7 @@ Run with `go run .` (Go 1.27 and a graphical desktop). Use `-seed 42` for a repr
 - Home / End: return to the starting bottom edge.
 - R: generate a new world while keeping the current position.
 
-The window is resizable. When generation needs to catch up, the view waits at the last loaded position and displays “Growing upward…”. Rocks share world coordinates across sections, and vines keep their full geometry across boundaries.
+The window is resizable. Scrolling continues while missing sections are prepared in the background, with “Growing upward…” displayed until they are ready. Rocks share world coordinates across sections, and vines keep their full geometry across boundaries.
 
 `go run . -seed 42 -output scene.png` exports the bottom 1000 × 2400 pixels and exits. `-texture 0` disables the surface texture.
 
@@ -30,6 +30,6 @@ go run . -seed 42 -study curl -view normals -output normals.png
 go run . -seed 42 -study curl -view shadows -output shadows.png
 ```
 
-Relief and shadows are generated once per cached section. The renderer uses a shallow 2.5D surface: illumination is constant within each polygon, with depth shadows averaged over the face to preserve the faceted appearance.
+Relief, shadows, rock triangulation, outlines, and vine and mushroom meshes are prepared in the background once per cached section. Background rock, foreground rock, vines, and mushrooms are polygonized concurrently, using up to `GOMAXPROCS - 1` workers (at least one) to leave CPU capacity for rendering. The game loop uploads the prepared meshes over several ticks, then adds the completed section to the scene with all its layers together. The renderer uses a shallow 2.5D surface: illumination is constant within each polygon, with depth shadows averaged over the face to preserve the faceted appearance.
 
 Run checks with `go test ./...` and `go vet ./...`. Ebitengine initializes the display for tests, so these also need a graphical session.
