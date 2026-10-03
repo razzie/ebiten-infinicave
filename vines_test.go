@@ -224,17 +224,32 @@ func TestForkShadingMeetsParent(t *testing.T) {
 }
 
 func TestVinePalettesVaryAndStayMuted(t *testing.T) {
-	vines := []Vine{{Parent: -1}, {Parent: -1}, {Parent: -1}, {Depth: 1, Parent: 0}}
-	palettes := [...]([len(vineColors)]color.NRGBA){
-		vinePalette(vines, 0),
-		vinePalette(vines, 1),
-		vinePalette(vines, 2),
+	vines := make([]Vine, 13)
+	for i := range 12 {
+		vines[i].Parent = -1
 	}
-	if reflect.DeepEqual(palettes[0], palettes[1]) || reflect.DeepEqual(palettes[1], palettes[2]) || reflect.DeepEqual(palettes[0], palettes[2]) {
-		t.Fatal("separate trunks should use varied palettes")
+	vines[12] = Vine{Depth: 1, Parent: 0}
+	var palettes [12][len(vineColors)]color.NRGBA
+	seen := make(map[[len(vineColors)]color.NRGBA]bool, len(palettes))
+	for i := range palettes {
+		palettes[i] = vinePalette(vines, i)
+		if seen[palettes[i]] {
+			t.Fatalf("trunks 0 through 11 repeat a palette at trunk %d", i)
+		}
+		seen[palettes[i]] = true
 	}
-	if child := vinePalette(vines, 3); child != palettes[0] {
+	if child := vinePalette(vines, 12); child != palettes[0] {
 		t.Fatal("branches should retain their trunk's palette")
+	}
+	for _, palette := range palettes[8:10] {
+		if int(palette[3].G)*100 < int(palette[3].R)*40 || int(palette[3].B)*100 < int(palette[3].R)*30 {
+			t.Fatalf("palette should have a brown cast: %v", palette[3])
+		}
+	}
+	for _, palette := range palettes[10:12] {
+		if palette[3].R != palette[3].G || palette[3].G != palette[3].B {
+			t.Fatalf("palette should be neutral gray: %v", palette[3])
+		}
 	}
 	for _, palette := range palettes {
 		for i, muted := range palette {

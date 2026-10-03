@@ -67,15 +67,37 @@ func vinePalette(vines []Vine, index int) [len(vineColors)]color.NRGBA {
 	for vines[family].Parent >= 0 && vines[family].Parent < family {
 		family = vines[family].Parent
 	}
-	tints := [...][3]int{{0, 0, 0}, {7, 2, -3}, {-4, 1, 5}}
-	tint := tints[family%len(tints)]
+	type paletteStyle struct {
+		tint                   [3]int
+		grayMix, brownMix, dim float64
+	}
+	styles := [...]paletteStyle{
+		{[3]int{0, 0, 0}, .48, 0, .72},
+		{[3]int{7, 2, -3}, .48, 0, .72},
+		{[3]int{-4, 1, 5}, .48, 0, .72},
+		{[3]int{12, -4, -6}, .48, 0, .72},
+		{[3]int{-8, 5, 11}, .48, 0, .72},
+		{[3]int{5, 2, -3}, .48, 0, .72},
+		{[3]int{-5, -2, 10}, .48, 0, .72},
+		{[3]int{9, -3, 0}, .48, 0, .72},
+		{[3]int{0, 0, 0}, .48, .62, .72},
+		{[3]int{0, 0, 0}, .48, .84, .72},
+		{[3]int{0, 0, 0}, 1, 0, .66},
+		{[3]int{0, 0, 0}, 1, 0, .82},
+	}
+	style := styles[family%len(styles)]
 	var palette [len(vineColors)]color.NRGBA
 	for i, base := range vineColors {
 		gray := .30*float64(base.R) + .59*float64(base.G) + .11*float64(base.B)
+		shade := func(channel uint8, tint int, sepia float64) uint8 {
+			value := lerp(float64(channel), gray, style.grayMix)
+			value = lerp(value, gray*sepia, style.brownMix)
+			return uint8(clamp(math.Round((value+float64(tint))*style.dim), 0, 255))
+		}
 		palette[i] = color.NRGBA{
-			R: uint8(clamp(math.Round((lerp(float64(base.R), gray, .48)+float64(tint[0]))*.72), 0, 255)),
-			G: uint8(clamp(math.Round((lerp(float64(base.G), gray, .48)+float64(tint[1]))*.72), 0, 255)),
-			B: uint8(clamp(math.Round((lerp(float64(base.B), gray, .48)+float64(tint[2]))*.72), 0, 255)),
+			R: shade(base.R, style.tint[0], 1.12),
+			G: shade(base.G, style.tint[1], .82),
+			B: shade(base.B, style.tint[2], .58),
 			A: 255,
 		}
 	}
