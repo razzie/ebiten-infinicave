@@ -91,6 +91,13 @@ func mergeGuideFragments(faces []guideFragment, guides []Guide) {
 					poly := joinFaces(f.poly, other.poly)
 					if len(poly) >= 3 {
 						merged := makeGuideFragment(poly, faceCenter(poly), true)
+						// A thin face must become more compact. Merely choosing
+						// the best neighbor can still make it thinner, triggering
+						// repeated merges into an ever larger sprawling face.
+						if f.compactness() < minGuideCompactness &&
+							math.Round(merged.compactness()*1e5) <= math.Round(f.compactness()*1e5) {
+							continue
+						}
 						neighbors = append(neighbors, neighbor{j, shared, merged})
 					}
 				}

@@ -4,6 +4,7 @@ import (
 	"math"
 	"math/rand"
 	"testing"
+	"time"
 )
 
 type sectionStats struct {
@@ -37,6 +38,33 @@ func TestSectionStatsStable(t *testing.T) {
 func BenchmarkBuildSection(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		buildSection(42, int64(i%3))
+	}
+}
+
+func TestSection10GenerationCompletes(t *testing.T) {
+	// This section used to spend over a minute repeatedly growing thin
+	// fragments into sprawling polygons. Keep a generous deadline so a
+	// regression fails without hanging the test suite.
+	result := make(chan sectionData, 1)
+	go func() { result <- buildSection(42, 10) }()
+	select {
+	case s := <-result:
+		if len(s.background) == 0 || len(s.foreground) == 0 {
+			t.Fatal("section 10 generated empty terrain")
+		}
+		for _, c := range s.foreground {
+			if len(c.Polygon) < 3 || faceArea(c.Polygon) <= 0 || len(faceTriangles(c.Polygon)) != len(c.Polygon)-2 {
+				t.Fatal("section 10 generated an invalid foreground face")
+			}
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("section 10 generation stalled")
+	}
+}
+
+func BenchmarkBuildSection10(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		buildSection(42, 10)
 	}
 }
 

@@ -220,6 +220,25 @@ func TestThinCellCanMergeIntoSmallerNeighbor(t *testing.T) {
 	}
 }
 
+func TestThinCellsDoNotMergeIntoThinnerUnion(t *testing.T) {
+	// Joining these strips end to end worsens compactness. Accepting this
+	// merge lets an already thin face keep growing instead of repairing it.
+	polys := [][]V{
+		{{0, 0}, {100, 0}, {100, 8}, {0, 8}},
+		{{100, 0}, {200, 0}, {200, 8}, {100, 8}},
+	}
+	var faces []guideFragment
+	for _, poly := range polys {
+		faces = append(faces, makeGuideFragment(poly, faceCenter(poly), false))
+	}
+	mergeGuideFragments(faces, nil)
+	for i, face := range faces {
+		if !reflect.DeepEqual(face.poly, polys[i]) {
+			t.Fatal("merge made a thin face thinner")
+		}
+	}
+}
+
 func TestTaperedGuideCellMerges(t *testing.T) {
 	// This wedge cleared the previous .30 compactness threshold even though
 	// it is over three times as long as it is wide and ends in a sharp tip.
