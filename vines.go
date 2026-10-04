@@ -57,7 +57,10 @@ const (
 // A small CPU field composites both grids in drawing order. Its clearance
 // measures distance from light faces and black voids, including vine width.
 type VineTerrain struct {
-	clearance []float64
+	// Surface growth stays entirely on the raised rock instead of tucking
+	// beneath it or making shallow excursions across the background.
+	onForeground bool
+	clearance    []float64
 	// Distance back to dark rock inside a black or bright face.
 	unsupported []float64
 	// Distance to the actual background cell edges, independent of face tone.
@@ -161,6 +164,9 @@ func newVineTerrain(background, foreground RockGrid) *VineTerrain {
 // Growth can cross a narrow gap, but the entire ribbon must remain near dark
 // rock. The window edges remain hard boundaries.
 func (f *VineTerrain) growthSpace(p V) float64 {
+	if f.onForeground {
+		return f.space(p)
+	}
 	x, y := int(math.Floor(p.X/vineFieldStep)), int(math.Floor(p.Y/vineFieldStep))
 	if x < 0 || y < 0 || x >= vineFieldWidth || y >= vineFieldHeight {
 		return 0
@@ -210,6 +216,8 @@ type Vine struct {
 	Joint  int
 	// Fine offshoots trace polygon seams exactly, including their corners.
 	EdgeAligned bool
+	// Foreground stems use a richer material and are drawn over the rock.
+	Foreground bool
 }
 
 func rotateV(v V, angle float64) V {
@@ -357,6 +365,14 @@ func generateVines(field *VineTerrain, rng *rand.Rand) []Vine {
 }
 
 func generateVinesInBand(field *VineTerrain, rng *rand.Rand, bottom, top float64, count int) []Vine {
+	minLength, minSpan := vineMinTrunkLength, vineMinTrunkSpan
+	radiusLow, radiusHigh := 6.0, 9.0
+	forks := 5
+	if field.onForeground {
+		minLength, minSpan = 190, 115
+		radiusLow, radiusHigh = 3.2, 4.5
+		forks = 2
+	}
 	var vines []Vine
 	for rootIndex := 0; rootIndex < count; rootIndex++ {
 		type candidate struct {
@@ -383,7 +399,7 @@ func generateVinesInBand(field *VineTerrain, rng *rand.Rand, bottom, top float64
 		sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].score > candidates[j].score })
 		angle := -math.Pi/2 + lerp(-.9, .9, rng.Float64())
 		heading := V{math.Cos(angle), math.Sin(angle)}
-		radius := lerp(6, 9, rng.Float64())
+		radius := lerp(radiusLow, radiusHigh, rng.Float64())
 		phase := rng.Float64() * 2 * math.Pi
 		curl := 1.0
 		if rng.Intn(2) == 0 {
@@ -412,7 +428,7 @@ func generateVinesInBand(field *VineTerrain, rng *rand.Rand, bottom, top float64
 				b := growVine(field, candidate.p, d.Mul(-1), radius, reachB, phase+math.Pi, -curl, 0)
 				v, joint := joinVineHalves(a, b)
 				length, span := v.extent()
-				if length < vineMinTrunkLength || span < vineMinTrunkSpan {
+				if length < minLength || span < minSpan {
 					continue
 				}
 				score := length*.6 + span + candidate.score*.3
@@ -432,8 +448,8 @@ func generateVinesInBand(field *VineTerrain, rng *rand.Rand, bottom, top float64
 		vines = append(vines, trunk)
 		// Invest in long, attached limbs before starting another independent
 		// trunk. Short blocked offshoots are discarded with their descendants.
-		for fork := 0; fork < 5; fork++ {
-			u := (float64(fork) + lerp(.25, .75, rng.Float64())) / 5
+		for fork := 0; fork < forks; fork++ {
+			u := (float64(fork) + lerp(.25, .75, rng.Float64())) / float64(forks)
 			i := int(lerp(12, float64(len(trunk.Points)-13), u))
 			base := trunk.Points[i]
 			if base.Radius < 1.8 {

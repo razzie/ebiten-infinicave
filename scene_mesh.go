@@ -28,16 +28,18 @@ type sectionMesh struct {
 	id                     int64
 	background, foreground gridMesh
 	vines                  []triangleMesh
+	foregroundVines        []triangleMesh
 	mushrooms              triangleMesh
 }
 
 func prepareSection(data sectionData, view string) sectionMesh {
 	mesh := sectionMesh{id: data.id}
-	jobs := make(chan func(), 4)
+	jobs := make(chan func(), 5)
 	jobs <- func() { mesh.background = prepareGrid(data.background, view) }
 	jobs <- func() { mesh.foreground = prepareGrid(data.foreground, view) }
 	if view == "shaded" || view == "" {
 		jobs <- func() { mesh.vines = prepareVines(data.vines) }
+		jobs <- func() { mesh.foregroundVines = prepareForegroundVines(data.foregroundVines) }
 		jobs <- func() { mesh.mushrooms = prepareMushrooms(data.mushrooms) }
 	}
 	close(jobs)

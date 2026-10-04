@@ -22,11 +22,13 @@ type sectionData struct {
 	id                     int64
 	background, foreground RockGrid
 	vines                  []Vine
+	foregroundVines        []Vine
 	mushrooms              []MushroomGroup
 }
 
 type worldSection struct {
 	terrain, vines, mushrooms, foreground *ebiten.Image
+	foregroundVines                       *ebiten.Image
 }
 
 type World struct {
@@ -42,13 +44,14 @@ type World struct {
 
 // sectionUpload spreads one section's GPU work over several frames.
 type sectionUpload struct {
-	data       sectionMesh
-	img        *ebiten.Image
-	foreground *ebiten.Image
-	vines      *ebiten.Image
-	mushrooms  *ebiten.Image
-	stage      int
-	next       int
+	data            sectionMesh
+	img             *ebiten.Image
+	foreground      *ebiten.Image
+	vines           *ebiten.Image
+	foregroundVines *ebiten.Image
+	mushrooms       *ebiten.Image
+	stage           int
+	next            int
 }
 
 func sectionSeed(seed, id int64) int64 {
@@ -145,11 +148,12 @@ func buildSectionMode(seed, id int64, study string) sectionData {
 	})
 	shadeRockGrids(background, foreground, backgroundNoise)
 	mushrooms := mushroomsForGuides(guides, insetForegroundGrid(foreground))
-	var vines []Vine
+	var vines, foregroundVines []Vine
 	if study == "" {
 		vines = generateVinesInBand(newVineTerrain(background, foreground), rand.New(rand.NewSource(sectionSeed(seed^0x76696e6573, id))), W, 2*W, 5)
+		foregroundVines = generateForegroundVines(foreground, guides, rand.New(rand.NewSource(sectionSeed(seed^0x73757266616365, id))))
 	}
-	return sectionData{id, background, foreground, vines, mushrooms}
+	return sectionData{id: id, background: background, foreground: foreground, vines: vines, foregroundVines: foregroundVines, mushrooms: mushrooms}
 }
 
 func newWorld(seed int64, study, view string) *World {
@@ -189,6 +193,9 @@ func (w *World) close() {
 	if w.upload != nil && w.upload.vines != nil {
 		w.upload.vines.Deallocate()
 	}
+	if w.upload != nil && w.upload.foregroundVines != nil {
+		w.upload.foregroundVines.Deallocate()
+	}
 	if w.upload != nil && w.upload.mushrooms != nil {
 		w.upload.mushrooms.Deallocate()
 	}
@@ -200,6 +207,9 @@ func (w *World) close() {
 	for id, section := range w.sections {
 		section.terrain.Deallocate()
 		section.vines.Deallocate()
+		if section.foregroundVines != nil {
+			section.foregroundVines.Deallocate()
+		}
 		if section.foreground != nil {
 			section.foreground.Deallocate()
 		}
@@ -298,8 +308,17 @@ func (w *World) receive(g *Game) {
 			u.mushrooms = newSectionImage(H)
 			u.data.mushrooms.draw(u.mushrooms, w.white)
 		}
+	case 7:
+		if len(u.data.foregroundVines) > 0 {
+			if u.foregroundVines == nil {
+				u.foregroundVines = newSectionImage(H)
+			}
+			if !w.uploadMeshes(u.foregroundVines, u.data.foregroundVines) {
+				return
+			}
+		}
 	default:
-		w.sections[u.data.id] = &worldSection{terrain: u.img, vines: u.vines, mushrooms: u.mushrooms, foreground: u.foreground}
+		w.sections[u.data.id] = &worldSection{terrain: u.img, vines: u.vines, mushrooms: u.mushrooms, foreground: u.foreground, foregroundVines: u.foregroundVines}
 		w.upload = nil
 		return
 	}
@@ -378,6 +397,9 @@ func (w *World) prune(y float64, height int, velocity float64) {
 		if !current && !keep[id] {
 			section.terrain.Deallocate()
 			section.vines.Deallocate()
+			if section.foregroundVines != nil {
+				section.foregroundVines.Deallocate()
+			}
 			if section.foreground != nil {
 				section.foreground.Deallocate()
 			}
@@ -419,6 +441,15 @@ func (w *World) draw(dst *ebiten.Image, y float64, height int) {
 			op := &ebiten.DrawImageOptions{}
 			op.GeoM.Translate(0, sectionTop(id)-y)
 			dst.DrawImage(section.foreground, op)
+		}
+	}
+	// Keep complete foreground stems in their owner's padded window, just
+	// like background vines, so scrolling across a section cannot cut them.
+	for id := max(0, low-1); id <= high+1; id++ {
+		if section := w.sections[id]; section != nil && section.foregroundVines != nil {
+			op := &ebiten.DrawImageOptions{}
+			op.GeoM.Translate(0, sectionWindowTop(id)-y)
+			dst.DrawImage(section.foregroundVines, op)
 		}
 	}
 }

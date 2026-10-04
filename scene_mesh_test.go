@@ -96,6 +96,9 @@ func TestPrepareSectionMatchesSerialLayers(t *testing.T) {
 			{Parent: -1, Points: []VinePoint{{P: V{100, 100}, Radius: 3}, {P: V{110, 110}, Radius: 2}, {P: V{120, 120}}}},
 			{Parent: 0, Joint: 1, Depth: 1, Points: []VinePoint{{P: V{110, 110}, Radius: 2}, {P: V{120, 110}, Radius: 1}, {P: V{130, 110}}}},
 		},
+		foregroundVines: []Vine{{Parent: -1, Foreground: true, Points: []VinePoint{
+			{P: V{30, 40}}, {P: V{40, 50}, Radius: 3}, {P: V{50, 60}},
+		}}},
 		mushrooms: []MushroomGroup{{Mushrooms: []Mushroom{{
 			Stem: []V{{50, 40}, {52, 30}, {50, 20}}, CapCenter: V{50, 18}, CapWidth: 10, CapHeight: 4,
 			Color: mushroomColors[0],
@@ -107,6 +110,7 @@ func TestPrepareSectionMatchesSerialLayers(t *testing.T) {
 		want := sectionMesh{id: data.id, background: prepareGrid(data.background, view), foreground: prepareGrid(data.foreground, view)}
 		if view == "" || view == "shaded" {
 			want.vines = prepareVines(data.vines)
+			want.foregroundVines = prepareForegroundVines(data.foregroundVines)
 			want.mushrooms = prepareMushrooms(data.mushrooms)
 		}
 		for _, procs := range []int{1, 2, 4, 8} {
@@ -126,13 +130,13 @@ func TestWorldWorkerPreparesAllLayers(t *testing.T) {
 	w.request(0)
 	select {
 	case mesh := <-w.results:
-		if mesh.id != 0 || len(mesh.background.faces.indices) == 0 || len(mesh.foreground.faces.indices) == 0 || len(mesh.vines) == 0 || len(mesh.mushrooms.indices) == 0 {
+		if mesh.id != 0 || len(mesh.background.faces.indices) == 0 || len(mesh.foreground.faces.indices) == 0 || len(mesh.vines) == 0 || len(mesh.foregroundVines) == 0 || len(mesh.mushrooms.indices) == 0 {
 			t.Fatal("worker returned incomplete section geometry")
 		}
 		checkMesh(t, mesh.background.faces)
 		checkMesh(t, mesh.foreground.faces)
 		checkMesh(t, mesh.mushrooms)
-		for _, layer := range [][]triangleMesh{mesh.background.outlines, mesh.foreground.outlines, mesh.vines} {
+		for _, layer := range [][]triangleMesh{mesh.background.outlines, mesh.foreground.outlines, mesh.vines, mesh.foregroundVines} {
 			for _, m := range layer {
 				checkMesh(t, m)
 			}
@@ -149,7 +153,7 @@ func TestSectionUploadsAreBoundedAndPublishedTogether(t *testing.T) {
 	w := &World{sections: make(map[int64]*worldSection), results: make(chan sectionMesh, 1), done: make(chan struct{}), working: true}
 	defer w.close()
 	// Empty meshes isolate scheduling from rendering and shader setup.
-	w.results <- sectionMesh{id: 0, background: gridMesh{outlines: make([]triangleMesh, uploadDrawsPerTick*2+1)}, vines: make([]triangleMesh, uploadDrawsPerTick*2+1)}
+	w.results <- sectionMesh{id: 0, background: gridMesh{outlines: make([]triangleMesh, uploadDrawsPerTick*2+1)}, vines: make([]triangleMesh, uploadDrawsPerTick*2+1), foregroundVines: make([]triangleMesh, uploadDrawsPerTick*2+1)}
 	g := &Game{world: w, view: "shaded"}
 	w.receive(g)
 	if w.upload == nil || w.working {
@@ -159,11 +163,11 @@ func TestSectionUploadsAreBoundedAndPublishedTogether(t *testing.T) {
 		stage, next := w.upload.stage, w.upload.next
 		w.receive(g)
 		if w.upload == nil {
-			if stage != 7 {
+			if stage != 8 {
 				t.Fatal("section was published before every layer finished")
 			}
 			s := w.sections[0]
-			if s == nil || s.terrain == nil || s.foreground == nil || s.vines == nil || s.mushrooms == nil {
+			if s == nil || s.terrain == nil || s.foreground == nil || s.vines == nil || s.foregroundVines == nil || s.mushrooms == nil {
 				t.Fatal("completed section is missing a layer")
 			}
 			return
@@ -174,7 +178,7 @@ func TestSectionUploadsAreBoundedAndPublishedTogether(t *testing.T) {
 		if stage == w.upload.stage && w.upload.next-next > uploadDrawsPerTick {
 			t.Fatal("tick submitted too many mesh uploads")
 		}
-		if (stage == 1 || stage == 5) && next == 0 && w.upload.stage != stage {
+		if (stage == 1 || stage == 5 || stage == 7) && next == 0 && w.upload.stage != stage {
 			t.Fatal("large mesh list was uploaded in one tick")
 		}
 	}

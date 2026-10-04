@@ -268,7 +268,7 @@ func TestVinePalettesVaryAndStayMuted(t *testing.T) {
 				t.Fatalf("palette band %d is not dimmer and less saturated: got %v, original %v", i, muted, original)
 			}
 		}
-		if max(int(palette[3].R), int(palette[3].G), int(palette[3].B)) > 75 {
+		if max(int(palette[3].R), int(palette[3].G), int(palette[3].B)) > 55 {
 			t.Fatalf("vine highlight is too bright for background growth: %v", palette[3])
 		}
 	}

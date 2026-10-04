@@ -7,7 +7,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-// Muted, matte ribbons sit against the background rock. Children inherit the
+// Ribbons shade across their width. Children inherit the
 // parent shading at their attachment, so a ribbon edge cannot cut across a fork.
 func prepareVines(vines []Vine) []triangleMesh {
 	meshes := make([]triangleMesh, 0, len(vines))
@@ -44,23 +44,26 @@ var vineBands = [...]float64{-1, -.78, -.46, -.2, .04, .3, .65, 1}
 var vineColors = [...]color.NRGBA{{42, 0, 3, 255}, {116, 1, 8, 255}, {200, 4, 13, 255}, {245, 16, 23, 255}, {210, 5, 12, 255}, {155, 1, 8, 255}, {92, 0, 5, 255}, {34, 0, 3, 255}}
 
 func vinePalette(vines []Vine, index int) [len(vineColors)]color.NRGBA {
+	if vines[vineFamily(vines, index)].Foreground {
+		return foregroundVinePalette(vines, index)
+	}
 	type paletteStyle struct {
 		tint                   [3]int
 		grayMix, brownMix, dim float64
 	}
 	styles := [...]paletteStyle{
-		{[3]int{0, 0, 0}, .80, 0, .48},
-		{[3]int{7, 2, -3}, .80, 0, .48},
-		{[3]int{-4, 1, 5}, .80, 0, .48},
-		{[3]int{12, -4, -6}, .80, 0, .48},
-		{[3]int{-8, 5, 11}, .80, 0, .48},
-		{[3]int{5, 2, -3}, .80, 0, .48},
-		{[3]int{-5, -2, 10}, .80, 0, .48},
-		{[3]int{9, -3, 0}, .80, 0, .48},
-		{[3]int{0, 0, 0}, .80, .62, .48},
-		{[3]int{0, 0, 0}, .80, .84, .48},
-		{[3]int{0, 0, 0}, 1, 0, .46},
-		{[3]int{0, 0, 0}, 1, 0, .52},
+		{[3]int{0, 0, 0}, .92, 0, .40},
+		{[3]int{7, 2, -3}, .92, 0, .40},
+		{[3]int{-4, 1, 5}, .92, 0, .40},
+		{[3]int{12, -4, -6}, .92, 0, .40},
+		{[3]int{-8, 5, 11}, .92, 0, .40},
+		{[3]int{5, 2, -3}, .92, 0, .40},
+		{[3]int{-5, -2, 10}, .92, 0, .40},
+		{[3]int{9, -3, 0}, .92, 0, .40},
+		{[3]int{0, 0, 0}, .92, .31, .40},
+		{[3]int{0, 0, 0}, .92, .42, .40},
+		{[3]int{0, 0, 0}, 1, 0, .38},
+		{[3]int{0, 0, 0}, 1, 0, .43},
 	}
 	var palette [len(vineColors)]color.NRGBA
 	family := vineFamily(vines, index)

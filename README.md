@@ -2,7 +2,9 @@
 
 A procedural rock scene with branching red vines, rendered with Ebitengine. The world starts at a bottom edge and grows infinitely upward as you scroll. Terrain is generated in the background and nearby sections are cached; returning to an evicted area regenerates the same rocks and vines from its seed.
 
-Vines use muted colors, a maximum stem width of 9 pixels, fine world-aligned grain, and a subtle one-pixel blur to sit behind the raised rock and mushrooms. Grain follows the `-texture` setting; the softened silhouette is baked into each cached vine layer.
+Background vines use muted colors, a maximum stem width of 9 pixels, fine world-aligned grain, and a subtle one-pixel blur to sit behind the raised rock and mushrooms. Grain follows the `-texture` setting; the softened silhouette is baked into each cached vine layer.
+
+Sparse foreground vines grow directly across the raised rock faces, with at most two trunks per section and a few attached branches. These stems use dusty rust and rose colors, subdued highlights, small contact shadows, and seam-following tendrils. Growth stays within the visible rock surface, including shaded faces, and leaves at least 30 pixels between the vine ribbons and guide lines to keep the crests clear. Full branches remain continuous across cached section boundaries.
 
 Tiny offshoots attach to the larger vines and trace the actual background cell edges through their junctions. Every other completed offshoot is retained for a lighter density. These slender branches taper over short lengths, inherit their parent’s subdued material, and respect the foreground rock boundaries.
 
@@ -34,6 +36,6 @@ go run . -seed 42 -study curl -view normals -output normals.png
 go run . -seed 42 -study curl -view shadows -output shadows.png
 ```
 
-Relief, shadows, rock triangulation, outlines, and vine and mushroom meshes are prepared in the background once per cached section. Background rock, foreground rock, vines, and mushrooms are polygonized concurrently, using up to `GOMAXPROCS - 1` workers (at least one) to leave CPU capacity for rendering. The game loop uploads the prepared meshes over several ticks, then adds the completed section to the scene with all its layers together. The renderer uses a shallow 2.5D surface: illumination is constant within each polygon, with depth shadows averaged over the face to preserve the faceted appearance.
+Relief, shadows, rock triangulation, outlines, and vine and mushroom meshes are prepared in the background once per cached section. Background rock, foreground rock, both vine layers, and mushrooms are polygonized concurrently, using up to `GOMAXPROCS - 1` workers (at least one) to leave CPU capacity for rendering. The game loop uploads the prepared meshes over several ticks, then adds the completed section to the scene with all its layers together. The renderer uses a shallow 2.5D surface: illumination is constant within each polygon, with depth shadows averaged over the face to preserve the faceted appearance.
 
 Run checks with `go test ./...` and `go vet ./...`. Ebitengine initializes the display for tests, so these also need a graphical session.
