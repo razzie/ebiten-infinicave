@@ -282,6 +282,18 @@ func (w *World) receive(g *Game) {
 			return
 		}
 	case 6:
+		if len(u.data.vines) > 0 && g.vineMaterial != nil {
+			softened := newSectionImage(H)
+			softened.DrawRectShader(W, H, g.vineMaterial, &ebiten.DrawRectShaderOptions{
+				Images: [4]*ebiten.Image{u.vines},
+				Uniforms: map[string]any{
+					"Offset":  []float32{0, float32(top)},
+					"Texture": float32(g.texture / 8),
+				},
+			})
+			u.vines.Deallocate()
+			u.vines = softened
+		}
 		if g.view == "shaded" || g.view == "" {
 			u.mushrooms = newSectionImage(H)
 			u.data.mushrooms.draw(u.mushrooms, w.white)

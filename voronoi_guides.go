@@ -26,6 +26,9 @@ const (
 //go:embed grain.kage
 var materialShaderSource []byte
 
+//go:embed vines.kage
+var vineShaderSource []byte
+
 type V struct{ X, Y float64 }
 
 func (a V) Add(b V) V               { return V{a.X + b.X, a.Y + b.Y} }
@@ -522,16 +525,17 @@ func edgeKey(a, b V) [4]int64 {
 }
 
 type Game struct {
-	camera      Camera
-	world       *World
-	loading     bool
-	material    *ebiten.Shader
-	texture     float64
-	seed        int64
-	output      string
-	study, view string
-	exported    bool
-	exportErr   error
+	camera       Camera
+	world        *World
+	loading      bool
+	material     *ebiten.Shader
+	vineMaterial *ebiten.Shader
+	texture      float64
+	seed         int64
+	output       string
+	study, view  string
+	exported     bool
+	exportErr    error
 }
 
 func insetForegroundGrid(grid RockGrid) RockGrid {

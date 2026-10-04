@@ -72,6 +72,9 @@ func TestVinesBranchCurlAndLimitTerrainIntrusion(t *testing.T) {
 			if vine.Depth == 2 {
 				minimum = vineMinTwigLength
 			}
+			if vine.EdgeAligned {
+				minimum = vineMinEdgeBranchLength
+			}
 			if length < minimum {
 				t.Fatalf("short blocked offshoot: %.1f", length)
 			}
@@ -81,6 +84,9 @@ func TestVinesBranchCurlAndLimitTerrainIntrusion(t *testing.T) {
 		}
 		turn := 0.0
 		for i, p := range vine.Points {
+			if p.Radius > vineMaxRadius+1e-9 {
+				t.Fatalf("vine exceeds maximum radius: %.2f", p.Radius)
+			}
 			if length <= vineThickLength && p.Radius > vineThinRadius+1e-9 {
 				t.Fatalf("short vine grew thick: length %.1f, radius %.2f", length, p.Radius)
 			}
@@ -262,10 +268,34 @@ func TestVinePalettesVaryAndStayMuted(t *testing.T) {
 				t.Fatalf("palette band %d is not dimmer and less saturated: got %v, original %v", i, muted, original)
 			}
 		}
+		if max(int(palette[3].R), int(palette[3].G), int(palette[3].B)) > 75 {
+			t.Fatalf("vine highlight is too bright for background growth: %v", palette[3])
+		}
+	}
+	if meshes := prepareVines(vines); len(meshes) != len(vines) {
+		t.Fatalf("expected one matte mesh per vine, got %d for %d stems", len(meshes), len(vines))
 	}
 }
 
-func TestVinesOnlyTouchForegroundCells(t *testing.T) {
+func TestVineWeatheringIsSubtleAndStable(t *testing.T) {
+	base := color.NRGBA{R: 72, G: 18, B: 16, A: 255}
+	first := weatherVineColor(base, V{120, 340}, 2)
+	if first != weatherVineColor(base, V{120, 340}, 2) {
+		t.Fatal("vine weathering is not deterministic")
+	}
+	second := weatherVineColor(base, V{640, 810}, 2)
+	if first == second {
+		t.Fatal("vine surface has no spatial mottling")
+	}
+	for _, weathered := range []color.NRGBA{first, second} {
+		if weathered.A != base.A || weathered.R > base.R || weathered.G > base.G || weathered.B > base.B ||
+			float64(weathered.R) < float64(base.R)*.89 || float64(weathered.G) < float64(base.G)*.89 || float64(weathered.B) < float64(base.B)*.89 {
+			t.Fatalf("vine weathering exceeded its subtle darkening range: %v", weathered)
+		}
+	}
+}
+
+func TestVinesTuckUnderForegroundCells(t *testing.T) {
 	for _, tone := range []uint8{0, 180} {
 		for _, width := range []float64{14, 180} {
 			background := testRockGrid([]V{{500, 500}}, []color.NRGBA{{30, 30, 30, 255}})
@@ -281,6 +311,13 @@ func TestVinesOnlyTouchForegroundCells(t *testing.T) {
 			}
 			if furthest < 497 {
 				t.Fatalf("tone %d, gap %.0f: vine stopped short of foreground edge at %.1f", tone, width, furthest)
+			}
+			tip := vine.Points[len(vine.Points)-1]
+			if _, inside := field.foregroundDepthAt(tip.P); !inside {
+				t.Fatalf("tone %d, gap %.0f: vine tip did not tuck beneath foreground", tone, width)
+			}
+			if tip.P.X >= 500+width {
+				t.Fatalf("tone %d, gap %.0f: vine crossed the foreground face", tone, width)
 			}
 		}
 	}
@@ -319,8 +356,8 @@ func TestVineThicknessRequiresCompletedLength(t *testing.T) {
 		if length <= 700 && radius > 3 {
 			t.Fatalf("short trunk of length %.0f retained radius %.1f", length, radius)
 		}
-		if length >= 1200 && radius != 9 {
-			t.Fatal("very long trunk lost its full thickness")
+		if length >= 1200 && radius != vineMaxRadius {
+			t.Fatal("very long trunk did not reach the capped thickness")
 		}
 		if radius < previous || vine.Points[0].Radius != 0 || vine.Points[2].Radius != 0 {
 			t.Fatal("thickness must increase with length and preserve tapered tips")

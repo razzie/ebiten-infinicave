@@ -35,8 +35,13 @@ func main() {
 		log.Fatal(err)
 	}
 	defer material.Deallocate()
+	vineMaterial, err := ebiten.NewShader(vineShaderSource)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer vineMaterial.Deallocate()
 
-	g := &Game{seed: *seed, output: *output, material: material, texture: *texture, study: *study, view: *view}
+	g := &Game{seed: *seed, output: *output, material: material, vineMaterial: vineMaterial, texture: *texture, study: *study, view: *view}
 	g.regenerate()
 	defer func() { g.world.close() }()
 
