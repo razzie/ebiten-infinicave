@@ -1,0 +1,27 @@
+//kage:unit pixels
+package main
+
+var Final float
+var Strength vec2
+
+// A separable Gaussian gives the face a quiet tint and a soft perimeter glow.
+// The second pass combines the blurred mask with the original silhouette.
+func Fragment(dst vec4, src vec2, color vec4) vec4 {
+	blur := 0.0
+	weight := 0.0
+	for i := -12; i <= 12; i++ {
+		w := exp(-float(i*i) / 32.0)
+		if Final == 0 {
+			blur += imageSrc0At(src+vec2(float(i), 0)).a * w
+		} else {
+			blur += imageSrc1At(src+vec2(0, float(i))).a * w
+		}
+		weight += w
+	}
+	blur /= weight
+	if Final == 0 {
+		return vec4(blur)
+	}
+	alpha := clamp(imageSrc0At(src).a*Strength.x + blur*Strength.y, 0.0, 1.0)
+	return vec4(vec3(1.0, .86, .60)*alpha, alpha)
+}

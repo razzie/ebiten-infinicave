@@ -30,6 +30,7 @@ type sectionMesh struct {
 	vines                  []triangleMesh
 	foregroundVines        []triangleMesh
 	mushrooms              triangleMesh
+	hover                  *hoverGeometry
 }
 
 func prepareSection(data sectionData, view string) sectionMesh {

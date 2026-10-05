@@ -24,11 +24,13 @@ type sectionData struct {
 	vines                  []Vine
 	foregroundVines        []Vine
 	mushrooms              []MushroomGroup
+	guides                 []Guide
 }
 
 type worldSection struct {
 	terrain, vines, mushrooms, foreground *ebiten.Image
 	foregroundVines                       *ebiten.Image
+	hover                                 *hoverGeometry
 }
 
 type World struct {
@@ -40,6 +42,7 @@ type World struct {
 	working  bool
 	upload   *sectionUpload
 	white    *ebiten.Image
+	revision uint64 // invalidates hover overlays when cached sections change
 }
 
 // sectionUpload spreads one section's GPU work over several frames.
@@ -153,10 +156,10 @@ func buildSectionMode(seed, id int64, study string) sectionData {
 		vines = generateVinesInBand(newVineTerrain(background, foreground), rand.New(rand.NewSource(sectionSeed(seed^0x76696e6573, id))), W, 2*W, 5)
 		foregroundVines = generateForegroundVines(foreground, guides, rand.New(rand.NewSource(sectionSeed(seed^0x73757266616365, id))))
 	}
-	return sectionData{id: id, background: background, foreground: foreground, vines: vines, foregroundVines: foregroundVines, mushrooms: mushrooms}
+	return sectionData{id: id, background: background, foreground: foreground, vines: vines, foregroundVines: foregroundVines, mushrooms: mushrooms, guides: guides}
 }
 
-func newWorld(seed int64, study, view string) *World {
+func newWorld(seed int64, study, view string, hover bool) *World {
 	w := &World{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1), results: make(chan sectionMesh, 1), done: make(chan struct{})}
 	go func() {
 		for {
@@ -171,6 +174,9 @@ func newWorld(seed int64, study, view string) *World {
 				default:
 				}
 				mesh := prepareSection(data, view)
+				if hover {
+					mesh.hover = prepareHoverGeometry(data)
+				}
 				select {
 				case <-w.done:
 					return
@@ -318,7 +324,8 @@ func (w *World) receive(g *Game) {
 			}
 		}
 	default:
-		w.sections[u.data.id] = &worldSection{terrain: u.img, vines: u.vines, mushrooms: u.mushrooms, foreground: u.foreground, foregroundVines: u.foregroundVines}
+		w.sections[u.data.id] = &worldSection{terrain: u.img, vines: u.vines, mushrooms: u.mushrooms, foreground: u.foreground, foregroundVines: u.foregroundVines, hover: u.data.hover}
+		w.revision++
 		w.upload = nil
 		return
 	}
@@ -407,6 +414,7 @@ func (w *World) prune(y float64, height int, velocity float64) {
 				section.mushrooms.Deallocate()
 			}
 			delete(w.sections, id)
+			w.revision++
 		}
 	}
 }

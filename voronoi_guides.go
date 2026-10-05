@@ -534,6 +534,8 @@ type Game struct {
 	seed         int64
 	output       string
 	study, view  string
+	hover        bool
+	highlight    *hoverRenderer
 	exported     bool
 	exportErr    error
 }
@@ -559,7 +561,10 @@ func (g *Game) regenerate() {
 	if g.world != nil {
 		g.world.close()
 	}
-	g.world = newWorld(g.seed, g.study, g.view)
+	if g.highlight != nil {
+		g.highlight.clear()
+	}
+	g.world = newWorld(g.seed, g.study, g.view, g.hover)
 }
 
 func (g *Game) Update() error {
@@ -583,6 +588,9 @@ func (g *Game) Update() error {
 
 func (g *Game) Draw(screen *ebiten.Image) {
 	g.world.draw(screen, g.camera.Y, g.camera.Height)
+	if g.hover && g.output == "" && g.highlight != nil {
+		g.drawHover(screen)
+	}
 	if g.loading {
 		ebitenutil.DebugPrint(screen, "Growing upward...")
 	}

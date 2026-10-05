@@ -24,6 +24,8 @@ Run with `go run .` (Go 1.27 and a graphical desktop). Use `-seed 42` for a repr
 
 The window is resizable. Scrolling continues while missing sections are prepared in the background, with “Growing upward…” displayed until they are ready. Rocks share world coordinates across sections, and vines keep their full geometry across boundaries.
 
+Hover over a foreground rock for a soft warm highlight and glow over its entire connected block of cells, including across cached section boundaries. Point within 6 pixels of a guide to highlight only that guide line instead. Hover effects are enabled by default; use `-hover=false` to disable them (or `-hover=true` to enable them). PNG exports never include hover effects.
+
 `go run . -seed 42 -output scene.png` exports the bottom 1000 × 2400 pixels and exits. `-texture 0` disables the surface texture.
 
 For shape studies without vines, use `-study ledge` or `-study curl`. The `-view` options are `shaded` (default), `clay`, `height`, `normals`, and `shadows`. Diagnostic views disable texture and hide vines; clay uses neutral gray material with the same lighting and exposed edges.

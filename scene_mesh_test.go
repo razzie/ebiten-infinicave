@@ -125,11 +125,14 @@ func TestPrepareSectionMatchesSerialLayers(t *testing.T) {
 }
 
 func TestWorldWorkerPreparesAllLayers(t *testing.T) {
-	w := newWorld(42, "", "shaded")
+	w := newWorld(42, "", "shaded", false)
 	defer w.close()
 	w.request(0)
 	select {
 	case mesh := <-w.results:
+		if mesh.hover != nil {
+			t.Fatal("disabled hover retained interaction geometry")
+		}
 		if mesh.id != 0 || len(mesh.background.faces.indices) == 0 || len(mesh.foreground.faces.indices) == 0 || len(mesh.vines) == 0 || len(mesh.foregroundVines) == 0 || len(mesh.mushrooms.indices) == 0 {
 			t.Fatal("worker returned incomplete section geometry")
 		}

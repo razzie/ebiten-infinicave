@@ -15,6 +15,7 @@ func main() {
 	texture := flag.Float64("texture", 8, "surface texture strength (0 disables it, range 0-16)")
 	study := flag.String("study", "", "isolated rock study: ledge or curl (no vines)")
 	view := flag.String("view", "shaded", "terrain view: shaded, clay, height, normals, shadows")
+	hover := flag.Bool("hover", true, "highlight foreground rocks and guide lines under the mouse")
 	flag.Parse()
 	if *study != "" && *study != "ledge" && *study != "curl" {
 		log.Fatal("study must be ledge or curl")
@@ -41,7 +42,14 @@ func main() {
 	}
 	defer vineMaterial.Deallocate()
 
-	g := &Game{seed: *seed, output: *output, material: material, vineMaterial: vineMaterial, texture: *texture, study: *study, view: *view}
+	g := &Game{seed: *seed, output: *output, material: material, vineMaterial: vineMaterial, texture: *texture, study: *study, view: *view, hover: *hover && *output == ""}
+	if g.hover {
+		g.highlight, err = newHoverRenderer()
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer g.highlight.close()
+	}
 	g.regenerate()
 	defer func() { g.world.close() }()
 
