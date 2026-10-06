@@ -5,6 +5,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/razzie/ebiten-infinicave"
 )
 
 const (
@@ -54,7 +55,7 @@ func (c *Camera) step() {
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
-	height := max(1, int(math.Round(float64(W)*float64(outsideHeight)/float64(max(1, outsideWidth)))))
+	height := max(1, int(math.Round(float64(infinicave.Width)*float64(outsideHeight)/float64(max(1, outsideWidth)))))
 	if g.output != "" {
 		height = exportHeight
 	}
@@ -64,7 +65,7 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	g.camera.Height = height
 	g.camera.Y = math.Min(g.camera.Y, -float64(height))
 	g.camera.Target = math.Min(g.camera.Target, -float64(height))
-	return W, height
+	return infinicave.Width, height
 }
 
 func (g *Game) updateCamera() {

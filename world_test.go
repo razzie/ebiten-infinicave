@@ -1,4 +1,4 @@
-package main
+package infinicave
 
 import (
 	"math"
@@ -152,7 +152,7 @@ func TestWorldSectionSeam(t *testing.T) {
 }
 
 func TestStreamingRequestsAndCacheStayBounded(t *testing.T) {
-	w := &World{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1)}
+	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1)}
 	if w.ensure(-800, 800, 0) {
 		t.Fatal("unloaded viewport reported ready")
 	}

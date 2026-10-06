@@ -1,4 +1,4 @@
-package main
+package infinicave
 
 import (
 	_ "embed"
@@ -17,20 +17,22 @@ const (
 //go:embed hover.kage
 var hoverShaderSource []byte
 
-type hoverFace struct {
+type terrainFace struct {
 	poly     []V
 	min, max V
 	block    int
 	key      [2]int64 // stable world-space interior point
 }
 
-// Retain the same clipped faces used for rendering, without GPU readbacks or
-// regenerating terrain while the mouse moves. Geometry belongs to its section.
-type hoverGeometry struct {
-	faces  []hoverFace
-	guides []Guide
-	blocks [][]int
-	top    float64
+// Retain the same clipped faces used for rendering and derive collision
+// boundaries from their union. Geometry belongs to its section, regardless
+// of whether the application draws hover highlights.
+type terrainGeometry struct {
+	faces     []terrainFace
+	guides    []Guide
+	blocks    [][]int
+	top       float64
+	collision CollisionGeometry
 }
 
 func polygonBounds(poly []V) (lo, hi V) {
@@ -42,8 +44,8 @@ func polygonBounds(poly []V) (lo, hi V) {
 	return
 }
 
-func prepareHoverGeometry(data sectionData) *hoverGeometry {
-	h := &hoverGeometry{guides: data.guides, top: sectionWindowTop(data.id)}
+func prepareTerrainGeometry(data sectionData, tolerance float64) *terrainGeometry {
+	h := &terrainGeometry{guides: data.guides, top: sectionWindowTop(data.id)}
 	var grid RockGrid
 	for _, cell := range insetForegroundGrid(data.foreground) {
 		if !cell.Raised || cell.Color.A == 0 {
@@ -52,7 +54,7 @@ func prepareHoverGeometry(data sectionData) *hoverGeometry {
 		lo, hi := polygonBounds(cell.Polygon)
 		center := faceCenter(cell.Polygon)
 		key := [2]int64{int64(math.Round(center.X * 1000)), int64(math.Round((center.Y + sectionWindowTop(data.id)) * 1000))}
-		h.faces = append(h.faces, hoverFace{poly: cell.Polygon, min: lo, max: hi, block: -1, key: key})
+		h.faces = append(h.faces, terrainFace{poly: cell.Polygon, min: lo, max: hi, block: -1, key: key})
 		grid = append(grid, cell)
 	}
 	// Shared edges connect an entire formation, including partial borders
@@ -75,16 +77,17 @@ func prepareHoverGeometry(data sectionData) *hoverGeometry {
 		}
 		h.blocks = append(h.blocks, queue)
 	}
+	h.collision = prepareCollisionGeometry(data.id, grid, neighbors, h, tolerance)
 	return h
 }
 
 type hoverTarget struct {
-	geometry *hoverGeometry
+	geometry *terrainGeometry
 	index    int
 	guide    bool
 }
 
-func (h *hoverGeometry) hit(p V) hoverTarget {
+func (h *terrainGeometry) hit(p V) hoverTarget {
 	if h == nil || p.X < foregroundScreenInset || p.X > W-foregroundScreenInset {
 		return hoverTarget{}
 	}
@@ -111,11 +114,11 @@ func (h *hoverGeometry) hit(p V) hoverTarget {
 	return hoverTarget{}
 }
 
-func (w *World) hoverAt(cursor V, cameraY float64, height int) hoverTarget {
+func (w *world) hoverAt(cursor V, cameraY float64, height int) hoverTarget {
 	if cursor.X < 0 || cursor.X >= W || cursor.Y < 0 || cursor.Y >= float64(height) {
 		return hoverTarget{}
 	}
-	// Match World's rounded rendering origin, including during camera glides.
+	// Match world's rounded rendering origin, including during camera glides.
 	p := cursor.Add(V{Y: math.Round(cameraY)})
 	if p.Y >= 0 {
 		return hoverTarget{}
@@ -123,7 +126,7 @@ func (w *World) hoverAt(cursor V, cameraY float64, height int) hoverTarget {
 	id := max(0, int64(math.Ceil(-p.Y/sectionHeight))-1)
 	if section := w.sections[id]; section != nil {
 		top := sectionWindowTop(id)
-		return section.hover.hit(p.Sub(V{Y: top}))
+		return section.geometry.hit(p.Sub(V{Y: top}))
 	}
 	return hoverTarget{}
 }
@@ -139,7 +142,7 @@ type hoverRenderer struct {
 
 // Overlapping generation windows share world-space faces. Follow those faces
 // between cached sections so a formation stays lit across section boundaries.
-func (w *World) hoverPolygons(target hoverTarget, low, high int64) [][]V {
+func (w *world) hoverPolygons(target hoverTarget, low, high int64) [][]V {
 	if target.guide {
 		g := target.geometry.guides[target.index]
 		poly := make([]V, len(g.Pts))
@@ -165,7 +168,7 @@ func (w *World) hoverPolygons(target hoverTarget, low, high int64) [][]V {
 	for changed := true; changed; {
 		changed = false
 		for _, id := range ids {
-			h := w.sections[id].hover
+			h := w.sections[id].geometry
 			if h == nil {
 				continue
 			}
@@ -189,7 +192,7 @@ func (w *World) hoverPolygons(target hoverTarget, low, high int64) [][]V {
 		if id < max(0, low-1) || id > high+1 {
 			continue
 		}
-		h := w.sections[id].hover
+		h := w.sections[id].geometry
 		if h == nil {
 			continue
 		}
@@ -239,7 +242,7 @@ func (r *hoverRenderer) close() {
 	r.shader.Deallocate()
 }
 
-func (r *hoverRenderer) selectTarget(target hoverTarget, w *World, low, high int64) {
+func (r *hoverRenderer) selectTarget(target hoverTarget, w *world, low, high int64) {
 	if target == r.target && (target.geometry == nil || (r.revision == w.revision && r.low == low && r.high == high)) {
 		return
 	}
@@ -302,18 +305,18 @@ func (r *hoverRenderer) selectTarget(target hoverTarget, w *World, low, high int
 	})
 }
 
-func (g *Game) drawHover(screen *ebiten.Image) {
-	if !ebiten.IsFocused() {
-		g.highlight.clear()
+// DrawHover draws an optional highlight at a cursor in logical viewport coordinates.
+// Call it after Draw. The caller controls whether the cursor is active or focused.
+func (g *Scene) DrawHover(screen *ebiten.Image, viewport Viewport, x, y float64) {
+	if g.closed || g.highlight == nil || !viewport.valid() {
 		return
 	}
-	x, y := ebiten.CursorPositionF()
-	target := g.world.hoverAt(V{x, y}, g.camera.Y, g.camera.Height)
-	low, high := visibleSections(math.Round(g.camera.Y), g.camera.Height)
+	target := g.world.hoverAt(V{x, y}, viewport.Y, viewport.Height)
+	low, high := visibleSections(math.Round(viewport.Y), viewport.Height)
 	g.highlight.selectTarget(target, g.world, low, high)
 	if g.highlight.image != nil {
 		op := &ebiten.DrawImageOptions{}
-		op.GeoM.Translate(g.highlight.origin.X, g.highlight.origin.Y-math.Round(g.camera.Y))
+		op.GeoM.Translate(g.highlight.origin.X, g.highlight.origin.Y-math.Round(viewport.Y))
 		screen.DrawImage(g.highlight.image, op)
 	}
 }

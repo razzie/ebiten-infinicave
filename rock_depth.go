@@ -1,4 +1,4 @@
-package main
+package infinicave
 
 import (
 	"math"
@@ -25,7 +25,7 @@ func (c RockCell) depthAt(p V) float64 {
 	return clamp(z, c.Z-4, c.Z+4)
 }
 
-// Rasterize real faces into a shared height buffer. World-aligned samples and
+// Rasterize real faces into a shared height buffer. world-aligned samples and
 // the generation padding keep shadow queries identical across section seams.
 func newRockDepth(grids ...RockGrid) *rockDepth {
 	d := &rockDepth{heights: make([]float64, rockDepthWidth*rockDepthHeight)}

@@ -1,4 +1,4 @@
-package main
+package infinicave
 
 import (
 	"image/color"
@@ -100,7 +100,7 @@ func TestExposedRockEdgesCancelPartialNeighbors(t *testing.T) {
 		grid[i].Shadow, grid[i].Ambient = 1, 1
 		grid[i].Color = color.NRGBA{R: 100, G: 100, B: 100, A: 255}
 	}
-	vertices, indices := appendRockWalls(nil, nil, grid, edges, "clay")
+	vertices, indices := appendRockWalls(nil, nil, grid, edges, ViewClay)
 	if len(indices) == 0 {
 		t.Fatal("raised silhouette has no side geometry")
 	}

@@ -1,4 +1,4 @@
-module voronoi-guides
+module github.com/razzie/ebiten-infinicave
 
 go 1.27.0
 

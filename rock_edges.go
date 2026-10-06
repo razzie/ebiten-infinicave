@@ -1,4 +1,4 @@
-package main
+package infinicave
 
 import (
 	"image/color"
@@ -16,7 +16,10 @@ type rockEdge struct {
 // Subdivide partial shared edges before cancellation, so merged guide faces
 // never grow a side wall through a neighboring rock. Corner contacts survive.
 func exposedRockEdges(grid RockGrid) []rockEdge {
-	neighbors := rockNeighbors(grid)
+	return rockBoundaryEdges(grid, rockNeighbors(grid), false)
+}
+
+func rockBoundaryEdges(grid RockGrid, neighbors [][]int, includeWindow bool) []rockEdge {
 	type entry struct {
 		edge  rockEdge
 		count int
@@ -30,7 +33,7 @@ func exposedRockEdges(grid RockGrid) []rockEdge {
 				continue
 			}
 			// Generation-window cuts have no physical thickness.
-			if (a.X == b.X && (a.X == 0 || a.X == W)) || (a.Y == b.Y && (a.Y == 0 || a.Y == H)) {
+			if !includeWindow && ((a.X == b.X && (a.X == 0 || a.X == W)) || (a.Y == b.Y && (a.Y == 0 || a.Y == H))) {
 				continue
 			}
 			ts := []float64{0, 1}
@@ -91,7 +94,7 @@ func appendRockQuad(vertices []ebiten.Vertex, indices []uint32, points [4]V, clr
 
 // A shallow oblique view exposes the drop below a silhouette. Draw walls
 // before the top faces; their inward portions are naturally hidden by rock.
-func appendRockWalls(vertices []ebiten.Vertex, indices []uint32, grid RockGrid, edges []rockEdge, viewMode string) ([]ebiten.Vertex, []uint32) {
+func appendRockWalls(vertices []ebiten.Vertex, indices []uint32, grid RockGrid, edges []rockEdge, viewMode View) ([]ebiten.Vertex, []uint32) {
 	if len(grid) == 0 || !grid[0].Raised {
 		return vertices, indices
 	}
@@ -113,17 +116,17 @@ func appendRockWalls(vertices []ebiten.Vertex, indices []uint32, grid RockGrid, 
 	return vertices, indices
 }
 
-func rockViewColor(c RockCell, view string) color.NRGBA {
+func rockViewColor(c RockCell, view View) color.NRGBA {
 	switch view {
-	case "height":
+	case ViewHeight:
 		v := uint8(math.Round(255 * clamp((c.Z+12)/112, 0, 1)))
 		return color.NRGBA{v, v, v, 255}
-	case "normals":
+	case ViewNormals:
 		return color.NRGBA{uint8(127.5 * (c.Normal.X + 1)), uint8(127.5 * (c.Normal.Y + 1)), uint8(127.5 * (c.Normal.Z + 1)), 255}
-	case "shadows":
+	case ViewShadows:
 		v := uint8(math.Round(255 * c.Shadow))
 		return color.NRGBA{v, v, v, 255}
-	case "clay":
+	case ViewClay:
 		v := uint8(math.Round(.30*float64(c.Color.R) + .59*float64(c.Color.G) + .11*float64(c.Color.B)))
 		return color.NRGBA{v, v, v, c.Color.A}
 	}
@@ -132,7 +135,7 @@ func rockViewColor(c RockCell, view string) color.NRGBA {
 
 // A restrained bevel belongs only to an exposed silhouette. Internal cell
 // edges have neither a raised rim nor a lighting seam from triangulation.
-func appendRockBevels(vertices []ebiten.Vertex, indices []uint32, grid RockGrid, edges []rockEdge, view string) ([]ebiten.Vertex, []uint32) {
+func appendRockBevels(vertices []ebiten.Vertex, indices []uint32, grid RockGrid, edges []rockEdge, view View) ([]ebiten.Vertex, []uint32) {
 	for _, edge := range edges {
 		c := grid[edge.Cell]
 		inward := edge.B.Sub(edge.A).Perp().Norm()

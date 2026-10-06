@@ -1,16 +1,12 @@
-package main
+package infinicave
 
 import (
 	_ "embed"
 	"image/color"
-	"image/png"
 	"math"
 	"math/rand"
-	"os"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
-	"github.com/hajimehoshi/ebiten/v2/inpututil"
 )
 
 const (
@@ -524,22 +520,6 @@ func edgeKey(a, b V) [4]int64 {
 	return [4]int64{ax, ay, bx, by}
 }
 
-type Game struct {
-	camera       Camera
-	world        *World
-	loading      bool
-	material     *ebiten.Shader
-	vineMaterial *ebiten.Shader
-	texture      float64
-	seed         int64
-	output       string
-	study, view  string
-	hover        bool
-	highlight    *hoverRenderer
-	exported     bool
-	exportErr    error
-}
-
 func insetForegroundGrid(grid RockGrid) RockGrid {
 	clipped := make(RockGrid, 0, len(grid))
 	for _, cell := range grid {
@@ -555,58 +535,4 @@ func insetForegroundGrid(grid RockGrid) RockGrid {
 		clipped = append(clipped, cell)
 	}
 	return clipped
-}
-
-func (g *Game) regenerate() {
-	if g.world != nil {
-		g.world.close()
-	}
-	if g.highlight != nil {
-		g.highlight.clear()
-	}
-	g.world = newWorld(g.seed, g.study, g.view, g.hover)
-}
-
-func (g *Game) Update() error {
-	if g.exported {
-		if g.exportErr != nil {
-			return g.exportErr
-		}
-		return ebiten.Termination
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyR) {
-		g.seed++
-		g.regenerate()
-	}
-	g.world.receive(g)
-	g.updateCamera()
-	g.camera.step()
-	g.loading = !g.world.ensure(g.camera.Y, g.camera.Height, g.camera.Velocity)
-	g.world.prune(g.camera.Y, g.camera.Height, g.camera.Velocity)
-	return nil
-}
-
-func (g *Game) Draw(screen *ebiten.Image) {
-	g.world.draw(screen, g.camera.Y, g.camera.Height)
-	if g.hover && g.output == "" && g.highlight != nil {
-		g.drawHover(screen)
-	}
-	if g.loading {
-		ebitenutil.DebugPrint(screen, "Growing upward...")
-	}
-	if g.output != "" && !g.exported && !g.loading {
-		g.exported = true
-		img := ebiten.NewImage(W, exportHeight)
-		defer img.Deallocate()
-		g.world.draw(img, -exportHeight, exportHeight)
-		f, err := os.Create(g.output)
-		if err != nil {
-			g.exportErr = err
-			return
-		}
-		g.exportErr = png.Encode(f, img)
-		if err := f.Close(); g.exportErr == nil {
-			g.exportErr = err
-		}
-	}
 }

@@ -1,4 +1,4 @@
-package main
+package infinicave
 
 import (
 	"fmt"
@@ -34,7 +34,7 @@ func TestPreparedOutlinesPreserveBlackPockets(t *testing.T) {
 		{Center: V{5, 5}, Polygon: []V{{0, 0}, {10, 0}, {10, 10}, {0, 10}}, Normal: V3{Z: 1}, Color: color.NRGBA{A: 255}},
 		{Center: V{15, 5}, Polygon: []V{{10, 0}, {20, 0}, {20, 10}, {10, 10}}, Normal: V3{Z: 1}, Color: color.NRGBA{R: 60, G: 60, B: 60, A: 255}},
 	}
-	mesh := prepareGrid(grid, "shaded")
+	mesh := prepareGrid(grid, ViewShaded)
 	if len(mesh.faces.indices) == 0 || len(mesh.outlines) == 0 {
 		t.Fatal("visible rock lost its faces or outlines")
 	}
@@ -53,7 +53,7 @@ func TestPreparedOutlinesPreserveBlackPockets(t *testing.T) {
 			}
 		}
 	}
-	for _, view := range []string{"clay", "height", "normals", "shadows"} {
+	for _, view := range []View{ViewClay, ViewHeight, ViewNormals, ViewShadows} {
 		if diagnostic := prepareGrid(grid, view); len(diagnostic.outlines) != 0 || len(diagnostic.faces.indices) == 0 {
 			t.Fatalf("view %s lost faces or gained outlines", view)
 		}
@@ -68,7 +68,7 @@ func TestLargePreparedOutlineGroups(t *testing.T) {
 		x, y := float64(i%100)*8, float64(i/100)*8
 		grid[i] = RockCell{Center: V{x + 2, y + 2}, Polygon: []V{{x, y}, {x + 4, y}, {x + 4, y + 4}, {x, y + 4}}, Normal: V3{Z: 1}, Color: color.NRGBA{R: 60, G: 60, B: 60, A: 255}}
 	}
-	mesh := prepareGrid(grid, "shaded")
+	mesh := prepareGrid(grid, ViewShaded)
 	total := 0
 	for _, outline := range mesh.outlines {
 		checkMesh(t, outline)
@@ -80,7 +80,7 @@ func TestLargePreparedOutlineGroups(t *testing.T) {
 	if total <= 1<<16 || len(mesh.outlines) < 2 {
 		t.Fatal("test did not exercise large outline splitting")
 	}
-	if !reflect.DeepEqual(mesh, prepareGrid(grid, "shaded")) {
+	if !reflect.DeepEqual(mesh, prepareGrid(grid, ViewShaded)) {
 		t.Fatal("prepared geometry changed on revisiting a section")
 	}
 }
@@ -106,9 +106,9 @@ func TestPrepareSectionMatchesSerialLayers(t *testing.T) {
 	}
 	previous := runtime.GOMAXPROCS(0)
 	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
-	for _, view := range []string{"", "shaded", "clay", "height", "normals", "shadows"} {
+	for _, view := range []View{ViewShaded, ViewClay, ViewHeight, ViewNormals, ViewShadows} {
 		want := sectionMesh{id: data.id, background: prepareGrid(data.background, view), foreground: prepareGrid(data.foreground, view)}
-		if view == "" || view == "shaded" {
+		if view == ViewShaded {
 			want.vines = prepareVines(data.vines)
 			want.foregroundVines = prepareForegroundVines(data.foregroundVines)
 			want.mushrooms = prepareMushrooms(data.mushrooms)
@@ -125,13 +125,13 @@ func TestPrepareSectionMatchesSerialLayers(t *testing.T) {
 }
 
 func TestWorldWorkerPreparesAllLayers(t *testing.T) {
-	w := newWorld(42, "", "shaded", false)
+	w := newWorld(42, StudyNone, ViewShaded, 0)
 	defer w.close()
 	w.request(0)
 	select {
 	case mesh := <-w.results:
-		if mesh.hover != nil {
-			t.Fatal("disabled hover retained interaction geometry")
+		if mesh.geometry == nil || len(mesh.geometry.collision.Polygons) == 0 {
+			t.Fatal("worker omitted collision geometry")
 		}
 		if mesh.id != 0 || len(mesh.background.faces.indices) == 0 || len(mesh.foreground.faces.indices) == 0 || len(mesh.vines) == 0 || len(mesh.foregroundVines) == 0 || len(mesh.mushrooms.indices) == 0 {
 			t.Fatal("worker returned incomplete section geometry")
@@ -153,11 +153,11 @@ func TestWorldWorkerPreparesAllLayers(t *testing.T) {
 }
 
 func TestSectionUploadsAreBoundedAndPublishedTogether(t *testing.T) {
-	w := &World{sections: make(map[int64]*worldSection), results: make(chan sectionMesh, 1), done: make(chan struct{}), working: true}
+	w := &world{sections: make(map[int64]*worldSection), results: make(chan sectionMesh, 1), done: make(chan struct{}), working: true}
 	defer w.close()
 	// Empty meshes isolate scheduling from rendering and shader setup.
 	w.results <- sectionMesh{id: 0, background: gridMesh{outlines: make([]triangleMesh, uploadDrawsPerTick*2+1)}, vines: make([]triangleMesh, uploadDrawsPerTick*2+1), foregroundVines: make([]triangleMesh, uploadDrawsPerTick*2+1)}
-	g := &Game{world: w, view: "shaded"}
+	g := &Scene{world: w, view: ViewShaded}
 	w.receive(g)
 	if w.upload == nil || w.working {
 		t.Fatal("result was not handed off to the upload queue")
@@ -193,6 +193,6 @@ func BenchmarkPrepareSection(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		prepareSection(data, "shaded")
+		prepareSection(data, ViewShaded)
 	}
 }

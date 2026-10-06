@@ -1,4 +1,4 @@
-package main
+package infinicave
 
 import (
 	"math"
@@ -30,15 +30,15 @@ type sectionMesh struct {
 	vines                  []triangleMesh
 	foregroundVines        []triangleMesh
 	mushrooms              triangleMesh
-	hover                  *hoverGeometry
+	geometry               *terrainGeometry
 }
 
-func prepareSection(data sectionData, view string) sectionMesh {
+func prepareSection(data sectionData, view View) sectionMesh {
 	mesh := sectionMesh{id: data.id}
 	jobs := make(chan func(), 5)
 	jobs <- func() { mesh.background = prepareGrid(data.background, view) }
 	jobs <- func() { mesh.foreground = prepareGrid(data.foreground, view) }
-	if view == "shaded" || view == "" {
+	if view == ViewShaded {
 		jobs <- func() { mesh.vines = prepareVines(data.vines) }
 		jobs <- func() { mesh.foregroundVines = prepareForegroundVines(data.foregroundVines) }
 		jobs <- func() { mesh.mushrooms = prepareMushrooms(data.mushrooms) }
@@ -77,7 +77,7 @@ func (m triangleMesh) draw(dst, white *ebiten.Image) {
 	dst.DrawTriangles32(m.vertices, m.indices, white, op)
 }
 
-func (g *Game) drawGridFaces(dst *ebiten.Image, mesh triangleMesh, top float64) {
+func (g *Scene) drawGridFaces(dst *ebiten.Image, mesh triangleMesh, top float64) {
 	if len(mesh.indices) == 0 {
 		return
 	}
@@ -92,14 +92,14 @@ func (g *Game) drawGridFaces(dst *ebiten.Image, mesh triangleMesh, top float64) 
 
 // Render each tessellation separately so transparent guide cells contribute
 // neither faces nor outlines, and the foreground covers the background mesh.
-func prepareGrid(grid RockGrid, view string) gridMesh {
+func prepareGrid(grid RockGrid, view View) gridMesh {
 	if len(grid) > 0 && grid[0].Raised {
 		grid = insetForegroundGrid(grid)
 	}
 	vertices := make([]ebiten.Vertex, 0, len(grid)*18)
 	indices := make([]uint32, 0, len(grid)*18)
 	var boundary []rockEdge
-	if len(grid) > 0 && grid[0].Raised && (view == "shaded" || view == "" || view == "clay") {
+	if len(grid) > 0 && grid[0].Raised && (view == ViewShaded || view == ViewClay) {
 		boundary = exposedRockEdges(grid)
 		vertices, indices = appendRockWalls(vertices, indices, grid, boundary, view)
 	}
@@ -123,7 +123,7 @@ func prepareGrid(grid RockGrid, view string) gridMesh {
 				hiddenEdges[key] = true
 			}
 			alpha := uint8(math.Round((96 + 28*surfaceLight(cell.Normal)) * float64(clr.A) / 255))
-			if view != "shaded" && view != "" {
+			if view != ViewShaded {
 				alpha = 0
 			}
 			if previous, ok := edges[key]; !ok || alpha > previous.alpha {

@@ -1,4 +1,4 @@
-package main
+package infinicave
 
 import (
 	"image/color"
@@ -33,7 +33,7 @@ func TestHoverConnectedBlocks(t *testing.T) {
 	background := hoverRect(350, 1100, 40, 40)
 	background.Raised = false
 	grid = append(grid, background)
-	h := prepareHoverGeometry(sectionData{foreground: grid})
+	h := prepareTerrainGeometry(sectionData{foreground: grid}, 0)
 	if len(h.blocks) != 4 {
 		t.Fatalf("got %d blocks, want 4", len(h.blocks))
 	}
@@ -57,9 +57,9 @@ func TestHoverConnectedBlocks(t *testing.T) {
 
 func TestHoverGuidePriorityAndScreenInset(t *testing.T) {
 	g := splineGuide([]V{{30, 1100}, {100, 1100}}, 1)
-	h := prepareHoverGeometry(sectionData{
+	h := prepareTerrainGeometry(sectionData{
 		foreground: RockGrid{hoverRect(0, 1080, 120, 60)}, guides: []Guide{g},
-	})
+	}, 0)
 	for _, p := range []V{{60, 1100}, {60, 1106}, {27, 1100}} {
 		if got := h.hit(p); got.geometry != h || !got.guide {
 			t.Fatalf("point %v should highlight only the guide", p)
@@ -77,10 +77,10 @@ func TestHoverGuidePriorityAndScreenInset(t *testing.T) {
 }
 
 func TestHoverWorldCoordinatesAndMissingSections(t *testing.T) {
-	w := &World{sections: map[int64]*worldSection{}}
+	w := &world{sections: map[int64]*worldSection{}}
 	for _, id := range []int64{0, 1} {
-		h := prepareHoverGeometry(sectionData{id: id, foreground: RockGrid{hoverRect(30, 1000, 30, 30)}})
-		w.sections[id] = &worldSection{hover: h}
+		h := prepareTerrainGeometry(sectionData{id: id, foreground: RockGrid{hoverRect(30, 1000, 30, 30)}}, 0)
+		w.sections[id] = &worldSection{geometry: h}
 	}
 	for _, tc := range []struct {
 		camera float64
@@ -93,7 +93,7 @@ func TestHoverWorldCoordinatesAndMissingSections(t *testing.T) {
 		{-1500, V{40, 510}, 0},
 	} {
 		target := w.hoverAt(tc.cursor, tc.camera, 800)
-		if target.geometry != w.sections[tc.id].hover {
+		if target.geometry != w.sections[tc.id].geometry {
 			t.Fatalf("camera %v and cursor %v did not match the rendered section", tc.camera, tc.cursor)
 		}
 	}
@@ -121,11 +121,11 @@ func TestHoverBlockAcrossSections(t *testing.T) {
 		{id: 0, foreground: RockGrid{hoverRect(30, 980, 30, 40), hoverRect(100, 980, 30, 40)}},
 		{id: 1, foreground: RockGrid{hoverRect(30, 1980, 30, 40), hoverRect(30, 1940, 30, 40), hoverRect(100, 1980, 30, 40)}},
 	}
-	w := &World{sections: map[int64]*worldSection{}}
+	w := &world{sections: map[int64]*worldSection{}}
 	for _, d := range data {
-		w.sections[d.id] = &worldSection{hover: prepareHoverGeometry(d)}
+		w.sections[d.id] = &worldSection{geometry: prepareTerrainGeometry(d, 0)}
 	}
-	target := w.sections[0].hover.hit(V{40, 1010})
+	target := w.sections[0].geometry.hit(V{40, 1010})
 	polys := w.hoverPolygons(target, 0, 1)
 	area := 0.0
 	for _, poly := range polys {
@@ -140,7 +140,7 @@ func TestHoverBlockAcrossSections(t *testing.T) {
 		t.Fatalf("highlighted area %v, want the entire 2400 pixel formation without duplicated overlaps", area)
 	}
 	// Reloading the neighbor must discover its new geometry, not keep stale pointers.
-	w.sections[1].hover = prepareHoverGeometry(data[1])
+	w.sections[1].geometry = prepareTerrainGeometry(data[1], 0)
 	if got := w.hoverPolygons(target, 0, 1); len(got) != len(polys) {
 		t.Fatal("reloaded neighbor broke connected hover highlighting")
 	}
@@ -152,8 +152,8 @@ func TestHoverShaderAndOverlayCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.close()
-	h := prepareHoverGeometry(sectionData{foreground: RockGrid{hoverRect(30, 1100, 30, 30), hoverRect(60, 1100, 30, 30)}})
-	w := &World{sections: map[int64]*worldSection{0: {hover: h}}}
+	h := prepareTerrainGeometry(sectionData{foreground: RockGrid{hoverRect(30, 1100, 30, 30), hoverRect(60, 1100, 30, 30)}}, 0)
+	w := &world{sections: map[int64]*worldSection{0: {geometry: h}}}
 	r.selectTarget(h.hit(V{40, 1110}), w, 0, 0)
 	if r.image == nil || r.image.Bounds().Dx() != 92 {
 		t.Fatal("overlay did not span the entire connected block plus glow padding")
@@ -174,14 +174,14 @@ func TestHoverShaderAndOverlayCache(t *testing.T) {
 	}
 }
 
-func TestHoverWorkerRetainsGeometry(t *testing.T) {
-	w := newWorld(42, "ledge", "clay", true)
+func TestDiagnosticWorkerRetainsTerrainGeometry(t *testing.T) {
+	w := newWorld(42, StudyLedge, ViewClay, 0)
 	defer w.close()
 	w.request(0)
 	select {
 	case mesh := <-w.results:
-		if mesh.hover == nil || len(mesh.hover.blocks) == 0 || len(mesh.hover.guides) == 0 {
-			t.Fatal("enabled hover lost the foreground blocks or guide lines")
+		if mesh.geometry == nil || len(mesh.geometry.blocks) == 0 || len(mesh.geometry.guides) == 0 || len(mesh.geometry.collision.Polygons) == 0 {
+			t.Fatal("diagnostic view lost terrain or collision geometry")
 		}
 	case <-time.After(20 * time.Second):
 		t.Fatal("hover geometry preparation stalled")

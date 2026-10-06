@@ -1,4 +1,4 @@
-package main
+package infinicave
 
 import (
 	"image"
@@ -12,7 +12,6 @@ import (
 
 const (
 	sectionHeight = W
-	exportHeight  = 2400
 )
 
 // Each section is generated with a full section of padding on either side.
@@ -30,10 +29,10 @@ type sectionData struct {
 type worldSection struct {
 	terrain, vines, mushrooms, foreground *ebiten.Image
 	foregroundVines                       *ebiten.Image
-	hover                                 *hoverGeometry
+	geometry                              *terrainGeometry
 }
 
-type World struct {
+type world struct {
 	sections map[int64]*worldSection
 	jobs     chan int64
 	results  chan sectionMesh
@@ -120,23 +119,23 @@ func worldSeeds(seed int64, top float64, noise *Perlin) []V {
 }
 
 func buildSection(seed, id int64) sectionData {
-	return buildSectionMode(seed, id, "")
+	return buildSectionMode(seed, id, StudyNone)
 }
 
-func buildSectionMode(seed, id int64, study string) sectionData {
+func buildSectionMode(seed, id int64, study Study) sectionData {
 	top := sectionWindowTop(id)
 	backgroundNoise := NewPerlin(rand.New(rand.NewSource(seed ^ 0x62617365)))
 	backgroundNoise.OffsetY = top
 	noise := NewPerlin(rand.New(rand.NewSource(seed)))
 	noise.OffsetY = top
 	guides := worldGuides(seed, id)
-	if study != "" {
+	if study != StudyNone {
 		guides = studyGuides(id, study)
 	}
 	backgroundSeeds := worldSeeds(seed^0x62617365, top, backgroundNoise)
 	seeds := artisticRockSeeds(worldSeeds(seed, top, noise), guides, seed, top)
 	var branches *BranchField
-	if study == "" {
+	if study == StudyNone {
 		branches = newBranchField(generateBranches(guides, noise, rand.New(rand.NewSource(seed))))
 	}
 	background := newRockGrid(backgroundSeeds, func(V) color.NRGBA { return color.NRGBA{A: 255} })
@@ -152,15 +151,15 @@ func buildSectionMode(seed, id int64, study string) sectionData {
 	shadeRockGrids(background, foreground, backgroundNoise)
 	mushrooms := mushroomsForGuides(guides, insetForegroundGrid(foreground))
 	var vines, foregroundVines []Vine
-	if study == "" {
+	if study == StudyNone {
 		vines = generateVinesInBand(newVineTerrain(background, foreground), rand.New(rand.NewSource(sectionSeed(seed^0x76696e6573, id))), W, 2*W, 5)
 		foregroundVines = generateForegroundVines(foreground, guides, rand.New(rand.NewSource(sectionSeed(seed^0x73757266616365, id))))
 	}
 	return sectionData{id: id, background: background, foreground: foreground, vines: vines, foregroundVines: foregroundVines, mushrooms: mushrooms, guides: guides}
 }
 
-func newWorld(seed int64, study, view string, hover bool) *World {
-	w := &World{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1), results: make(chan sectionMesh, 1), done: make(chan struct{})}
+func newWorld(seed int64, study Study, view View, tolerance float64) *world {
+	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1), results: make(chan sectionMesh, 1), done: make(chan struct{})}
 	go func() {
 		for {
 			select {
@@ -174,9 +173,7 @@ func newWorld(seed int64, study, view string, hover bool) *World {
 				default:
 				}
 				mesh := prepareSection(data, view)
-				if hover {
-					mesh.hover = prepareHoverGeometry(data)
-				}
+				mesh.geometry = prepareTerrainGeometry(data, tolerance)
 				select {
 				case <-w.done:
 					return
@@ -188,7 +185,7 @@ func newWorld(seed int64, study, view string, hover bool) *World {
 	return w
 }
 
-func (w *World) close() {
+func (w *world) close() {
 	w.closing.Do(func() { close(w.done) })
 	if w.upload != nil && w.upload.img != nil {
 		w.upload.img.Deallocate()
@@ -236,7 +233,7 @@ func newSectionImage(height int) *ebiten.Image {
 // uploads. CPU tessellation has already finished before a result arrives.
 const uploadDrawsPerTick = 4
 
-func (w *World) uploadMeshes(dst *ebiten.Image, meshes []triangleMesh) bool {
+func (w *world) uploadMeshes(dst *ebiten.Image, meshes []triangleMesh) bool {
 	u := w.upload
 	end := min(u.next+uploadDrawsPerTick, len(meshes))
 	for ; u.next < end; u.next++ {
@@ -247,7 +244,7 @@ func (w *World) uploadMeshes(dst *ebiten.Image, meshes []triangleMesh) bool {
 
 // GPU resources stay on the game thread. Publish all layers together only
 // after their uploads finish, so drawing never sees a partial section.
-func (w *World) receive(g *Game) {
+func (w *world) receive(g *Scene) {
 	if w.upload == nil {
 		select {
 		case data := <-w.results:
@@ -310,7 +307,7 @@ func (w *World) receive(g *Game) {
 			u.vines.Deallocate()
 			u.vines = softened
 		}
-		if g.view == "shaded" || g.view == "" {
+		if g.view == ViewShaded {
 			u.mushrooms = newSectionImage(H)
 			u.data.mushrooms.draw(u.mushrooms, w.white)
 		}
@@ -324,7 +321,7 @@ func (w *World) receive(g *Game) {
 			}
 		}
 	default:
-		w.sections[u.data.id] = &worldSection{terrain: u.img, vines: u.vines, mushrooms: u.mushrooms, foreground: u.foreground, foregroundVines: u.foregroundVines, hover: u.data.hover}
+		w.sections[u.data.id] = &worldSection{terrain: u.img, vines: u.vines, mushrooms: u.mushrooms, foreground: u.foreground, foregroundVines: u.foregroundVines, geometry: u.data.geometry}
 		w.revision++
 		w.upload = nil
 		return
@@ -339,7 +336,7 @@ func visibleSections(y float64, height int) (low, high int64) {
 	return
 }
 
-func (w *World) request(id int64) {
+func (w *world) request(id int64) {
 	if !w.working {
 		w.working = true
 		w.jobs <- id
@@ -372,7 +369,7 @@ func prefetch(y float64, height int, velocity float64) (ids []int64, required in
 
 // ensure never blocks: it queues the most useful missing section and reports
 // whether everything the viewport needs is already built.
-func (w *World) ensure(y float64, height int, velocity float64) bool {
+func (w *world) ensure(y float64, height int, velocity float64) bool {
 	ids, required := prefetch(y, height, velocity)
 	ready := true
 	for i, id := range ids {
@@ -392,7 +389,7 @@ func (w *World) ensure(y float64, height int, velocity float64) bool {
 	return ready
 }
 
-func (w *World) prune(y float64, height int, velocity float64) {
+func (w *world) prune(y float64, height int, velocity float64) {
 	low, high := visibleSections(y, height)
 	ids, _ := prefetch(y, height, velocity)
 	keep := make(map[int64]bool, len(ids))
@@ -419,7 +416,7 @@ func (w *World) prune(y float64, height int, velocity float64) {
 	}
 }
 
-func (w *World) draw(dst *ebiten.Image, y float64, height int) {
+func (w *world) draw(dst *ebiten.Image, y float64, height int) {
 	y = math.Round(y)
 	low, high := visibleSections(y, height)
 	for id := low; id <= high; id++ {
