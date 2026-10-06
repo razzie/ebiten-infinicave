@@ -52,7 +52,7 @@ type siteGrid struct {
 
 func newSiteGrid(pts []V) *siteGrid {
 	g := &siteGrid{pts: pts, size: 24}
-	g.cols, g.rows = int(W/g.size)+1, int(H/g.size)+1
+	g.cols, g.rows = int(generationWidth/g.size)+1, int(generationHeight/g.size)+1
 	g.buckets = make([][]int32, g.cols*g.rows)
 	for i, p := range pts {
 		cx, cy := g.cellOf(p)
@@ -69,7 +69,7 @@ func (g *siteGrid) cellOf(p V) (int, int) {
 // buckets are clipped nearest first until the next ring is out of reach.
 func (g *siteGrid) cell(i int) []V {
 	a := g.pts[i]
-	poly := []V{{0, 0}, {W, 0}, {W, H}, {0, H}}
+	poly := []V{{0, 0}, {generationWidth, 0}, {generationWidth, generationHeight}, {0, generationHeight}}
 	cx, cy := g.cellOf(a)
 	var ring []int32
 	reach2 := math.Inf(1)
@@ -126,7 +126,7 @@ func (g *siteGrid) cell(i int) []V {
 		}
 	}
 	sort.Slice(ring, func(p, q int) bool { return ring[p] < ring[q] })
-	poly = []V{{0, 0}, {W, 0}, {W, H}, {0, H}}
+	poly = []V{{0, 0}, {generationWidth, 0}, {generationWidth, generationHeight}, {0, generationHeight}}
 	for _, j := range ring {
 		b := g.pts[j]
 		poly = clipHalfPlane(poly, b.Sub(a), 0.5*(b.Len2()-a.Len2()))

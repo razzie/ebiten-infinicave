@@ -103,7 +103,7 @@ func TestHoverWorldCoordinatesAndMissingSections(t *testing.T) {
 	}{
 		{-3000, V{40, 10}}, // missing section
 		{-800, V{-1, 10}},
-		{-800, V{W, 10}},
+		{-800, V{generationWidth, 10}},
 		{-800, V{40, -1}},
 		{-800, V{40, 800}},
 		{0, V{40, 0}}, // below world floor

@@ -41,7 +41,7 @@ func TestWorldSeedsMatchOverlappingWindows(t *testing.T) {
 func TestForegroundGridStaysInsideHorizontalScreenInset(t *testing.T) {
 	grid := RockGrid{
 		{Center: V{10, 50}, Polygon: []V{{0, 0}, {40, 0}, {40, 100}, {0, 100}}, Raised: true},
-		{Center: V{W - 10, 50}, Polygon: []V{{W - 40, 0}, {W, 0}, {W, 100}, {W - 40, 100}}, Raised: true},
+		{Center: V{generationWidth - 10, 50}, Polygon: []V{{generationWidth - 40, 0}, {generationWidth, 0}, {generationWidth, 100}, {generationWidth - 40, 100}}, Raised: true},
 	}
 	original := make([][]V, len(grid))
 	for i := range grid {
@@ -54,7 +54,7 @@ func TestForegroundGridStaysInsideHorizontalScreenInset(t *testing.T) {
 	}
 	for _, cell := range clipped {
 		for _, p := range cell.Polygon {
-			if p.X < foregroundScreenInset-1e-9 || p.X > W-foregroundScreenInset+1e-9 {
+			if p.X < foregroundScreenInset-1e-9 || p.X > generationWidth-foregroundScreenInset+1e-9 {
 				t.Fatalf("foreground vertex reaches horizontal screen edge: %v", p)
 			}
 		}
@@ -124,7 +124,7 @@ func TestWorldSectionSeam(t *testing.T) {
 					continue
 				}
 				prev := v.Points[j-1]
-				for _, edge := range []float64{W, 2 * W} {
+				for _, edge := range []float64{generationWidth, 2 * generationWidth} {
 					if (prev.P.Y-edge)*(p.P.Y-edge) < 0 && prev.Radius > 0 && p.Radius > 0 {
 						crossing = true
 					}

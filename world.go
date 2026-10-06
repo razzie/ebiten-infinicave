@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	sectionHeight = W
+	sectionHeight = generationWidth
 )
 
 // Each section is generated with a full section of padding on either side.
@@ -94,15 +94,15 @@ func worldGuides(seed, id int64) []Guide {
 func worldSeeds(seed int64, top float64, noise *Perlin) []V {
 	const step = 22.0
 	first := int64(math.Floor(top / step))
-	last := int64(math.Ceil((top + H) / step))
+	last := int64(math.Ceil((top + generationHeight) / step))
 	rows := make([][]V, last-first)
 	parallelFor(len(rows), func(n int) {
 		row := first + int64(n)
-		for col := int64(0); float64(col)*step < W; col++ {
+		for col := int64(0); float64(col)*step < generationWidth; col++ {
 			rng := rand.New(rand.NewSource(sectionSeed(sectionSeed(seed, row), col)))
 			p := V{(float64(col)+.5)*step + (rng.Float64()-.5)*step*.85,
 				(float64(row)+.5)*step + (rng.Float64()-.5)*step*.85 - top}
-			if p.X <= 1 || p.X >= W-1 || p.Y <= 1 || p.Y >= H-1 {
+			if p.X <= 1 || p.X >= generationWidth-1 || p.Y <= 1 || p.Y >= generationHeight-1 {
 				continue
 			}
 			spacing := desiredSpacing(p, noise)
@@ -152,7 +152,7 @@ func buildSectionMode(seed, id int64, study Study) sectionData {
 	mushrooms := mushroomsForGuides(guides, insetForegroundGrid(foreground))
 	var vines, foregroundVines []Vine
 	if study == StudyNone {
-		vines = generateVinesInBand(newVineTerrain(background, foreground), rand.New(rand.NewSource(sectionSeed(seed^0x76696e6573, id))), W, 2*W, 5)
+		vines = generateVinesInBand(newVineTerrain(background, foreground), rand.New(rand.NewSource(sectionSeed(seed^0x76696e6573, id))), generationWidth, 2*generationWidth, 5)
 		foregroundVines = generateForegroundVines(foreground, guides, rand.New(rand.NewSource(sectionSeed(seed^0x73757266616365, id))))
 	}
 	return sectionData{id: id, background: background, foreground: foreground, vines: vines, foregroundVines: foregroundVines, mushrooms: mushrooms, guides: guides}
@@ -226,7 +226,7 @@ func (w *world) close() {
 // Keep cached render targets out of the atlas: reallocation must not change
 // their raster origin and introduce subpixel differences on revisiting.
 func newSectionImage(height int) *ebiten.Image {
-	return ebiten.NewImageWithOptions(image.Rect(0, 0, W, height), &ebiten.NewImageOptions{Unmanaged: true})
+	return ebiten.NewImageWithOptions(image.Rect(0, 0, generationWidth, height), &ebiten.NewImageOptions{Unmanaged: true})
 }
 
 // Limit draw submissions per tick as well as separating the large layer
@@ -262,7 +262,7 @@ func (w *world) receive(g *Scene) {
 	}
 	switch u.stage {
 	case 0:
-		u.img = newSectionImage(H)
+		u.img = newSectionImage(generationHeight)
 		u.img.Fill(color.Black)
 		g.drawGridFaces(u.img, u.data.background.faces, top)
 	case 1:
@@ -270,7 +270,7 @@ func (w *world) receive(g *Scene) {
 			return
 		}
 	case 2:
-		u.foreground = newSectionImage(H)
+		u.foreground = newSectionImage(generationHeight)
 		g.drawGridFaces(u.foreground, u.data.foreground.faces, top)
 	case 3:
 		if !w.uploadMeshes(u.foreground, u.data.foreground.outlines) {
@@ -289,15 +289,15 @@ func (w *world) receive(g *Scene) {
 		u.foreground = foreground
 	case 5:
 		if u.vines == nil {
-			u.vines = newSectionImage(H)
+			u.vines = newSectionImage(generationHeight)
 		}
 		if !w.uploadMeshes(u.vines, u.data.vines) {
 			return
 		}
 	case 6:
 		if len(u.data.vines) > 0 && g.vineMaterial != nil {
-			softened := newSectionImage(H)
-			softened.DrawRectShader(W, H, g.vineMaterial, &ebiten.DrawRectShaderOptions{
+			softened := newSectionImage(generationHeight)
+			softened.DrawRectShader(generationWidth, generationHeight, g.vineMaterial, &ebiten.DrawRectShaderOptions{
 				Images: [4]*ebiten.Image{u.vines},
 				Uniforms: map[string]any{
 					"Offset":  []float32{0, float32(top)},
@@ -308,13 +308,13 @@ func (w *world) receive(g *Scene) {
 			u.vines = softened
 		}
 		if g.view == ViewShaded {
-			u.mushrooms = newSectionImage(H)
+			u.mushrooms = newSectionImage(generationHeight)
 			u.data.mushrooms.draw(u.mushrooms, w.white)
 		}
 	case 7:
 		if len(u.data.foregroundVines) > 0 {
 			if u.foregroundVines == nil {
-				u.foregroundVines = newSectionImage(H)
+				u.foregroundVines = newSectionImage(generationHeight)
 			}
 			if !w.uploadMeshes(u.foregroundVines, u.data.foregroundVines) {
 				return
@@ -330,8 +330,8 @@ func (w *world) receive(g *Scene) {
 	u.next = 0
 }
 
-func visibleSections(y float64, height int) (low, high int64) {
-	low = max(0, int64(math.Floor(-(y+float64(height))/sectionHeight)))
+func visibleSections(y float64, height float64) (low, high int64) {
+	low = max(0, int64(math.Floor(-(y+height)/sectionHeight)))
 	high = max(low, int64(math.Ceil(-y/sectionHeight))-1)
 	return
 }
@@ -345,7 +345,7 @@ func (w *world) request(id int64) {
 
 // prefetch lists sections to keep, nearest first: the viewport, its neighbors
 // (their vines may reach in), then lookahead in the direction of travel.
-func prefetch(y float64, height int, velocity float64) (ids []int64, required int) {
+func prefetch(y float64, height float64, velocity float64) (ids []int64, required int) {
 	low, high := visibleSections(y, height)
 	for id := low; id <= high; id++ {
 		ids = append(ids, id)
@@ -369,7 +369,7 @@ func prefetch(y float64, height int, velocity float64) (ids []int64, required in
 
 // ensure never blocks: it queues the most useful missing section and reports
 // whether everything the viewport needs is already built.
-func (w *world) ensure(y float64, height int, velocity float64) bool {
+func (w *world) ensure(y float64, height float64, velocity float64) bool {
 	ids, required := prefetch(y, height, velocity)
 	ready := true
 	for i, id := range ids {
@@ -389,7 +389,7 @@ func (w *world) ensure(y float64, height int, velocity float64) bool {
 	return ready
 }
 
-func (w *world) prune(y float64, height int, velocity float64) {
+func (w *world) prune(y float64, height float64, velocity float64) {
 	low, high := visibleSections(y, height)
 	ids, _ := prefetch(y, height, velocity)
 	keep := make(map[int64]bool, len(ids))
@@ -416,13 +416,15 @@ func (w *world) prune(y float64, height int, velocity float64) {
 	}
 }
 
-func (w *world) draw(dst *ebiten.Image, y float64, height int) {
+func (w *world) draw(dst *ebiten.Image, y float64, height float64) {
+	scale := float64(dst.Bounds().Dx()) / generationWidth
 	y = math.Round(y)
 	low, high := visibleSections(y, height)
 	for id := low; id <= high; id++ {
 		if section := w.sections[id]; section != nil {
 			op := &ebiten.DrawImageOptions{}
 			op.GeoM.Translate(0, sectionTop(id)-y)
+			op.GeoM.Scale(scale, scale)
 			dst.DrawImage(section.terrain, op)
 		}
 	}
@@ -431,6 +433,7 @@ func (w *world) draw(dst *ebiten.Image, y float64, height int) {
 		if section := w.sections[id]; section != nil {
 			op := &ebiten.DrawImageOptions{}
 			op.GeoM.Translate(0, sectionWindowTop(id)-y)
+			op.GeoM.Scale(scale, scale)
 			dst.DrawImage(section.vines, op)
 		}
 	}
@@ -438,6 +441,7 @@ func (w *world) draw(dst *ebiten.Image, y float64, height int) {
 		if section := w.sections[id]; section != nil && section.mushrooms != nil {
 			op := &ebiten.DrawImageOptions{}
 			op.GeoM.Translate(0, sectionWindowTop(id)-y)
+			op.GeoM.Scale(scale, scale)
 			dst.DrawImage(section.mushrooms, op)
 		}
 	}
@@ -445,6 +449,7 @@ func (w *world) draw(dst *ebiten.Image, y float64, height int) {
 		if section := w.sections[id]; section != nil {
 			op := &ebiten.DrawImageOptions{}
 			op.GeoM.Translate(0, sectionTop(id)-y)
+			op.GeoM.Scale(scale, scale)
 			dst.DrawImage(section.foreground, op)
 		}
 	}
@@ -454,6 +459,7 @@ func (w *world) draw(dst *ebiten.Image, y float64, height int) {
 		if section := w.sections[id]; section != nil && section.foregroundVines != nil {
 			op := &ebiten.DrawImageOptions{}
 			op.GeoM.Translate(0, sectionWindowTop(id)-y)
+			op.GeoM.Scale(scale, scale)
 			dst.DrawImage(section.foregroundVines, op)
 		}
 	}

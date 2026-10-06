@@ -10,7 +10,7 @@ import (
 
 func TestGuideCutsCellsWithoutAddingSites(t *testing.T) {
 	seeds := []V{{250, 480}, {750, 480}, {250, 800}, {750, 800}}
-	guides := []Guide{splineGuide([]V{{-10, 500}, {W + 10, 500}}, 1)}
+	guides := []Guide{splineGuide([]V{{-10, 500}, {generationWidth + 10, 500}}, 1)}
 	grid := newGuideRockGrid(seeds, guides, func(p V) color.NRGBA {
 		if p.Y > 500 {
 			return color.NRGBA{R: 200, A: 255}
@@ -36,7 +36,7 @@ func TestGuideCutsCellsWithoutAddingSites(t *testing.T) {
 			t.Fatal("lit fragment inherited the original shadow site's color")
 		}
 	}
-	if math.Abs(area-W*H) > 1e-6 || math.Abs(seam-2*W) > 1e-6 {
+	if math.Abs(area-generationWidth*generationHeight) > 1e-6 || math.Abs(seam-2*generationWidth) > 1e-6 {
 		t.Fatalf("faces leave gaps or fail to share the guide: area=%v seam=%v", area, seam)
 	}
 }
@@ -169,7 +169,7 @@ func TestGuideNormalsRemainContinuous(t *testing.T) {
 
 func TestVineTerrainPreservesConcaveGuideCut(t *testing.T) {
 	poly := []V{{100, 100}, {300, 100}, {300, 300}, {240, 300}, {240, 160}, {160, 160}, {160, 300}, {100, 300}}
-	background := RockGrid{{Center: V{500, 1500}, Polygon: []V{{0, 0}, {W, 0}, {W, H}, {0, H}}, Color: color.NRGBA{R: 30, G: 30, B: 30, A: 255}}}
+	background := RockGrid{{Center: V{500, 1500}, Polygon: []V{{0, 0}, {generationWidth, 0}, {generationWidth, generationHeight}, {0, generationHeight}}, Color: color.NRGBA{R: 30, G: 30, B: 30, A: 255}}}
 	foreground := RockGrid{{Center: faceCenter(poly), Polygon: poly, Color: color.NRGBA{R: 200, G: 200, B: 200, A: 255}}}
 	field := newVineTerrain(background, foreground)
 	at := func(x, y int) int { return (y/int(vineFieldStep))*vineFieldWidth + x/int(vineFieldStep) }

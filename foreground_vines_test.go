@@ -12,9 +12,9 @@ func TestForegroundVinesStayOnVisibleRock(t *testing.T) {
 	// Bright and shadowed rock share a continuous surface, with a real gap
 	// to the right. The growth field must use geometry instead of shading.
 	rock := RockGrid{
-		{Polygon: []V{{0, 0}, {400, 0}, {400, H}, {0, H}}, Color: color.NRGBA{220, 210, 190, 255}},
-		{Polygon: []V{{400, 0}, {700, 0}, {700, H}, {400, H}}, Color: color.NRGBA{8, 8, 8, 255}},
-		{Polygon: []V{{800, 0}, {W, 0}, {W, H}, {800, H}}},
+		{Polygon: []V{{0, 0}, {400, 0}, {400, generationHeight}, {0, generationHeight}}, Color: color.NRGBA{220, 210, 190, 255}},
+		{Polygon: []V{{400, 0}, {700, 0}, {700, generationHeight}, {400, generationHeight}}, Color: color.NRGBA{8, 8, 8, 255}},
+		{Polygon: []V{{800, 0}, {generationWidth, 0}, {generationWidth, generationHeight}, {800, generationHeight}}},
 	}
 	field := newForegroundVineTerrain(rock, nil)
 	for _, p := range []V{{200, 1500}, {500, 1500}, {400, 1500}} {
@@ -66,7 +66,7 @@ func TestForegroundVinesStayOnVisibleRock(t *testing.T) {
 
 func TestForegroundVinesKeepClearOfGuideLines(t *testing.T) {
 	rock := testRockGrid([]V{{500, 1500}}, []color.NRGBA{{100, 90, 80, 255}})
-	guides := []Guide{splineGuide([]V{{350, 0}, {420, 1000}, {300, 2000}, {380, H}}, 1)}
+	guides := []Guide{splineGuide([]V{{350, 0}, {420, 1000}, {300, 2000}, {380, generationHeight}}, 1)}
 	field := newForegroundVineTerrain(rock, guides)
 	guide := &guides[0]
 	for _, s := range []float64{0, 750, 1500, 2250, guide.S[len(guide.S)-1]} {

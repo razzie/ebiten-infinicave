@@ -299,7 +299,7 @@ func TestVinesTuckUnderForegroundCells(t *testing.T) {
 	for _, tone := range []uint8{0, 180} {
 		for _, width := range []float64{14, 180} {
 			background := testRockGrid([]V{{500, 500}}, []color.NRGBA{{30, 30, 30, 255}})
-			foreground := RockGrid{{Polygon: []V{{500, 0}, {500 + width, 0}, {500 + width, H}, {500, H}}, Color: color.NRGBA{tone, tone, tone, 255}}}
+			foreground := RockGrid{{Polygon: []V{{500, 0}, {500 + width, 0}, {500 + width, generationHeight}, {500, generationHeight}}, Color: color.NRGBA{tone, tone, tone, 255}}}
 			field := newVineTerrain(background, foreground)
 			vine := growVine(field, V{450, 500}, V{1, 0}, 4, 260, 0, 0, 0)
 			furthest := 0.0

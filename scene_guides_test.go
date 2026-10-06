@@ -36,7 +36,7 @@ func TestGuideSegmentClearance(t *testing.T) {
 func guideSampleCoverage(guides []Guide, minY, maxY float64) float64 {
 	covered, total := 0, 0
 	for y := minY + 25; y < maxY; y += 50 {
-		for x := 25.0; x < W; x += 50 {
+		for x := 25.0; x < generationWidth; x += 50 {
 			_, pr := nearestGuide(V{x, y}, guides)
 			if pr.Dist <= guideCoverageRadius {
 				covered++
@@ -62,7 +62,7 @@ func checkGuideClearance(t *testing.T, guides []Guide) {
 }
 
 func TestRandomGuideSectionsHaveCoverageClearanceAndVariety(t *testing.T) {
-	lo, hi := V{W, W}, V{}
+	lo, hi := V{generationWidth, generationWidth}, V{}
 	minLength, maxLength := math.Inf(1), 0.0
 	counts := map[int]bool{}
 	for seed := int64(0); seed < 32; seed++ {
@@ -78,7 +78,7 @@ func TestRandomGuideSectionsHaveCoverageClearanceAndVariety(t *testing.T) {
 				t.Fatalf("seed %d filled a reserved open pocket", seed)
 			}
 		}
-		coverage := guideSampleCoverage(guides, 0, W)
+		coverage := guideSampleCoverage(guides, 0, generationWidth)
 		t.Logf("seed %d: %d guides, coverage %.3f", seed, len(guides), coverage)
 		if coverage < .55 || coverage > .85 {
 			t.Errorf("seed %d: coverage %.3f leaves too much empty space or too few gaps", seed, coverage)
@@ -90,12 +90,12 @@ func TestRandomGuideSectionsHaveCoverageClearanceAndVariety(t *testing.T) {
 		for _, g := range guides {
 			length := g.S[len(g.S)-1]
 			minLength, maxLength = math.Min(minLength, length), math.Max(maxLength, length)
-			if g.Min.X < foregroundScreenInset || g.Max.X > W-foregroundScreenInset || g.Min.Y < 0 || g.Max.Y > W {
+			if g.Min.X < foregroundScreenInset || g.Max.X > generationWidth-foregroundScreenInset || g.Min.Y < 0 || g.Max.Y > generationWidth {
 				t.Fatal("guide escaped its placement bounds")
 			}
 		}
 	}
-	if hi.X-lo.X < W*.35 || hi.Y-lo.Y < W*.35 || maxLength-minLength < 250 || len(counts) < 3 {
+	if hi.X-lo.X < generationWidth*.35 || hi.Y-lo.Y < generationWidth*.35 || maxLength-minLength < 250 || len(counts) < 3 {
 		t.Fatalf("scenes still repeat anchors, lengths, or counts: centers %v..%v, lengths %.1f..%.1f, counts %v", lo, hi, minLength, maxLength, counts)
 	}
 	a := generateGuideSection(rand.New(rand.NewSource(42)))
@@ -111,7 +111,7 @@ func TestWorldGuidesKeepClearanceCoverageAndStableOverlaps(t *testing.T) {
 		checkGuideClearance(t, a)
 		checkGuideClearance(t, b)
 		for _, guides := range [][]Guide{a, b} {
-			coverage := guideSampleCoverage(guides, W, 2*W)
+			coverage := guideSampleCoverage(guides, generationWidth, 2*generationWidth)
 			if coverage < .55 || coverage > .85 {
 				t.Errorf("seed %d: streamed section coverage %.3f", seed, coverage)
 			}

@@ -26,25 +26,35 @@ defer scene.Close()
 
 Keep `scene` in your own `ebiten.Game`. In `Update`, advance your camera and call
 `scene.Update(viewport)` once per tick. In `Draw`, call `scene.Draw(screen, viewport)`.
-For example, a stationary view of the bottom 800 pixels uses:
+For example, a stationary view of the bottom 0.8 scene units uses:
 
 ```go
-viewport := infinicave.Viewport{Y: -800, Height: 800}
+viewport := infinicave.Viewport{Y: -0.8, Height: 0.8}
 ready := scene.Update(viewport) // false while required sections are loading
 scene.Draw(screen, viewport)
 // Add your own loading UI when !ready.
 ```
 
-The cave has a fixed logical width of `infinicave.Width` (1000 pixels). Set your
-`Layout` to that width and the viewport height. World Y is negative above the
-floor at zero, so the initial viewport Y is `-float64(height)` and scrolling
-upward decreases it. Set `Viewport.Velocity` to camera movement in pixels per tick
-for directional prefetching. Y must be finite and no greater than `-float64(height)`;
-height must be positive. Invalid viewports do no work and report not ready.
+The cave is `infinicave.Width` (1 scene unit) wide. Each section is a square,
+with its owned local area running from `(0, 0)` to `(1, 1)`;
+`infinicave.SectionHeight` is also 1. World Y is negative above the floor at zero,
+so the initial viewport Y is `-viewport.Height` and scrolling upward decreases it.
+`Viewport.Height` is a floating-point height in scene units, and
+`Viewport.Velocity` is camera movement in scene units per tick for directional
+prefetching. Y must be finite and no greater than `-viewport.Height`; height must
+be finite and positive. Invalid viewports do no work and report not ready.
+
+Rendering scales scene units uniformly to the destination image's width. Use a
+`Layout` with the same aspect ratio as the viewport: for example, a 1000 × 800
+image for a viewport height of 0.8, or a 500 × 500 image for a single unit square.
+The generator and cached textures retain their fixed resolution independently
+of scene coordinates.
 
 `scene.DrawHover(screen, viewport, x, y)` adds an optional highlight after drawing;
-pass cursor coordinates in logical viewport pixels and call it only when the
-cursor is active. `scene.Reset(seed)` discards cached sections and starts a new
+pass cursor coordinates in viewport-local scene units and call it only when the
+cursor is active. Convert cursor pixels to scene units with
+`float64(infinicave.Width) / float64(screen.Bounds().Dx())`.
+`scene.Reset(seed)` discards cached sections and starts a new
 world with the same rendering settings. Rendering does not include UI or exports.
 Call every `Scene` method on the Ebitengine game goroutine. `Close` is idempotent
 and releases shaders and cached images; an in-progress CPU generation finishes
@@ -57,7 +67,7 @@ and `View` are typed enums:
 ```go
 config.Study = infinicave.StudyNone // or StudyLedge, StudyCurl
 config.View = infinicave.ViewShaded // or ViewClay, ViewHeight, ViewNormals, ViewShadows
-config.CollisionTolerance = 2 // approximation tolerance in world pixels
+config.CollisionTolerance = 0.002 // approximation tolerance in scene units
 ```
 
 `Texture` accepts 0–16. Diagnostic views disable texture and hide vegetation.
@@ -68,8 +78,8 @@ Foreground geometry is always prepared and retained, including in diagnostic
 views. Calling `DrawHover` is optional and has no effect on collision availability.
 `CollisionTolerance` must be finite and nonnegative. Zero preserves exact rock
 boundaries; larger values simplify collision polygons to reduce vertex counts
-and collision cost while the rendered terrain stays detailed. For example, 2
-allows up to 2 world pixels of original-vertex deviation from a simplified edge.
+and collision cost while the rendered terrain stays detailed. For example, 0.002
+allows up to 0.002 scene units of original-vertex deviation from a simplified edge.
 Simplification keeps section crossings fixed and rejects invalid loops or changes
 that break a block's hole topology. Shapes that cannot safely simplify retain
 exact boundaries, so the tolerance does not guarantee a particular vertex count.
@@ -79,7 +89,7 @@ After `Update`, obtain collision geometry for a loaded section:
 ```go
 geometry, ready := scene.CollisionGeometry(0)
 if ready {
-    solid := geometry.Contains(infinicave.V{X: 500, Y: -400})
+    solid := geometry.Contains(infinicave.V{X: 0.5, Y: -0.4})
     // Use solid for a point query, or build physics fixtures from geometry.Polygons.
     _ = solid
 }
@@ -101,7 +111,7 @@ if err != nil {
     return err
 }
 // section.Foreground contains rock face polygons, heights, and normals.
-// Convert local Y to world Y by adding section.WindowTop.
+// Convert local Y to world Y by adding section.Top.
 // section.Collision.Polygons already use world coordinates.
 ```
 
@@ -109,7 +119,10 @@ if err != nil {
 background goroutine in an interactive application. IDs start at 0 at the bottom
 and increase upward; negative IDs return an error. Each section owns its geometry
 and includes one section of padding above and below for seamless generation.
-Its owned world band is `[section.Top, section.Top + infinicave.SectionHeight)`;
+All exposed positions, lengths, radii, and rock heights use scene units; normals
+and directions remain unit vectors. The owned local square is `[0, 1] × [0, 1]`,
+with generation padding spanning local Y from -1 to 2. `section.WindowTop` marks
+the start of that padding in world coordinates. Its owned world band is `[section.Top, section.Top + infinicave.SectionHeight)`;
 vegetation may extend outside that band. Collision contours also include padding;
 use only the owned band when combining adjacent sections. The exposed grids
 describe visual faces, and `section.Collision` contains the collision boundaries.
@@ -118,15 +131,20 @@ tolerance with synchronous generation. This
 package depends on Ebitengine, so desktop initialization still needs a graphical
 environment even when only generating geometry.
 
+When migrating from pixel coordinates, divide world positions, lengths, camera
+velocities, and collision tolerances by 1000. Generated section-local Y also
+subtracts 1 after division, so the owned band starts at zero. Image dimensions
+and cursor input from Ebitengine remain pixels.
+
 The API is an initial foundation and may change as gameplay requirements develop.
 
-Background vines use muted colors, a maximum stem width of 9 pixels, fine world-aligned grain, and a subtle one-pixel blur to sit behind the raised rock and mushrooms. Grain follows the `-texture` setting; the softened silhouette is baked into each cached vine layer.
+Background vines use muted colors, a maximum stem width of 0.009 scene units, fine world-aligned grain, and a subtle one-pixel blur to sit behind the raised rock and mushrooms. Grain follows the `-texture` setting; the softened silhouette is baked into each cached vine layer.
 
-Sparse foreground vines grow directly across the raised rock faces, with at most two trunks per section and a few attached branches. These stems use dusty rust and rose colors, subdued highlights, small contact shadows, and seam-following tendrils. Growth stays within the visible rock surface, including shaded faces, and leaves at least 30 pixels between the vine ribbons and guide lines to keep the crests clear. Full branches remain continuous across cached section boundaries.
+Sparse foreground vines grow directly across the raised rock faces, with at most two trunks per section and a few attached branches. These stems use dusty rust and rose colors, subdued highlights, small contact shadows, and seam-following tendrils. Growth stays within the visible rock surface, including shaded faces, and leaves at least 0.03 scene units between the vine ribbons and guide lines to keep the crests clear. Full branches remain continuous across cached section boundaries.
 
 Tiny offshoots attach to the larger vines and trace the actual background cell edges through their junctions. Every other completed offshoot is retained for a lighter density. These slender branches taper over short lengths, inherit their parent’s subdued material, and respect the foreground rock boundaries.
 
-Each section grows new random guide curves with varying lengths, directions, and bends. Placement favors underfilled areas while reserving a few open pockets. The finished jagged guides stay at least 155 pixels apart, including across section boundaries, and tight folds or self-crossings are rejected. Coverage aims for about two-thirds of the scene within 115 pixels of a guide, leaving gaps for platform-game layouts. Seeds reproduce the same scene, but different seeds and sections use fresh shapes rather than fixed curve templates.
+Each section grows new random guide curves with varying lengths, directions, and bends. Placement favors underfilled areas while reserving a few open pockets. The finished jagged guides stay at least 0.155 scene units apart, including across section boundaries, and tight folds or self-crossings are rejected. Coverage aims for about two-thirds of the scene within 0.115 scene units of a guide, leaving gaps for platform-game layouts. Seeds reproduce the same scene, but different seeds and sections use fresh shapes rather than fixed curve templates.
 
 Guides form slightly jagged rock borders by cutting the foreground Voronoi cells along broad, uneven facets. Tiny clipping fragments and long, thin foreground cells merge into neighbors on the same side of the guide, favoring compact combined faces. Site spacing compresses across exposed lips and expands into the flanks without adding aligned rows. Flanks use fewer, larger facets; the outer footprint is cut through the cells along a relief contour, rather than ending in a row of whole tiles.
 
@@ -142,9 +160,9 @@ Run with `go run ./cmd/infinicave` (Go 1.27 and a graphical desktop). Use `-seed
 
 The window is resizable. Scrolling continues while missing sections are prepared in the background, with “Growing upward…” displayed until they are ready. Rocks share world coordinates across sections, and vines keep their full geometry across boundaries.
 
-Hover over a foreground rock for a soft warm highlight and glow over its entire connected block of cells, including across cached section boundaries. Point within 6 pixels of a guide to highlight only that guide line instead. Hover effects are enabled by default; use `-hover=false` to disable them (or `-hover=true` to enable them). PNG exports never include hover effects.
+Hover over a foreground rock for a soft warm highlight and glow over its entire connected block of cells, including across cached section boundaries. Point within 0.006 scene units of a guide to highlight only that guide line instead. Hover effects are enabled by default; use `-hover=false` to disable them (or `-hover=true` to enable them). PNG exports never include hover effects.
 
-`go run ./cmd/infinicave -seed 42 -output scene.png` exports the bottom 1000 × 2400 pixels and exits. `-texture 0` disables the surface texture. `-collision-tolerance 2` simplifies collision polygons with a 2-pixel tolerance.
+`go run ./cmd/infinicave -seed 42 -output scene.png` exports the bottom 1000 × 2400 pixels and exits. `-texture 0` disables the surface texture. `-collision-tolerance 0.002` simplifies collision polygons with a 0.002-unit tolerance.
 
 For shape studies without vines, use `-study ledge` or `-study curl`. The `-view` options are `shaded` (default), `clay`, `height`, `normals`, and `shadows`. Diagnostic views disable texture and hide vines; clay uses neutral gray material with the same lighting and exposed edges.
 

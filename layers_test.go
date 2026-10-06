@@ -10,8 +10,8 @@ import (
 func TestBackgroundContainsBlackAndDarkCells(t *testing.T) {
 	noise := NewPerlin(rand.New(rand.NewSource(42)))
 	tones := make(map[color.NRGBA]bool)
-	for y := 0.0; y < H; y += 20 {
-		for x := 0.0; x < W; x += 20 {
+	for y := 0.0; y < generationHeight; y += 20 {
+		for x := 0.0; x < generationWidth; x += 20 {
 			clr := backgroundCellColor(V{x, y}, noise)
 			if clr.A != 255 || clr.R > 50 || clr.G > 51 || clr.B > 49 {
 				t.Fatalf("background must stay opaque and dark: %v", clr)
@@ -22,8 +22,8 @@ func TestBackgroundContainsBlackAndDarkCells(t *testing.T) {
 	if !tones[color.NRGBA{A: 255}] || len(tones) < 10 {
 		t.Fatalf("expected exact black and varied charcoal cells, got %d tones", len(tones))
 	}
-	for y := 0.0; y < H; y += 20 {
-		for x := 0.0; x < W; x += 20 {
+	for y := 0.0; y < generationHeight; y += 20 {
+		for x := 0.0; x < generationWidth; x += 20 {
 			p := V{x, y}
 			lit := backgroundSurfaceColor(p, noise, V3{0, -1, 0})
 			shadowed := backgroundSurfaceColor(p, noise, V3{0, 1, 0})
@@ -84,7 +84,7 @@ func TestBackgroundSeedsWorkWithoutGuides(t *testing.T) {
 	relaxSeeds(seeds, noise)
 	for _, p := range seeds {
 		spacing := desiredSpacing(p, noise)
-		if math.IsNaN(p.X) || math.IsNaN(p.Y) || p.X < 0 || p.X > W || p.Y < 0 || p.Y > H {
+		if math.IsNaN(p.X) || math.IsNaN(p.Y) || p.X < 0 || p.X > generationWidth || p.Y < 0 || p.Y > generationHeight {
 			t.Fatalf("invalid background seed: %v", p)
 		}
 		if math.IsNaN(spacing) || spacing < 22 || spacing > 30 {

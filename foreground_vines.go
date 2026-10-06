@@ -57,7 +57,7 @@ func newForegroundVineTerrain(foreground RockGrid, guides []Guide) *VineTerrain 
 }
 
 func generateForegroundVines(foreground RockGrid, guides []Guide, rng *rand.Rand) []Vine {
-	vines := generateVinesInBand(newForegroundVineTerrain(foreground, guides), rng, W, 2*W, 2)
+	vines := generateVinesInBand(newForegroundVineTerrain(foreground, guides), rng, generationWidth, 2*generationWidth, 2)
 	for i := range vines {
 		vines[i].Foreground = true
 	}

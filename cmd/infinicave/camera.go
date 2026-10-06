@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	cameraFriction = 0.92 // per tick; a velocity v coasts about v/(1-friction) px
-	cameraMaxSpeed = 150.0
+	cameraFriction = 0.92 // per tick; a velocity v coasts about v/(1-friction) units
+	cameraMaxSpeed = .15
 	cameraGlide    = 0.1
 )
 
@@ -20,10 +20,10 @@ const (
 type Camera struct {
 	Y, Target, Velocity float64
 	Gliding             bool
-	Height              int
+	Height              float64
 }
 
-func (c *Camera) floor() float64 { return -float64(c.Height) }
+func (c *Camera) floor() float64 { return -c.Height }
 
 // push adds momentum; negative moves up.
 func (c *Camera) push(v float64) {
@@ -39,12 +39,12 @@ func (c *Camera) glideTo(y float64) {
 func (c *Camera) step() {
 	if c.Gliding {
 		c.Velocity = (c.Target - c.Y) * cameraGlide
-		if math.Abs(c.Target-c.Y) < .5 {
+		if math.Abs(c.Target-c.Y) < .0005 {
 			c.Y, c.Velocity, c.Gliding = c.Target, 0, false
 		}
 	} else {
 		c.Velocity *= cameraFriction
-		if math.Abs(c.Velocity) < .02 {
+		if math.Abs(c.Velocity) < .00002 {
 			c.Velocity = 0
 		}
 	}
@@ -55,17 +55,18 @@ func (c *Camera) step() {
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
-	height := max(1, int(math.Round(float64(infinicave.Width)*float64(outsideHeight)/float64(max(1, outsideWidth)))))
+	height := max(1, int(math.Round(float64(renderWidth)*float64(outsideHeight)/float64(max(1, outsideWidth)))))
 	if g.output != "" {
 		height = exportHeight
 	}
+	sceneHeight := float64(height) / renderWidth * infinicave.Width
 	if g.camera.Height == 0 {
-		g.camera.Y, g.camera.Target = -float64(height), -float64(height)
+		g.camera.Y, g.camera.Target = -sceneHeight, -sceneHeight
 	}
-	g.camera.Height = height
-	g.camera.Y = math.Min(g.camera.Y, -float64(height))
-	g.camera.Target = math.Min(g.camera.Target, -float64(height))
-	return infinicave.Width, height
+	g.camera.Height = sceneHeight
+	g.camera.Y = math.Min(g.camera.Y, -sceneHeight)
+	g.camera.Target = math.Min(g.camera.Target, -sceneHeight)
+	return renderWidth, height
 }
 
 func (g *Game) updateCamera() {
@@ -73,10 +74,10 @@ func (g *Game) updateCamera() {
 		return
 	}
 	_, wheel := ebiten.Wheel()
-	// An impulse of d*(1-friction) coasts about d pixels in total.
+	// An impulse of d*(1-friction) coasts about d scene units in total.
 	const gain = 1 - cameraFriction
-	impulse := -wheel * 48 * gain
-	accel := 480 / float64(ebiten.TPS()) * gain
+	impulse := -wheel * .048 * gain
+	accel := .48 / float64(ebiten.TPS()) * gain
 	if ebiten.IsKeyPressed(ebiten.KeyArrowUp) || ebiten.IsKeyPressed(ebiten.KeyW) {
 		impulse -= accel
 	}
@@ -84,10 +85,10 @@ func (g *Game) updateCamera() {
 		impulse += accel
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyPageUp) {
-		impulse -= float64(g.camera.Height) * .9 * gain
+		impulse -= g.camera.Height * .9 * gain
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyPageDown) {
-		impulse += float64(g.camera.Height) * .9 * gain
+		impulse += g.camera.Height * .9 * gain
 	}
 	if impulse != 0 {
 		g.camera.push(impulse)

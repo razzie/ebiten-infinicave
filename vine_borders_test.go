@@ -16,7 +16,7 @@ func TestVineBordersUseBackgroundGeometry(t *testing.T) {
 			t.Fatalf("equal-tone background seam missing at %v: %.2f", p, got)
 		}
 	}
-	for _, p := range []V{{250, 500}, {1, 500}, {250, 1}, {W - 1, 500}, {250, H - 1}} {
+	for _, p := range []V{{250, 500}, {1, 500}, {250, 1}, {generationWidth - 1, 500}, {250, generationHeight - 1}} {
 		if got := field.borderDistance(p); got != vineBorderRange {
 			t.Fatalf("foreground seam or window edge attracts vines at %v: %.2f", p, got)
 		}

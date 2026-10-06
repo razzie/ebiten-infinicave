@@ -154,7 +154,7 @@ func TestGeneratedGuideFragmentsMergeWithoutLosingArea(t *testing.T) {
 	if before == 0 || after > before/10 {
 		t.Fatalf("too many clipping slivers remain: %d of %d", after, before)
 	}
-	if math.Abs(area-W*H) > 1e-3 {
+	if math.Abs(area-generationWidth*generationHeight) > 1e-3 {
 		t.Fatalf("merging changed the total terrain area: %v", area)
 	}
 }

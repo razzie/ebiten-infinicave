@@ -16,7 +16,7 @@ func TestTinyVineBranchesFollowExactCellEdges(t *testing.T) {
 	background := newRockGrid(seeds, func(V) color.NRGBA { return color.NRGBA{30, 30, 30, 255} })
 	// This raised face blocks the right side of the seam, while left-hand
 	// branches have open rock. The root is slightly off-seam to test joining.
-	foreground := RockGrid{{Polygon: []V{{520, 0}, {W, 0}, {W, H}, {520, H}}, Color: color.NRGBA{180, 180, 170, 255}}}
+	foreground := RockGrid{{Polygon: []V{{520, 0}, {generationWidth, 0}, {generationWidth, generationHeight}, {520, generationHeight}}, Color: color.NRGBA{180, 180, 170, 255}}}
 	field := newVineTerrain(background, foreground)
 	parent := Vine{Parent: -1}
 	for y := 250.0; y <= 1000; y += 2.5 {

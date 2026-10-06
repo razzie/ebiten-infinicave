@@ -10,7 +10,10 @@ import (
 	"github.com/razzie/ebiten-infinicave"
 )
 
-const exportHeight = 2400
+const (
+	renderWidth  = 1000
+	exportHeight = 2400
+)
 
 type Game struct {
 	camera    Camera
@@ -48,6 +51,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.scene.Draw(screen, g.viewport())
 	if g.hover && ebiten.IsFocused() {
 		x, y := ebiten.CursorPositionF()
+		scale := float64(infinicave.Width) / float64(screen.Bounds().Dx())
+		x, y = x*scale, y*scale
 		g.scene.DrawHover(screen, g.viewport(), x, y)
 	}
 	if g.loading {
@@ -55,9 +60,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 	if g.output != "" && !g.exported && !g.loading {
 		g.exported = true
-		img := ebiten.NewImage(infinicave.Width, exportHeight)
+		img := ebiten.NewImage(renderWidth, exportHeight)
 		defer img.Deallocate()
-		g.scene.Draw(img, infinicave.Viewport{Y: -exportHeight, Height: exportHeight})
+		height := float64(exportHeight) / renderWidth * infinicave.Width
+		g.scene.Draw(img, infinicave.Viewport{Y: -height, Height: height})
 		f, err := os.Create(g.output)
 		if err != nil {
 			g.exportErr = err

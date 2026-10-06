@@ -6,8 +6,8 @@ import (
 )
 
 const rockDepthStep = 4.0
-const rockDepthWidth = int(W / rockDepthStep)
-const rockDepthHeight = int(H / rockDepthStep)
+const rockDepthWidth = int(generationWidth / rockDepthStep)
+const rockDepthHeight = int(generationHeight / rockDepthStep)
 
 type rockDepth struct{ heights []float64 }
 
@@ -34,7 +34,7 @@ func newRockDepth(grids ...RockGrid) *rockDepth {
 	}
 	for _, grid := range grids {
 		for _, c := range grid {
-			minY, maxY := float64(H), 0.0
+			minY, maxY := float64(generationHeight), 0.0
 			for _, p := range c.Polygon {
 				minY, maxY = math.Min(minY, p.Y), math.Max(maxY, p.Y)
 			}
@@ -63,7 +63,7 @@ func newRockDepth(grids ...RockGrid) *rockDepth {
 }
 
 func (d *rockDepth) at(p V) float64 {
-	if p.X < 0 || p.X >= W || p.Y < 0 || p.Y >= H {
+	if p.X < 0 || p.X >= generationWidth || p.Y < 0 || p.Y >= generationHeight {
 		return -16
 	}
 	return d.heights[int(p.Y/rockDepthStep)*rockDepthWidth+int(p.X/rockDepthStep)]

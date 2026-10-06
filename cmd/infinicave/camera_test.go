@@ -1,17 +1,16 @@
 package main
 
 import (
-	"github.com/razzie/ebiten-infinicave"
 	"testing"
 )
 
 func TestCameraGrowsUpwardWithoutLimit(t *testing.T) {
 	g := &Game{}
 	w, h := g.Layout(1000, 800)
-	if w != infinicave.Width || h != 800 || g.camera.Y != -800 || g.camera.Target != -800 {
+	if w != renderWidth || h != 800 || g.camera.Y != -.8 || g.camera.Target != -.8 {
 		t.Fatalf("must start at the floor: %+v", g.camera)
 	}
-	g.camera.push(-10)
+	g.camera.push(-.01)
 	prev := g.camera.Y
 	for i := 0; i < 2000; i++ {
 		g.camera.step()
@@ -20,7 +19,7 @@ func TestCameraGrowsUpwardWithoutLimit(t *testing.T) {
 		}
 		prev = g.camera.Y
 	}
-	if g.camera.Velocity != 0 || g.camera.Y > -800-100 {
+	if g.camera.Velocity != 0 || g.camera.Y > -.8-.1 {
 		t.Fatalf("momentum did not coast to rest: %+v", g.camera)
 	}
 	g.camera.push(cameraMaxSpeed * 10)
@@ -30,7 +29,7 @@ func TestCameraGrowsUpwardWithoutLimit(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		g.camera.step()
 	}
-	if g.camera.Y != -800 || g.camera.Velocity != 0 {
+	if g.camera.Y != -.8 || g.camera.Velocity != 0 {
 		t.Fatal("camera passed below starting floor")
 	}
 }
@@ -38,17 +37,17 @@ func TestCameraGrowsUpwardWithoutLimit(t *testing.T) {
 func TestCameraGlideAndMoveWithoutSections(t *testing.T) {
 	g := &Game{}
 	g.Layout(1000, 800)
-	g.camera.Y = -50000
-	g.camera.glideTo(-800)
-	for i := 0; i < 400 && g.camera.Y != -800; i++ {
+	g.camera.Y = -50
+	g.camera.glideTo(-.8)
+	for i := 0; i < 400 && g.camera.Y != -.8; i++ {
 		g.camera.step()
 	}
-	if g.camera.Y != -800 {
+	if g.camera.Y != -.8 {
 		t.Fatal("glide did not arrive")
 	}
-	g.camera.push(-20)
+	g.camera.push(-.02)
 	g.camera.step()
-	if g.camera.Y >= -800 {
+	if g.camera.Y >= -.8 {
 		t.Fatal("camera must keep moving while sections are missing")
 	}
 }
@@ -56,14 +55,14 @@ func TestCameraGlideAndMoveWithoutSections(t *testing.T) {
 func TestInfiniteCameraResize(t *testing.T) {
 	g := &Game{}
 	g.Layout(1000, 800)
-	g.camera.Y, g.camera.Target = -5300, -5300
+	g.camera.Y, g.camera.Target = -5.3, -5.3
 	w, h := g.Layout(500, 400)
-	if w != infinicave.Width || h != 800 || g.camera.Y != -5300 || g.camera.Target != -5300 {
+	if w != renderWidth || h != 800 || g.camera.Y != -5.3 || g.camera.Target != -5.3 {
 		t.Fatal("resize reset position")
 	}
-	g.camera.Y, g.camera.Target = -800, -800
+	g.camera.Y, g.camera.Target = -.8, -.8
 	g.Layout(1000, 1200)
-	if g.camera.Y != -1200 || g.camera.Target != -1200 {
+	if g.camera.Y != -1.2 || g.camera.Target != -1.2 {
 		t.Fatal("resize exposed space below the floor")
 	}
 }

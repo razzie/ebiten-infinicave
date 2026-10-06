@@ -46,7 +46,7 @@ func TestRockNeighborsIncludePartialEdgesButNotCorners(t *testing.T) {
 }
 
 func TestGuideFacingOverridesHeightsOnBothSides(t *testing.T) {
-	guides := []Guide{splineGuide([]V{{-10, 500}, {W + 10, 500}}, 1)}
+	guides := []Guide{splineGuide([]V{{-10, 500}, {generationWidth + 10, 500}}, 1)}
 	grid := guideRockFaces([]V{{250, 480}, {750, 480}, {250, 800}, {750, 800}}, guides)
 	shapeRockGrid(grid, guides, NewPerlin(rand.New(rand.NewSource(42))))
 	touching, distant := 0, 0
@@ -76,8 +76,8 @@ func TestGuideFacingOverridesHeightsOnBothSides(t *testing.T) {
 func TestRockLightingPreservesOccupancyAndDarkFlanks(t *testing.T) {
 	noise := NewPerlin(rand.New(rand.NewSource(42)))
 	guides := []Guide{splineGuide([]V{{100, 400}, {900, 400}}, 1)}
-	for y := 0.0; y < H; y += 20 {
-		for x := 0.0; x < W; x += 20 {
+	for y := 0.0; y < generationHeight; y += 20 {
+		for x := 0.0; x < generationWidth; x += 20 {
 			p := V{x, y}
 			darkForeground := guideSurfaceColor(p, guides, noise, nil, V3{Y: 1})
 			if darkForeground.A != 0 && (darkForeground.R <= 8 || darkForeground.R > 40) {

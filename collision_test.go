@@ -95,9 +95,17 @@ func TestSceneCollisionGeometryOwnershipAndAvailability(t *testing.T) {
 	if !ok || len(geometry.Polygons) == 0 {
 		t.Fatal("cached collision geometry is unavailable")
 	}
+	if geometry.Top != -1 || !geometry.Contains(V{.04, -.89}) || geometry.Contains(V{.4, -.89}) {
+		t.Fatal("cached collision geometry does not use scene units")
+	}
+	before := h.collision.Polygons[0][0]
 	geometry.Polygons[0][0].X += 100
-	if geometry.Polygons[0][0] == h.collision.Polygons[0][0] {
+	if h.collision.Polygons[0][0] != before {
 		t.Fatal("caller modified the cached collision geometry")
+	}
+	copy, ok := scene.CollisionGeometry(0)
+	if !ok || !copy.Contains(V{.04, -.89}) {
+		t.Fatal("repeated collision access changed the cached geometry")
 	}
 	if _, ok := scene.CollisionGeometry(1); ok {
 		t.Fatal("missing section reported ready")
@@ -113,7 +121,7 @@ func TestGeneratedCollisionMatchesRockFaces(t *testing.T) {
 	h := prepareTerrainGeometry(data, 0)
 	grid := insetForegroundGrid(data.foreground)
 	for y := 1001.25; y < 2000; y += 13 {
-		for x := 18.25; x < W-18; x += 13 {
+		for x := 18.25; x < generationWidth-18; x += 13 {
 			p := V{x, y}
 			inside := false
 			for _, cell := range grid {

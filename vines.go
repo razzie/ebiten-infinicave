@@ -35,8 +35,8 @@ func newRockGrid(seeds []V, colorAt func(V) color.NRGBA) RockGrid {
 
 const (
 	vineFieldStep   = 2.0
-	vineFieldWidth  = int(W / vineFieldStep)
-	vineFieldHeight = int(H / vineFieldStep)
+	vineFieldWidth  = int(generationWidth / vineFieldStep)
+	vineFieldHeight = int(generationHeight / vineFieldStep)
 	// Prefer charcoal faces, allowing only shallow trips across voids/ridges.
 	vineVoidTone        = 3.0
 	vineLightTone       = 72.0
@@ -83,7 +83,7 @@ func newVineTerrain(background, foreground RockGrid) *VineTerrain {
 			if len(cell.Polygon) < 3 {
 				continue
 			}
-			minY, maxY := float64(H), 0.0
+			minY, maxY := float64(generationHeight), 0.0
 			for _, p := range cell.Polygon {
 				minY, maxY = math.Min(minY, p.Y), math.Max(maxY, p.Y)
 			}
@@ -178,7 +178,7 @@ func (f *VineTerrain) growthSpace(p V) float64 {
 		foregroundSpace = vineForegroundTouch - f.foregroundInside[i]
 	}
 	space = math.Min(space, foregroundSpace)
-	edge := math.Min(math.Min(p.X, W-p.X), math.Min(p.Y, H-p.Y))
+	edge := math.Min(math.Min(p.X, generationWidth-p.X), math.Min(p.Y, generationHeight-p.Y))
 	return math.Max(0, math.Min(space, edge))
 }
 
@@ -361,7 +361,7 @@ func (v Vine) extent() (length, span float64) {
 }
 
 func generateVines(field *VineTerrain, rng *rand.Rand) []Vine {
-	return generateVinesInBand(field, rng, 20, H-20, 5*H/W)
+	return generateVinesInBand(field, rng, 20, generationHeight-20, 5*generationHeight/generationWidth)
 }
 
 func generateVinesInBand(field *VineTerrain, rng *rand.Rand, bottom, top float64, count int) []Vine {
@@ -381,7 +381,7 @@ func generateVinesInBand(field *VineTerrain, rng *rand.Rand, bottom, top float64
 		}
 		var candidates []candidate
 		for attempt := 0; attempt < 240; attempt++ {
-			p := V{20 + rng.Float64()*(W-40), bottom + rng.Float64()*(top-bottom)}
+			p := V{20 + rng.Float64()*(generationWidth-40), bottom + rng.Float64()*(top-bottom)}
 			space := field.space(p)
 			if space < 15 {
 				continue

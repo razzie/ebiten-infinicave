@@ -59,7 +59,7 @@ func mushroomsForGuides(guides []Guide, foreground RockGrid) []MushroomGroup {
 					continue
 				}
 				anchor, _, rockNormal := g.frameAt(along)
-				if anchor.X < foregroundScreenInset || anchor.X > W-foregroundScreenInset || !mushroomOnGround(anchor, ground) {
+				if anchor.X < foregroundScreenInset || anchor.X > generationWidth-foregroundScreenInset || !mushroomOnGround(anchor, ground) {
 					continue
 				}
 				air := rockNormal.Mul(-1)
@@ -135,7 +135,7 @@ func mushroomOnGround(p V, ground []mushroomGround) bool {
 }
 
 func mushroomWithinForegroundInset(m Mushroom) bool {
-	left, right := foregroundScreenInset, W-foregroundScreenInset
+	left, right := foregroundScreenInset, generationWidth-foregroundScreenInset
 	half := m.CapWidth / 2
 	if m.CapCenter.X-half < left || m.CapCenter.X+half > right {
 		return false

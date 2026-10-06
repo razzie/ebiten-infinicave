@@ -51,7 +51,7 @@ func reliefHeight(p V, guides []Guide, noise *Perlin, branches *BranchField) flo
 	height = math.Max(height, 80*branchBias(p, branches)*branchMask)
 	world := V{p.X, p.Y + noise.OffsetY}
 	chips := 1.2 * noise.Noise(world.X*.035+43, world.Y*.035+97)
-	edgeFade := smoothstep(0, foregroundEdgeFadeWidth, math.Min(p.X, W-p.X))
+	edgeFade := smoothstep(0, foregroundEdgeFadeWidth, math.Min(p.X, generationWidth-p.X))
 	return math.Max(0, height+chips*smoothstep(0, 15, height)) * edgeFade
 }
 
@@ -66,8 +66,8 @@ func reliefSeeds(seeds []V, guides []Guide) []V {
 		}
 		shift := -15 * math.Sin(math.Pi*pr.Dist/110)
 		out[i] = p.Add(pr.N.Mul(shift))
-		out[i].X = clamp(out[i].X, 1, W-1)
-		out[i].Y = clamp(out[i].Y, 1, H-1)
+		out[i].X = clamp(out[i].X, 1, generationWidth-1)
+		out[i].Y = clamp(out[i].Y, 1, generationHeight-1)
 	}
 	return out
 }

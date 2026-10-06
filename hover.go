@@ -88,7 +88,7 @@ type hoverTarget struct {
 }
 
 func (h *terrainGeometry) hit(p V) hoverTarget {
-	if h == nil || p.X < foregroundScreenInset || p.X > W-foregroundScreenInset {
+	if h == nil || p.X < foregroundScreenInset || p.X > generationWidth-foregroundScreenInset {
 		return hoverTarget{}
 	}
 	// A crest can share an edge with two rock faces. Prefer the guide so
@@ -114,8 +114,8 @@ func (h *terrainGeometry) hit(p V) hoverTarget {
 	return hoverTarget{}
 }
 
-func (w *world) hoverAt(cursor V, cameraY float64, height int) hoverTarget {
-	if cursor.X < 0 || cursor.X >= W || cursor.Y < 0 || cursor.Y >= float64(height) {
+func (w *world) hoverAt(cursor V, cameraY float64, height float64) hoverTarget {
+	if cursor.X < 0 || cursor.X >= generationWidth || cursor.Y < 0 || cursor.Y >= height {
 		return hoverTarget{}
 	}
 	// Match world's rounded rendering origin, including during camera glides.
@@ -202,8 +202,8 @@ func (w *world) hoverPolygons(target hoverTarget, low, high int64) [][]V {
 			}
 			// Use each section's visible band once; padded overlaps must not
 			// brighten the tint or expose geometry outside the loaded terrain.
-			poly := clipHalfPlane(face.poly, V{0, -1}, -W)
-			poly = clipHalfPlane(poly, V{0, 1}, 2*W)
+			poly := clipHalfPlane(face.poly, V{0, -1}, -generationWidth)
+			poly = clipHalfPlane(poly, V{0, 1}, 2*generationWidth)
 			if len(poly) < 3 {
 				continue
 			}
@@ -212,7 +212,7 @@ func (w *world) hoverPolygons(target hoverTarget, low, high int64) [][]V {
 				worldPoly[i] = p.Add(V{Y: h.top})
 			}
 			worldPoly = clipHalfPlane(worldPoly, V{0, -1}, -(sectionTop(high) - hoverPadding))
-			worldPoly = clipHalfPlane(worldPoly, V{0, 1}, math.Min(0, sectionTop(low)+W+hoverPadding))
+			worldPoly = clipHalfPlane(worldPoly, V{0, 1}, math.Min(0, sectionTop(low)+generationWidth+hoverPadding))
 			if len(worldPoly) >= 3 {
 				polygons = append(polygons, worldPoly)
 			}
@@ -305,18 +305,23 @@ func (r *hoverRenderer) selectTarget(target hoverTarget, w *world, low, high int
 	})
 }
 
-// DrawHover draws an optional highlight at a cursor in logical viewport coordinates.
+// DrawHover draws an optional highlight at a cursor in viewport-local scene units.
+// Convert image pixel coordinates by multiplying by Width / screen.Bounds().Dx().
 // Call it after Draw. The caller controls whether the cursor is active or focused.
 func (g *Scene) DrawHover(screen *ebiten.Image, viewport Viewport, x, y float64) {
 	if g.closed || g.highlight == nil || !viewport.valid() {
 		return
 	}
+	viewport = viewport.generation()
+	x, y = x*generationWidth, y*generationWidth
 	target := g.world.hoverAt(V{x, y}, viewport.Y, viewport.Height)
 	low, high := visibleSections(math.Round(viewport.Y), viewport.Height)
 	g.highlight.selectTarget(target, g.world, low, high)
 	if g.highlight.image != nil {
 		op := &ebiten.DrawImageOptions{}
 		op.GeoM.Translate(g.highlight.origin.X, g.highlight.origin.Y-math.Round(viewport.Y))
+		scale := float64(screen.Bounds().Dx()) / generationWidth
+		op.GeoM.Scale(scale, scale)
 		screen.DrawImage(g.highlight.image, op)
 	}
 }

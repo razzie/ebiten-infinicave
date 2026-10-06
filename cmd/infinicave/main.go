@@ -22,7 +22,7 @@ func run() error {
 	study := flag.String("study", "", "isolated rock study: ledge or curl (no vines)")
 	view := flag.String("view", "shaded", "terrain view: shaded, clay, height, normals, shadows")
 	hover := flag.Bool("hover", true, "highlight foreground rocks and guide lines under the mouse")
-	tolerance := flag.Float64("collision-tolerance", 0, "collision polygon simplification tolerance in world pixels")
+	tolerance := flag.Float64("collision-tolerance", 0, "collision polygon simplification tolerance in scene units (one section is 1 by 1)")
 	flag.Parse()
 	config := infinicave.DefaultConfig()
 	config.Seed, config.Texture = *seed, *texture
@@ -43,7 +43,7 @@ func run() error {
 	defer scene.Close()
 	g := &Game{scene: scene, seed: *seed, output: *output, hover: *hover && *output == ""}
 
-	ebiten.SetWindowSize(infinicave.Width, 800)
+	ebiten.SetWindowSize(renderWidth, 800)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetWindowTitle("ebiten-infinicave | Scroll / Up / Down | R: regenerate")
 	return ebiten.RunGame(g)

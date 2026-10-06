@@ -10,8 +10,10 @@ import (
 )
 
 const (
-	W                     = 1000
-	H                     = 3 * W // local generation window: a section plus padding above and below
+	// Generation and cached raster layers retain a fixed resolution. Public
+	// geometry and viewports use scene units, with one square section per unit.
+	generationWidth       = 1000
+	generationHeight      = 3 * generationWidth // local generation window: a section plus padding above and below
 	foregroundScreenInset = 18.0
 
 	guideSpacing   = 20.0
@@ -208,7 +210,7 @@ func generateSeeds(rng *rand.Rand, count int, noise *Perlin) []V {
 			candidates = 8
 		}
 		for c := 0; c < candidates; c++ {
-			p := V{rng.Float64() * W, rng.Float64() * H}
+			p := V{rng.Float64() * generationWidth, rng.Float64() * generationHeight}
 			minD2 := math.Inf(1)
 			for _, q := range pts {
 				d2 := p.Sub(q).Len2()
@@ -250,8 +252,8 @@ func relaxSeeds(seeds []V, noise *Perlin) {
 		}
 		for i := range seeds {
 			seeds[i] = seeds[i].Add(shifts[i])
-			seeds[i].X = clamp(seeds[i].X, 1, W-1)
-			seeds[i].Y = clamp(seeds[i].Y, 1, H-1)
+			seeds[i].X = clamp(seeds[i].X, 1, generationWidth-1)
+			seeds[i].Y = clamp(seeds[i].Y, 1, generationHeight-1)
 		}
 	}
 }
@@ -415,7 +417,7 @@ func clipHalfPlane(poly []V, n V, c float64) []V {
 }
 
 func voronoiCell(i int, pts []V) []V {
-	poly := []V{{0, 0}, {W, 0}, {W, H}, {0, H}}
+	poly := []V{{0, 0}, {generationWidth, 0}, {generationWidth, generationHeight}, {0, generationHeight}}
 	a := pts[i]
 	for j, b := range pts {
 		if i == j {
@@ -524,7 +526,7 @@ func insetForegroundGrid(grid RockGrid) RockGrid {
 	clipped := make(RockGrid, 0, len(grid))
 	for _, cell := range grid {
 		poly := clipHalfPlane(cell.Polygon, V{-1, 0}, -foregroundScreenInset)
-		poly = clipHalfPlane(poly, V{1, 0}, W-foregroundScreenInset)
+		poly = clipHalfPlane(poly, V{1, 0}, generationWidth-foregroundScreenInset)
 		if len(poly) < 3 || faceArea(poly) < 1e-9 {
 			continue
 		}

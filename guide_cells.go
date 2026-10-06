@@ -27,7 +27,7 @@ func guideRockFaces(seeds []V, guides []Guide) RockGrid {
 	parallelFor(len(seeds), func(i int) {
 		site, poly := seeds[i], cells[i]
 		faces := [][]V{poly}
-		lo, hi := V{W, H}, V{}
+		lo, hi := V{generationWidth, generationHeight}, V{}
 		for _, p := range poly {
 			lo.X, lo.Y = math.Min(lo.X, p.X), math.Min(lo.Y, p.Y)
 			hi.X, hi.Y = math.Max(hi.X, p.X), math.Max(hi.Y, p.Y)

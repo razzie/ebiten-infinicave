@@ -3,10 +3,11 @@ package infinicave
 import "fmt"
 
 // Section holds generated geometry for a section plus one section of padding
-// above and below. Geometry uses local coordinates: add WindowTop to Y to get
-// world coordinates. The owned band is [SectionHeight, 2*SectionHeight) locally,
-// or [Top, Top+SectionHeight) in world coordinates. Vegetation may extend into
-// padding and should be drawn once per owning section.
+// above and below. Geometry uses scene units and section-local coordinates:
+// the owned square runs from (0, 0) to (1, 1). Add Top to Y to get world
+// coordinates. Padding spans Y = -1 to 2, with WindowTop marking its world
+// start. The owned world band is [Top, Top+SectionHeight). Vegetation may extend
+// into padding and should be drawn once per owning section.
 //
 // Each generated Section owns its slices; callers may modify them. Rock grids
 // describe visual faces; Collision contains boundaries for physics integration.
@@ -41,12 +42,14 @@ func GenerateSectionWithConfig(config Config, id int64) (Section, error) {
 		return Section{}, fmt.Errorf("infinicave: section ID must be nonnegative")
 	}
 	data := buildSectionMode(config.Seed, id, config.Study)
-	geometry := prepareTerrainGeometry(data, config.CollisionTolerance)
-	return Section{
+	geometry := prepareTerrainGeometry(data, config.CollisionTolerance*generationWidth)
+	section := Section{
 		ID: data.id, Top: sectionTop(id), WindowTop: sectionWindowTop(id),
 		Background: data.background, Foreground: data.foreground,
 		Vines: data.vines, ForegroundVines: data.foregroundVines,
 		Mushrooms: data.mushrooms, Guides: data.guides,
 		Collision: geometry.collision,
-	}, nil
+	}
+	section.normalize()
+	return section, nil
 }

@@ -22,7 +22,7 @@ func newVineBorders(background RockGrid) []float64 {
 		for i, a := range cell.Polygon {
 			b := cell.Polygon[(i+1)%len(cell.Polygon)]
 			// Window clipping edges are not seams in the world tessellation.
-			if (a.X == b.X && (a.X == 0 || a.X == W)) || (a.Y == b.Y && (a.Y == 0 || a.Y == H)) {
+			if (a.X == b.X && (a.X == 0 || a.X == generationWidth)) || (a.Y == b.Y && (a.Y == 0 || a.Y == generationHeight)) {
 				continue
 			}
 			key := edgeKey(a, b)

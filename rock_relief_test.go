@@ -57,7 +57,7 @@ func TestReliefFadesBeforeHorizontalScreenInset(t *testing.T) {
 }
 
 func TestRaisedRockCastsShadowAndOccludesAmbientLight(t *testing.T) {
-	background := RockGrid{{Center: V{500, 1500}, Polygon: []V{{0, 0}, {W, 0}, {W, H}, {0, H}}, Normal: V3{Z: 1}}}
+	background := RockGrid{{Center: V{500, 1500}, Polygon: []V{{0, 0}, {generationWidth, 0}, {generationWidth, generationHeight}, {0, generationHeight}}, Normal: V3{Z: 1}}}
 	block := RockGrid{{Center: V{500, 500}, Polygon: []V{{470, 470}, {530, 470}, {530, 530}, {470, 530}}, Z: 70, Normal: V3{Z: 1}, Raised: true}}
 	d := newRockDepth(background, block)
 	away := (V{-rockLight.X, -rockLight.Y}).Norm()

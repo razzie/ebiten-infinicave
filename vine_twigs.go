@@ -40,7 +40,7 @@ func newVineEdgeGraph(background RockGrid) *vineEdgeGraph {
 	for _, cell := range background {
 		for j, a := range cell.Polygon {
 			b := cell.Polygon[(j+1)%len(cell.Polygon)]
-			if (a.X == b.X && (a.X == 0 || a.X == W)) || (a.Y == b.Y && (a.Y == 0 || a.Y == H)) {
+			if (a.X == b.X && (a.X == 0 || a.X == generationWidth)) || (a.Y == b.Y && (a.Y == 0 || a.Y == generationHeight)) {
 				continue
 			}
 			key := edgeKey(a, b)

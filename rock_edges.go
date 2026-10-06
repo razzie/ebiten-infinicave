@@ -33,7 +33,7 @@ func rockBoundaryEdges(grid RockGrid, neighbors [][]int, includeWindow bool) []r
 				continue
 			}
 			// Generation-window cuts have no physical thickness.
-			if !includeWindow && ((a.X == b.X && (a.X == 0 || a.X == W)) || (a.Y == b.Y && (a.Y == 0 || a.Y == H))) {
+			if !includeWindow && ((a.X == b.X && (a.X == 0 || a.X == generationWidth)) || (a.Y == b.Y && (a.Y == 0 || a.Y == generationHeight))) {
 				continue
 			}
 			ts := []float64{0, 1}

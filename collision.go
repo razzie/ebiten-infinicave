@@ -3,8 +3,8 @@ package infinicave
 import "math"
 
 // CollisionGeometry contains the union boundaries of foreground rock in world
-// coordinates. Polygons are closed implicitly and may be concave. Outer loops
-// have positive signed area; holes have negative signed area. Physics engines
+// coordinates in scene units. Polygons are closed implicitly and may be concave.
+// Outer loops have positive signed area; holes have negative signed area. Physics engines
 // requiring convex fixtures must decompose these loops and account for holes.
 //
 // Geometry includes a section of padding on either side of the owned band,
@@ -23,7 +23,7 @@ func (g CollisionGeometry) Contains(p V) bool {
 	for _, poly := range g.Polygons {
 		for i, a := range poly {
 			b := poly[(i+1)%len(poly)]
-			if guideSegmentsDistance2(p, p, a, b) <= 1e-14 {
+			if guideSegmentsDistance2(p, p, a, b) <= 1e-20 {
 				return true
 			}
 			if a.Y <= p.Y && b.Y > p.Y && cross(b.Sub(a), p.Sub(a)) > 0 {
@@ -48,10 +48,7 @@ func (g *Scene) CollisionGeometry(id int64) (CollisionGeometry, bool) {
 		return CollisionGeometry{}, false
 	}
 	geometry := section.geometry.collision
-	geometry.Polygons = make([][]V, len(section.geometry.collision.Polygons))
-	for i, poly := range section.geometry.collision.Polygons {
-		geometry.Polygons[i] = append([]V(nil), poly...)
-	}
+	geometry.normalize()
 	return geometry, true
 }
 
@@ -184,7 +181,7 @@ func collisionSeamVertices(poly []V) []V {
 		b := poly[(i+1)%len(poly)]
 		out = append(out, a)
 		var cuts []V
-		for _, y := range []float64{0, sectionHeight, 2 * sectionHeight, H} {
+		for _, y := range []float64{0, sectionHeight, 2 * sectionHeight, generationHeight} {
 			if y > math.Min(a.Y, b.Y)+1e-9 && y < math.Max(a.Y, b.Y)-1e-9 {
 				t := (y - a.Y) / (b.Y - a.Y)
 				cuts = append(cuts, V{lerp(a.X, b.X, t), y})

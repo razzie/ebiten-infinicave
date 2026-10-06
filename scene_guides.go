@@ -26,7 +26,7 @@ func newGuideLayout(rng *rand.Rand) guideLayout {
 	layout := guideLayout{}
 	for n := 1 + rng.Intn(2); n > 0; n-- {
 		layout.pockets = append(layout.pockets, guidePocket{
-			V{lerp(170, W-170, rng.Float64()), lerp(170, W-170, rng.Float64())},
+			V{lerp(170, generationWidth-170, rng.Float64()), lerp(170, generationWidth-170, rng.Float64())},
 			lerp(85, 135, rng.Float64()),
 		})
 	}
@@ -35,8 +35,8 @@ func newGuideLayout(rng *rand.Rand) guideLayout {
 	for y := 0; y < side; y++ {
 		for x := 0; x < side; x++ {
 			layout.probes = append(layout.probes, V{
-				(float64(x) + lerp(.2, .8, rng.Float64())) * W / side,
-				(float64(y) + lerp(.2, .8, rng.Float64())) * W / side,
+				(float64(x) + lerp(.2, .8, rng.Float64())) * generationWidth / side,
+				(float64(y) + lerp(.2, .8, rng.Float64())) * generationWidth / side,
 			})
 		}
 	}
@@ -45,7 +45,7 @@ func newGuideLayout(rng *rand.Rand) guideLayout {
 
 func generateGuides(rng *rand.Rand) []Guide {
 	var guides []Guide
-	for top := 0; top < H; top += W {
+	for top := 0; top < generationHeight; top += generationWidth {
 		var obstacles []Guide
 		for _, g := range guides {
 			obstacles = append(obstacles, shiftedGuide(g, -float64(top)))
@@ -132,7 +132,7 @@ func (layout guideLayout) fill(rng *rand.Rand, guides, obstacles []Guide, margin
 		}
 		center := layout.probes[anchor].Add(V{lerp(-40, 40, rng.Float64()), lerp(-40, 40, rng.Float64())})
 		g := randomGuide(rng, center, attempt > guidePlacementAttempts/3)
-		if g.Min.X < foregroundScreenInset || g.Max.X > W-foregroundScreenInset || g.Min.Y < margin || g.Max.Y > W-margin {
+		if g.Min.X < foregroundScreenInset || g.Max.X > generationWidth-foregroundScreenInset || g.Min.Y < margin || g.Max.Y > generationWidth-margin {
 			continue
 		}
 		valid := guideSelfClear(g)
@@ -232,7 +232,7 @@ func spacedWorldGuideSection(seed, owner int64, proposals map[int64][]Guide) []G
 	priority := uint64(sectionSeed(seed^0x7370616365, owner))
 	for neighbor := owner - 1; neighbor <= owner+1; neighbor += 2 {
 		for _, g := range proposals[neighbor] {
-			obstacles = append(obstacles, shiftedGuide(g, float64(owner-neighbor)*W))
+			obstacles = append(obstacles, shiftedGuide(g, float64(owner-neighbor)*generationWidth))
 		}
 	}
 	for _, g := range proposals[owner] {
@@ -243,7 +243,7 @@ func spacedWorldGuideSection(seed, owner int64, proposals map[int64][]Guide) []G
 				continue
 			}
 			for _, other := range proposals[neighbor] {
-				if guidesTooClose(g, shiftedGuide(other, float64(owner-neighbor)*W)) {
+				if guidesTooClose(g, shiftedGuide(other, float64(owner-neighbor)*generationWidth)) {
 					valid = false
 					break
 				}
