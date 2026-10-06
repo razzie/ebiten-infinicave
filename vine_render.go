@@ -7,7 +7,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-// Ribbons shade across their width. Children inherit the
+// Ribbons have flat highlight and body bands with dark outlines. Children inherit the
 // parent shading at their attachment, so a ribbon edge cannot cut across a fork.
 func prepareVines(vines []Vine) []triangleMesh {
 	meshes := make([]triangleMesh, 0, len(vines))
@@ -24,7 +24,7 @@ func prepareVines(vines []Vine) []triangleMesh {
 				clr := weatherVineColor(vineJoinColor(vines, index, p, palette[j]), p, vineStyleFamily(vines, index))
 				a := float32(clr.A) / 255
 				vertices = append(vertices, ebiten.Vertex{DstX: float32(p.X * rasterPixelsPerUnit), DstY: float32((p.Y - generationMinY) * rasterPixelsPerUnit), SrcX: .5, SrcY: .5, ColorR: float32(clr.R) / 255 * a, ColorG: float32(clr.G) / 255 * a, ColorB: float32(clr.B) / 255 * a, ColorA: a})
-				if i > 0 && j > 0 {
+				if i > 0 && j > 0 && vineBands[j] != vineBands[j-1] {
 					k := uint32(len(vertices) - 1)
 					b := uint32(len(vineBands))
 					indices = append(indices, k-b-1, k-b, k, k-b-1, k, k-1)
@@ -40,8 +40,15 @@ func prepareVines(vines []Vine) []triangleMesh {
 	return meshes
 }
 
-var vineBands = [...]float64{-1, -.78, -.46, -.2, .04, .3, .65, 1}
-var vineColors = [...]color.NRGBA{{42, 0, 3, 255}, {116, 1, 8, 255}, {200, 4, 13, 255}, {245, 16, 23, 255}, {210, 5, 12, 255}, {155, 1, 8, 255}, {92, 0, 5, 255}, {34, 0, 3, 255}}
+// Paired vertices share positions at each tonal boundary, keeping the bands
+// crisp instead of interpolating a rounded, glossy cylinder across the stem.
+var vineBands = [...]float64{-1, -.78, -.78, -.30, -.30, .78, .78, 1}
+var vineColors = [...]color.NRGBA{
+	{34, 0, 3, 255}, {34, 0, 3, 255},
+	{245, 16, 23, 255}, {245, 16, 23, 255},
+	{155, 1, 8, 255}, {155, 1, 8, 255},
+	{34, 0, 3, 255}, {34, 0, 3, 255},
+}
 
 func vinePalette(vines []Vine, index int) [len(vineColors)]color.NRGBA {
 	if vines[vineFamily(vines, index)].Foreground {
@@ -52,18 +59,18 @@ func vinePalette(vines []Vine, index int) [len(vineColors)]color.NRGBA {
 		grayMix, brownMix, dim float64
 	}
 	styles := [...]paletteStyle{
-		{[3]int{0, 0, 0}, .92, 0, .40},
-		{[3]int{7, 2, -3}, .92, 0, .40},
-		{[3]int{-4, 1, 5}, .92, 0, .40},
-		{[3]int{12, -4, -6}, .92, 0, .40},
-		{[3]int{-8, 5, 11}, .92, 0, .40},
-		{[3]int{5, 2, -3}, .92, 0, .40},
-		{[3]int{-5, -2, 10}, .92, 0, .40},
-		{[3]int{9, -3, 0}, .92, 0, .40},
-		{[3]int{0, 0, 0}, .92, .31, .40},
-		{[3]int{0, 0, 0}, .92, .42, .40},
-		{[3]int{0, 0, 0}, 1, 0, .38},
-		{[3]int{0, 0, 0}, 1, 0, .43},
+		{[3]int{0, 0, 0}, .92, 0, .36},
+		{[3]int{7, 2, -3}, .92, 0, .36},
+		{[3]int{-4, 1, 5}, .92, 0, .36},
+		{[3]int{12, -4, -6}, .92, 0, .36},
+		{[3]int{-8, 5, 11}, .92, 0, .36},
+		{[3]int{5, 2, -3}, .92, 0, .36},
+		{[3]int{-5, -2, 10}, .92, 0, .36},
+		{[3]int{9, -3, 0}, .92, 0, .36},
+		{[3]int{0, 0, 0}, .92, .31, .36},
+		{[3]int{0, 0, 0}, .92, .42, .36},
+		{[3]int{0, 0, 0}, 1, 0, .34},
+		{[3]int{0, 0, 0}, 1, 0, .39},
 	}
 	var palette [len(vineColors)]color.NRGBA
 	family := vineStyleFamily(vines, index)
@@ -103,7 +110,7 @@ func vineStyleFamily(vines []Vine, index int) int {
 func weatherVineColor(clr color.NRGBA, p V, family int) color.NRGBA {
 	familyOffset := float64(family)
 	grain := .5 + .25*math.Sin(p.X*71+(p.Y-generationMinY)*37+familyOffset*1.7) + .25*math.Sin(p.X*29-(p.Y-generationMinY)*83+familyOffset*.61)
-	factor := .9 + .1*grain
+	factor := .98 + .02*grain
 	return color.NRGBA{
 		R: uint8(math.Round(float64(clr.R) * factor)),
 		G: uint8(math.Round(float64(clr.G) * factor)),

@@ -69,12 +69,12 @@ func generateForegroundVinesWithWorkspace(foreground RockGrid, guides []Guide, r
 }
 
 func foregroundVinePalette(vines []Vine, index int) [len(vineColors)]color.NRGBA {
-	// Dusty rust and rose retain volume without bright red highlights.
+	// Flat dusty rose highlights and rust bodies sit inside an ink-dark outline.
 	tints := [...][3]float64{{1, 1, 1}, {.97, .95, 1.04}, {1, 1.05, .96}, {.96, .98, 1.06}}
 	tint := tints[vineStyleFamily(vines, index)%len(tints)]
 	palette := [len(vineColors)]color.NRGBA{
-		{34, 23, 24, 255}, {57, 36, 35, 255}, {82, 53, 47, 255}, {115, 85, 70, 255},
-		{98, 65, 54, 255}, {74, 43, 39, 255}, {48, 29, 29, 255}, {29, 20, 22, 255},
+		{29, 20, 22, 255}, {29, 20, 22, 255}, {115, 85, 70, 255}, {115, 85, 70, 255},
+		{82, 53, 47, 255}, {82, 53, 47, 255}, {29, 20, 22, 255}, {29, 20, 22, 255},
 	}
 	for i, c := range palette {
 		palette[i] = color.NRGBA{

@@ -369,7 +369,7 @@ func (w *world) receive(g *Scene) {
 			return
 		}
 	case 6:
-		u.vines = g.softenVinesAt(u.vines, data.vinesBounds, top, u.pixels)
+		u.vines = g.finishVinesAt(u.vines, data.vinesBounds, top, u.pixels)
 		if u.data.geometry != nil {
 			eraseVineCutsAt(u.vines, data.vinesBounds, top, u.data.geometry.vegetation.cuts, u.pixels)
 		}

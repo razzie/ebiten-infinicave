@@ -37,7 +37,7 @@ func batchTriangleMeshes(meshes []triangleMesh) []triangleMesh {
 }
 
 // Bounds live in the original padded-window pixels. Integer origins preserve
-// raster alignment, and padding includes antialiasing plus the vine blur.
+// raster alignment, and padding leaves room for antialiasing at the edges.
 func triangleMeshesBounds(meshes []triangleMesh) image.Rectangle {
 	loX, loY, hiX, hiY := math.Inf(1), math.Inf(1), math.Inf(-1), math.Inf(-1)
 	for _, mesh := range meshes {

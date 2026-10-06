@@ -121,7 +121,7 @@ func (g *Scene) redrawCarvedVegetation(section *worldSection, id int64) {
 	section.mushrooms = draw([]triangleMesh{mesh.mushrooms}, mesh.mushroomsBounds)
 	section.vinesBounds, section.foregroundVinesBounds, section.mushroomsBounds = mesh.vinesBounds, mesh.foregroundVinesBounds, mesh.mushroomsBounds
 	top := sectionWindowTop(id)
-	section.vines = g.softenVinesAt(section.vines, section.vinesBounds, top, pixels)
+	section.vines = g.finishVinesAt(section.vines, section.vinesBounds, top, pixels)
 	for _, layer := range []struct {
 		image  *ebiten.Image
 		bounds image.Rectangle
@@ -132,12 +132,12 @@ func (g *Scene) redrawCarvedVegetation(section *worldSection, id int64) {
 	}
 }
 
-func (g *Scene) softenVinesAt(img *ebiten.Image, bounds image.Rectangle, top float64, pixels int) *ebiten.Image {
+func (g *Scene) finishVinesAt(img *ebiten.Image, bounds image.Rectangle, top float64, pixels int) *ebiten.Image {
 	if img == nil || g.vineMaterial == nil {
 		return img
 	}
-	softened := newVegetationImage(bounds)
-	softened.DrawRectShader(bounds.Dx(), bounds.Dy(), g.vineMaterial, &ebiten.DrawRectShaderOptions{
+	finished := newVegetationImage(bounds)
+	finished.DrawRectShader(bounds.Dx(), bounds.Dy(), g.vineMaterial, &ebiten.DrawRectShaderOptions{
 		Images: [4]*ebiten.Image{img},
 		Uniforms: map[string]any{
 			"Offset":  []float32{float32(bounds.Min.X), float32(top*float64(pixels)) + float32(bounds.Min.Y)},
@@ -146,7 +146,7 @@ func (g *Scene) softenVinesAt(img *ebiten.Image, bounds image.Rectangle, top flo
 		},
 	})
 	img.Deallocate()
-	return softened
+	return finished
 }
 
 func sameRockCut(a, b rockCut) bool {

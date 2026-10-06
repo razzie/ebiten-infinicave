@@ -347,7 +347,7 @@ and cursor input from Ebitengine remain pixels.
 
 The API is an initial foundation and may change as gameplay requirements develop.
 
-Background vines use muted colors, a maximum stem width of 0.009 scene units, fine world-aligned grain, and a subtle one-pixel blur to sit behind the raised rock and mushrooms. Grain follows the `-texture` setting; the softened silhouette is baked into each cached vine layer.
+Vines use crisp dark outlines and broad, flat highlight and body bands to match the cartoon-like faceted rocks. Forks inherit their parent's shading at the attachment. Background vines retain muted colors and a maximum stem width of 0.009 scene units, with restrained world-aligned grain following the `-texture` setting. Antialiased silhouettes stay sharp in each cached vine layer.
 
 Sparse foreground vines grow directly across the raised rock faces, with at most two trunks per section and a few attached branches. These stems use dusty rust and rose colors, subdued highlights, small contact shadows, and seam-following tendrils. Growth stays within the visible rock surface, including shaded faces, and leaves at least 0.03 scene units between the vine ribbons and guide lines to keep the crests clear. Full branches remain continuous across cached section boundaries.
 
