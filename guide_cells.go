@@ -27,7 +27,7 @@ func guideRockFaces(seeds []V, guides []Guide) RockGrid {
 	parallelFor(len(seeds), func(i int) {
 		site, poly := seeds[i], cells[i]
 		faces := [][]V{poly}
-		lo, hi := V{generationWidth, generationHeight}, V{}
+		lo, hi := V{generationWidth, generationMaxY}, V{Y: generationMinY}
 		for _, p := range poly {
 			lo.X, lo.Y = math.Min(lo.X, p.X), math.Min(lo.Y, p.Y)
 			hi.X, hi.Y = math.Max(hi.X, p.X), math.Max(hi.Y, p.Y)
@@ -79,7 +79,7 @@ func insideFace(p V, poly []V) bool {
 		d := b.Sub(a)
 		if d.Len2() > 0 {
 			q := a.Add(d.Mul(clamp(p.Sub(a).Dot(d)/d.Len2(), 0, 1)))
-			if p.Sub(q).Len2() < 1e-14 {
+			if p.Sub(q).Len2() < 1e-20 {
 				return false
 			}
 		}
@@ -105,7 +105,7 @@ func splitGuideFace(poly []V, g *Guide) [][]V {
 		for i, b := range poly {
 			e := poly[(i+1)%len(poly)].Sub(b)
 			den := cross(d, e)
-			if math.Abs(den) < 1e-12 {
+			if math.Abs(den) < 1e-18 {
 				continue
 			}
 			t, u := cross(b.Sub(a), e)/den, cross(b.Sub(a), d)/den
@@ -118,7 +118,7 @@ func splitGuideFace(poly []V, g *Guide) [][]V {
 	sort.Slice(hits, func(i, j int) bool { return hits[i].path < hits[j].path })
 	unique := hits[:0]
 	for _, hit := range hits {
-		if len(unique) == 0 || hit.p.Sub(unique[len(unique)-1].p).Len2() > 1e-14 {
+		if len(unique) == 0 || hit.p.Sub(unique[len(unique)-1].p).Len2() > 1e-20 {
 			unique = append(unique, hit)
 		}
 	}
@@ -140,7 +140,7 @@ func splitGuideFace(poly []V, g *Guide) [][]V {
 		}
 		right = append(right, path[1:len(path)-1]...)
 		left, right = cleanFace(left), cleanFace(right)
-		if len(left) < 3 || len(right) < 3 || faceArea(left) < 1e-8 || faceArea(right) < 1e-8 {
+		if len(left) < 3 || len(right) < 3 || faceArea(left) < 1e-14 || faceArea(right) < 1e-14 {
 			continue
 		}
 		return append(splitGuideFace(left, g), splitGuideFace(right, g)...)
@@ -163,11 +163,11 @@ func boundaryArc(poly []V, a, b guideHit) []V {
 func cleanFace(poly []V) []V {
 	out := make([]V, 0, len(poly))
 	for _, p := range poly {
-		if len(out) == 0 || p.Sub(out[len(out)-1]).Len2() > 1e-14 {
+		if len(out) == 0 || p.Sub(out[len(out)-1]).Len2() > 1e-20 {
 			out = append(out, p)
 		}
 	}
-	if len(out) > 1 && out[0].Sub(out[len(out)-1]).Len2() < 1e-14 {
+	if len(out) > 1 && out[0].Sub(out[len(out)-1]).Len2() < 1e-20 {
 		out = out[:len(out)-1]
 	}
 	// Straight sampled guides should produce one edge, not dozens of facets.
@@ -175,7 +175,7 @@ func cleanFace(poly []V) []V {
 		changed = false
 		for i, p := range out {
 			a, b := out[(i+len(out)-1)%len(out)], out[(i+1)%len(out)]
-			if math.Abs(cross(p.Sub(a), b.Sub(p))) < 1e-9 && p.Sub(a).Dot(b.Sub(p)) >= 0 {
+			if math.Abs(cross(p.Sub(a), b.Sub(p))) < 1e-15 && p.Sub(a).Dot(b.Sub(p)) >= 0 {
 				out = append(out[:i], out[i+1:]...)
 				changed = true
 				break
@@ -205,7 +205,7 @@ func faceTriangles(poly []V) [][3]int {
 		found := false
 		for j, b := range remaining {
 			a, c := remaining[(j+len(remaining)-1)%len(remaining)], remaining[(j+1)%len(remaining)]
-			if cross(poly[b].Sub(poly[a]), poly[c].Sub(poly[b])) <= 1e-10 {
+			if cross(poly[b].Sub(poly[a]), poly[c].Sub(poly[b])) <= 1e-16 {
 				continue
 			}
 			blocked := false
@@ -214,9 +214,9 @@ func faceTriangles(poly []V) [][3]int {
 					continue
 				}
 				p := poly[k]
-				if cross(poly[b].Sub(poly[a]), p.Sub(poly[a])) >= -1e-10 &&
-					cross(poly[c].Sub(poly[b]), p.Sub(poly[b])) >= -1e-10 &&
-					cross(poly[a].Sub(poly[c]), p.Sub(poly[c])) >= -1e-10 {
+				if cross(poly[b].Sub(poly[a]), p.Sub(poly[a])) >= -1e-16 &&
+					cross(poly[c].Sub(poly[b]), p.Sub(poly[b])) >= -1e-16 &&
+					cross(poly[a].Sub(poly[c]), p.Sub(poly[c])) >= -1e-16 {
 					blocked = true
 					break
 				}

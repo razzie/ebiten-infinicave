@@ -6,8 +6,8 @@ import (
 )
 
 const (
-	guideClearance         = 155.0 // room for a rock flank and an open approach to the next lip
-	guideCoverageRadius    = 115.0
+	guideClearance         = .155 // room for a rock flank and an open approach to the next lip
+	guideCoverageRadius    = .115
 	guideCoverageTarget    = .68
 	guidePlacementAttempts = 600
 )
@@ -26,8 +26,8 @@ func newGuideLayout(rng *rand.Rand) guideLayout {
 	layout := guideLayout{}
 	for n := 1 + rng.Intn(2); n > 0; n-- {
 		layout.pockets = append(layout.pockets, guidePocket{
-			V{lerp(170, generationWidth-170, rng.Float64()), lerp(170, generationWidth-170, rng.Float64())},
-			lerp(85, 135, rng.Float64()),
+			V{lerp(0.17, generationWidth-0.17, rng.Float64()), lerp(0.17, generationWidth-0.17, rng.Float64())},
+			lerp(0.085, 0.135, rng.Float64()),
 		})
 	}
 	// Jittered probes measure coverage without arranging guides in rows.
@@ -45,7 +45,7 @@ func newGuideLayout(rng *rand.Rand) guideLayout {
 
 func generateGuides(rng *rand.Rand) []Guide {
 	var guides []Guide
-	for top := 0; top < generationHeight; top += generationWidth {
+	for top := generationMinY; top < generationMaxY; top += generationWidth {
 		var obstacles []Guide
 		for _, g := range guides {
 			obstacles = append(obstacles, shiftedGuide(g, -float64(top)))
@@ -67,9 +67,9 @@ func generateGuideSection(rng *rand.Rand) []Guide {
 // and knot spacing. Persistent turns make broad hooks; changing turns make
 // uneven ledges and S-bends. There are no reusable knot templates.
 func randomGuide(rng *rand.Rand, center V, crowded bool) Guide {
-	length := lerp(230, 620, rng.Float64())
+	length := lerp(0.23, 0.62, rng.Float64())
 	if crowded {
-		length = lerp(150, 360, rng.Float64())
+		length = lerp(0.15, 0.36, rng.Float64())
 	}
 	angle := lerp(-.8, .8, rng.Float64())
 	if rng.Float64() < .22 {
@@ -78,8 +78,8 @@ func randomGuide(rng *rand.Rand, center V, crowded bool) Guide {
 	turn := lerp(-1.3, 1.3, rng.Float64())
 	knots := []V{{}}
 	for s := 0.0; s < length; {
-		step := math.Min(lerp(45, 90, rng.Float64()), length-s)
-		angle += turn * step / 100
+		step := math.Min(lerp(0.045, 0.09, rng.Float64()), length-s)
+		angle += turn * step / 0.1
 		knots = append(knots, knots[len(knots)-1].Add(V{math.Cos(angle), math.Sin(angle)}.Mul(step)))
 		turn = clamp(turn*.75+lerp(-.55, .55, rng.Float64()), -1.4, 1.4)
 		s += step
@@ -130,7 +130,7 @@ func (layout guideLayout) fill(rng *rand.Rand, guides, obstacles []Guide, margin
 				anchor = i
 			}
 		}
-		center := layout.probes[anchor].Add(V{lerp(-40, 40, rng.Float64()), lerp(-40, 40, rng.Float64())})
+		center := layout.probes[anchor].Add(V{lerp(-0.04, 0.04, rng.Float64()), lerp(-0.04, 0.04, rng.Float64())})
 		g := randomGuide(rng, center, attempt > guidePlacementAttempts/3)
 		if g.Min.X < foregroundScreenInset || g.Max.X > generationWidth-foregroundScreenInset || g.Min.Y < margin || g.Max.Y > generationWidth-margin {
 			continue
@@ -162,7 +162,7 @@ func shiftedGuide(g Guide, offset float64) Guide {
 func guideSegmentsDistance2(a, b, c, d V) float64 {
 	ab, cd := b.Sub(a), d.Sub(c)
 	den := cross(ab, cd)
-	if math.Abs(den) > 1e-9 {
+	if math.Abs(den) > 1e-15 {
 		u, v := cross(c.Sub(a), cd)/den, cross(c.Sub(a), ab)/den
 		if u >= 0 && u <= 1 && v >= 0 && v <= 1 {
 			return 0
@@ -208,7 +208,7 @@ func guideSelfClear(g Guide) bool {
 	for i := 1; i < len(g.Pts); i++ {
 		for j := i + 2; j < len(g.Pts); j++ {
 			distance2 := guideSegmentsDistance2(g.Pts[i-1], g.Pts[i], g.Pts[j-1], g.Pts[j])
-			if distance2 < 1e-12 {
+			if distance2 < 1e-18 {
 				return false
 			}
 			// Adjacent parts of a continuous curve are necessarily close.

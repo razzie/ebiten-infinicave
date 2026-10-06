@@ -50,18 +50,21 @@ func (g *Scene) CollisionGeometry(id int64) (CollisionGeometry, bool) {
 		return CollisionGeometry{}, false
 	}
 	geometry := section.geometry.collision
-	geometry.normalize()
+	geometry.Polygons = make([][]V, len(section.geometry.collision.Polygons))
+	for i, poly := range section.geometry.collision.Polygons {
+		geometry.Polygons[i] = append([]V(nil), poly...)
+	}
 	return geometry, true
 }
 
 func collisionVertexKey(p V) [2]int64 {
-	return [2]int64{int64(math.Round(p.X * 1e4)), int64(math.Round(p.Y * 1e4))}
+	return [2]int64{int64(math.Round(p.X * 1e7)), int64(math.Round(p.Y * 1e7))}
 }
 
 // Internal face edges cancel, including partial shared edges. Tracing per
 // connected block keeps corner contacts from joining unrelated formations.
 func prepareCollisionGeometry(id int64, grid RockGrid, neighbors [][]int, h *terrainGeometry, tolerance float64) CollisionGeometry {
-	geometry := CollisionGeometry{ID: id, Top: sectionTop(id)}
+	geometry := CollisionGeometry{ID: -id, Top: sectionTop(id)}
 	byBlock := make([][]rockEdge, len(h.blocks))
 	for _, edge := range rockBoundaryEdges(grid, neighbors, true) {
 		block := h.faces[edge.Cell].block
@@ -114,7 +117,7 @@ func compatibleCollisionLoops(original, simplified [][]V) bool {
 			for k, p := range a {
 				q := a[(k+1)%len(a)]
 				for n, r := range b {
-					if guideSegmentsDistance2(p, q, r, b[(n+1)%len(b)]) < 1e-14 {
+					if guideSegmentsDistance2(p, q, r, b[(n+1)%len(b)]) < 1e-20 {
 						return false
 					}
 				}
@@ -167,7 +170,7 @@ func traceCollisionLoops(edges []rockEdge) ([][]V, bool) {
 			}
 			at = next
 		}
-		if len(poly) < 3 || math.Abs(faceArea(poly)) < 1e-9 {
+		if len(poly) < 3 || math.Abs(faceArea(poly)) < 1e-15 {
 			return nil, false
 		}
 		loops = append(loops, poly)
@@ -183,8 +186,8 @@ func collisionSeamVertices(poly []V) []V {
 		b := poly[(i+1)%len(poly)]
 		out = append(out, a)
 		var cuts []V
-		for _, y := range []float64{0, sectionHeight, 2 * sectionHeight, generationHeight} {
-			if y > math.Min(a.Y, b.Y)+1e-9 && y < math.Max(a.Y, b.Y)-1e-9 {
+		for _, y := range []float64{generationMinY, 0, SectionHeight, generationMaxY} {
+			if y > math.Min(a.Y, b.Y)+1e-12 && y < math.Max(a.Y, b.Y)-1e-12 {
 				t := (y - a.Y) / (b.Y - a.Y)
 				cuts = append(cuts, V{lerp(a.X, b.X, t), y})
 			}
@@ -265,7 +268,7 @@ func simpleCollisionLoop(poly []V) bool {
 			if (j+1)%len(poly) == i {
 				continue
 			}
-			if guideSegmentsDistance2(a, b, poly[j], poly[(j+1)%len(poly)]) < 1e-14 {
+			if guideSegmentsDistance2(a, b, poly[j], poly[(j+1)%len(poly)]) < 1e-20 {
 				return false
 			}
 		}

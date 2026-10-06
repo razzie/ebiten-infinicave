@@ -11,7 +11,7 @@ import (
 
 func TestWorldSeedsMatchOverlappingWindows(t *testing.T) {
 	seed := int64(42)
-	aTop, bTop := sectionWindowTop(0), sectionWindowTop(1)
+	aTop, bTop := sectionTop(0), sectionTop(1)
 	noise := NewPerlin(rand.New(rand.NewSource(seed)))
 	noise.OffsetY = aTop
 	a := worldSeeds(seed, aTop, noise)
@@ -21,7 +21,7 @@ func TestWorldSeedsMatchOverlappingWindows(t *testing.T) {
 		var result []V
 		for _, p := range seeds {
 			p.Y += top
-			if p.Y > -1900 && p.Y < -100 {
+			if p.Y > -1.900 && p.Y < -.100 {
 				result = append(result, p)
 			}
 		}
@@ -40,8 +40,8 @@ func TestWorldSeedsMatchOverlappingWindows(t *testing.T) {
 
 func TestForegroundGridStaysInsideHorizontalScreenInset(t *testing.T) {
 	grid := RockGrid{
-		{Center: V{10, 50}, Polygon: []V{{0, 0}, {40, 0}, {40, 100}, {0, 100}}, Raised: true},
-		{Center: V{generationWidth - 10, 50}, Polygon: []V{{generationWidth - 40, 0}, {generationWidth, 0}, {generationWidth, 100}, {generationWidth - 40, 100}}, Raised: true},
+		{Center: V{0.01, 0.05}, Polygon: []V{{0, 0}, {0.04, 0}, {0.04, 0.1}, {0, 0.1}}, Raised: true},
+		{Center: V{generationWidth - 0.01, 0.05}, Polygon: []V{{generationWidth - 0.04, 0}, {generationWidth, 0}, {generationWidth, 0.1}, {generationWidth - 0.04, 0.1}}, Raised: true},
 	}
 	original := make([][]V, len(grid))
 	for i := range grid {
@@ -82,20 +82,20 @@ func TestWorldSectionSeam(t *testing.T) {
 		result := make(map[[2]int64]face)
 		for _, c := range grid {
 			y := c.Center.Y + top
-			if y < -1120 || y > -880 {
+			if y < -1.120 || y > -.880 {
 				continue
 			}
 			poly := make([]V, len(c.Polygon))
 			for i, p := range c.Polygon {
 				poly[i] = V{p.X, p.Y + top}
 			}
-			key := [2]int64{int64(math.Round(c.Center.X * 1e5)), int64(math.Round(y * 1e5))}
+			key := [2]int64{int64(math.Round(c.Center.X * 1e8)), int64(math.Round(y * 1e8))}
 			result[key] = face{[4]uint8{c.Color.R, c.Color.G, c.Color.B, c.Color.A}, poly, cellSeed(42, c.Center, top), c.Z, c.Normal, c.Shadow, c.Ambient}
 		}
 		return result
 	}
 	for i, pair := range [][2]RockGrid{{a.background, b.background}, {a.foreground, b.foreground}} {
-		left, right := collect(pair[0], sectionWindowTop(0)), collect(pair[1], sectionWindowTop(1))
+		left, right := collect(pair[0], sectionTop(0)), collect(pair[1], sectionTop(1))
 		if len(left) == 0 || len(left) != len(right) {
 			t.Fatalf("layer %d seam has different faces: %d/%d", i, len(left), len(right))
 		}
@@ -104,11 +104,11 @@ func TestWorldSectionSeam(t *testing.T) {
 			if !ok || x.color != y.color || x.seed != y.seed || len(x.polygon) != len(y.polygon) {
 				t.Fatalf("layer %d: mismatched face at %v", i, key)
 			}
-			if math.Abs(x.shadow-y.shadow) > 1e-8 || math.Abs(x.ambient-y.ambient) > 1e-8 || math.Abs(x.z-y.z) > 1e-8 || math.Abs(x.normal.X-y.normal.X)+math.Abs(x.normal.Y-y.normal.Y)+math.Abs(x.normal.Z-y.normal.Z) > 1e-8 {
+			if math.Abs(x.shadow-y.shadow) > 1e-8 || math.Abs(x.ambient-y.ambient) > 1e-8 || math.Abs(x.z-y.z) > 1e-11 || math.Abs(x.normal.X-y.normal.X)+math.Abs(x.normal.Y-y.normal.Y)+math.Abs(x.normal.Z-y.normal.Z) > 1e-8 {
 				t.Fatalf("layer %d: height, normal, or lighting seam at %v", i, key)
 			}
 			for j, p := range x.polygon {
-				if p.Sub(y.polygon[j]).Len() > 1e-6 {
+				if p.Sub(y.polygon[j]).Len() > 1e-9 {
 					t.Fatalf("layer %d: polygon seam at %v: %v vs %v", i, key, p, y.polygon[j])
 				}
 			}
@@ -124,7 +124,7 @@ func TestWorldSectionSeam(t *testing.T) {
 					continue
 				}
 				prev := v.Points[j-1]
-				for _, edge := range []float64{generationWidth, 2 * generationWidth} {
+				for _, edge := range []float64{0, SectionHeight} {
 					if (prev.P.Y-edge)*(p.P.Y-edge) < 0 && prev.Radius > 0 && p.Radius > 0 {
 						crossing = true
 					}
@@ -153,14 +153,14 @@ func TestWorldSectionSeam(t *testing.T) {
 
 func TestStreamingRequestsAndCacheStayBounded(t *testing.T) {
 	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1)}
-	if w.ensure(-800, 800, 0) {
+	if w.ensure(-.800, .800, 0) {
 		t.Fatal("unloaded viewport reported ready")
 	}
 	if id := <-w.jobs; id != 0 {
 		t.Fatalf("first request is %d, want floor section", id)
 	}
 	// Repeated frames must not enqueue duplicate work while the worker is busy.
-	w.ensure(-800, 800, 0)
+	w.ensure(-.800, .800, 0)
 	if len(w.jobs) != 0 {
 		t.Fatal("duplicate generation request")
 	}
@@ -168,18 +168,18 @@ func TestStreamingRequestsAndCacheStayBounded(t *testing.T) {
 	for id := int64(0); id < 100; id++ {
 		w.sections[id] = &worldSection{terrain: ebiten.NewImage(1, 1), vines: ebiten.NewImage(1, 1)}
 	}
-	w.prune(-10800, 800, 0)
+	w.prune(-10.800, .800, 0)
 	if len(w.sections) > 6 {
 		t.Fatalf("cache grew with distance: %d sections", len(w.sections))
 	}
 	if w.sections[0] != nil || w.sections[10] == nil {
 		t.Fatal("cache discarded the viewport or retained distant sections")
 	}
-	if !w.ensure(-10800, 800, 0) {
+	if !w.ensure(-10.800, .800, 0) {
 		t.Fatal("loaded far-up viewport cannot be reached")
 	}
-	w.prune(-800, 800, 0)
-	if w.ensure(-800, 800, 0) {
+	w.prune(-.800, .800, 0)
+	if w.ensure(-.800, .800, 0) {
 		t.Fatal("evicted starting area was not requested again")
 	}
 	for _, s := range w.sections {

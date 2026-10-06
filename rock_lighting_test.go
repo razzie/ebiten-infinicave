@@ -8,10 +8,10 @@ import (
 
 func TestRockNormalsFollowNeighborHeights(t *testing.T) {
 	// Unequal, non-axis-aligned spacing must still recover a planar slope.
-	grid := RockGrid{{Center: V{50, 50}}, {Center: V{23, 42}}, {Center: V{61, 17}}, {Center: V{85, 61}}, {Center: V{39, 79}}}
+	grid := RockGrid{{Center: V{0.05, 0.05}}, {Center: V{0.023, 0.042}}, {Center: V{0.061, 0.017}}, {Center: V{0.085, 0.061}}, {Center: V{0.039, 0.079}}}
 	for _, slope := range []V{{}, {0, 1}, {0, -1}, {.7, -.3}} {
 		for i := range grid {
-			grid[i].Z = 15 + grid[i].Center.Dot(slope)
+			grid[i].Z = .015 + grid[i].Center.Dot(slope)
 		}
 		got := rockNormal(grid, 0, []int{1, 2, 3, 4})
 		want := (V3{-slope.X, -slope.Y, 1}).Norm()
@@ -27,7 +27,7 @@ func TestRockNormalsFollowNeighborHeights(t *testing.T) {
 	if got := rockNormal(grid, 0, nil); got != (V3{Z: 1}) {
 		t.Fatalf("isolated cell has invalid normal: %v", got)
 	}
-	grid[1].Center, grid[1].Z = V{50, 40}, grid[0].Z-10
+	grid[1].Center, grid[1].Z = V{0.05, 0.04}, grid[0].Z-.010
 	if got := rockNormal(grid, 0, []int{1}); math.Abs(got.Y+math.Sqrt(.5)) > 1e-12 {
 		t.Fatalf("single neighbor lost its slope: %v", got)
 	}
@@ -35,9 +35,9 @@ func TestRockNormalsFollowNeighborHeights(t *testing.T) {
 
 func TestRockNeighborsIncludePartialEdgesButNotCorners(t *testing.T) {
 	grid := RockGrid{
-		{Polygon: []V{{0, 0}, {20, 0}, {20, 20}, {0, 20}}},
-		{Polygon: []V{{20, 0}, {30, 0}, {30, 10}, {20, 10}}},
-		{Polygon: []V{{20, 20}, {30, 20}, {30, 30}, {20, 30}}},
+		{Polygon: []V{{0, 0}, {0.02, 0}, {0.02, 0.02}, {0, 0.02}}},
+		{Polygon: []V{{0.02, 0}, {0.03, 0}, {0.03, 0.01}, {0.02, 0.01}}},
+		{Polygon: []V{{0.02, 0.02}, {0.03, 0.02}, {0.03, 0.03}, {0.02, 0.03}}},
 	}
 	neighbors := rockNeighbors(grid)
 	if len(neighbors[0]) != 1 || neighbors[0][0] != 1 || len(neighbors[1]) != 1 || len(neighbors[2]) != 0 {
@@ -46,18 +46,18 @@ func TestRockNeighborsIncludePartialEdgesButNotCorners(t *testing.T) {
 }
 
 func TestGuideFacingOverridesHeightsOnBothSides(t *testing.T) {
-	guides := []Guide{splineGuide([]V{{-10, 500}, {generationWidth + 10, 500}}, 1)}
-	grid := guideRockFaces([]V{{250, 480}, {750, 480}, {250, 800}, {750, 800}}, guides)
+	guides := []Guide{splineGuide([]V{{-0.01, 0.5}, {generationWidth + 0.01, 0.5}}, 1)}
+	grid := guideRockFaces([]V{{0.25, 0.48}, {0.75, 0.48}, {0.25, 0.8}, {0.75, 0.8}}, guides)
 	shapeRockGrid(grid, guides, NewPerlin(rand.New(rand.NewSource(42))))
 	touching, distant := 0, 0
 	for i, cell := range grid {
 		contact := false
 		for _, p := range cell.Polygon {
-			contact = contact || math.Abs(p.Y-500) < 1e-7
+			contact = contact || math.Abs(p.Y-.500) < 1e-10
 		}
 		if contact {
 			touching++
-			if math.Abs(cell.Normal.X) > 1e-9 || cell.Normal.Y*(500-cell.Center.Y) <= 0 {
+			if math.Abs(cell.Normal.X) > 1e-9 || cell.Normal.Y*(.500-cell.Center.Y) <= 0 {
 				t.Fatalf("guide neighbor faces away: %v normal=%v", cell.Center, cell.Normal)
 			}
 		} else {
@@ -75,9 +75,9 @@ func TestGuideFacingOverridesHeightsOnBothSides(t *testing.T) {
 
 func TestRockLightingPreservesOccupancyAndDarkFlanks(t *testing.T) {
 	noise := NewPerlin(rand.New(rand.NewSource(42)))
-	guides := []Guide{splineGuide([]V{{100, 400}, {900, 400}}, 1)}
-	for y := 0.0; y < generationHeight; y += 20 {
-		for x := 0.0; x < generationWidth; x += 20 {
+	guides := []Guide{splineGuide([]V{{0.1, 0.4}, {0.9, 0.4}}, 1)}
+	for y := float64(generationMinY); y < generationMaxY; y += 0.02 {
+		for x := 0.0; x < generationWidth; x += 0.02 {
 			p := V{x, y}
 			darkForeground := guideSurfaceColor(p, guides, noise, nil, V3{Y: 1})
 			if darkForeground.A != 0 && (darkForeground.R <= 8 || darkForeground.R > 40) {

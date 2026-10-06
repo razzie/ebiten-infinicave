@@ -16,6 +16,10 @@ func TestLoadedGuidesKeepWorldPositionsAndCallerOwnership(t *testing.T) {
 		Pts: append([]V(nil), source[0].Pts...), S: append([]float64(nil), source[0].S...),
 		Min: source[0].Min, Max: source[0].Max, BrightSign: -1,
 	}
+	local, ok := loadedGuide(source[0])
+	if !ok || !reflect.DeepEqual(local.Pts, []V{{.2, .4}, {.7, .5}}) || local.Min != (V{.2, .4}) || local.Max != (V{.7, .5}) {
+		t.Fatal("internal loader changed scene-unit coordinates")
+	}
 	var requested []int64
 	load := func(id int64) []Guide {
 		requested = append(requested, id)
@@ -32,9 +36,9 @@ func TestLoadedGuidesKeepWorldPositionsAndCallerOwnership(t *testing.T) {
 	}
 	bySeed := make(map[int64]Guide)
 	for _, g := range a {
-		g = shiftedGuide(g, sectionWindowTop(0))
+		g = shiftedGuide(g, sectionTop(0))
 		bySeed[g.Seed] = g
-		if len(g.Pts) != 2 || g.BrightSign != -1 || math.Abs(g.S[1]-math.Hypot(500, 100)) > 1e-9 {
+		if len(g.Pts) != 2 || g.BrightSign != -1 || math.Abs(g.S[1]-math.Hypot(.500, .100)) > 1e-9 {
 			t.Fatal("loaded guide has incorrect points, lighting, or arc length")
 		}
 	}
@@ -45,8 +49,14 @@ func TestLoadedGuidesKeepWorldPositionsAndCallerOwnership(t *testing.T) {
 			continue
 		}
 		shared++
-		if !reflect.DeepEqual(shiftedGuide(g, sectionWindowTop(1)), other) {
-			t.Fatal("neighboring windows changed loaded guide geometry or seed")
+		world := shiftedGuide(g, sectionTop(1))
+		if world.Seed != other.Seed || world.BrightSign != other.BrightSign || len(world.Pts) != len(other.Pts) {
+			t.Fatal("neighboring windows changed loaded guide metadata")
+		}
+		for i, p := range world.Pts {
+			if p.Sub(other.Pts[i]).Len() > 1e-12 || math.Abs(world.S[i]-other.S[i]) > 1e-12 {
+				t.Fatal("neighboring windows changed loaded guide geometry")
+			}
 		}
 	}
 	if shared != 3 {

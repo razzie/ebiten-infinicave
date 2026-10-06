@@ -31,8 +31,8 @@ func checkMesh(t *testing.T, mesh triangleMesh) {
 
 func TestPreparedOutlinesPreserveBlackPockets(t *testing.T) {
 	grid := RockGrid{
-		{Center: V{5, 5}, Polygon: []V{{0, 0}, {10, 0}, {10, 10}, {0, 10}}, Normal: V3{Z: 1}, Color: color.NRGBA{A: 255}},
-		{Center: V{15, 5}, Polygon: []V{{10, 0}, {20, 0}, {20, 10}, {10, 10}}, Normal: V3{Z: 1}, Color: color.NRGBA{R: 60, G: 60, B: 60, A: 255}},
+		{Center: V{0.005, 0.005}, Polygon: []V{{0, 0}, {0.01, 0}, {0.01, 0.01}, {0, 0.01}}, Normal: V3{Z: 1}, Color: color.NRGBA{A: 255}},
+		{Center: V{0.015, 0.005}, Polygon: []V{{0.01, 0}, {0.02, 0}, {0.02, 0.01}, {0.01, 0.01}}, Normal: V3{Z: 1}, Color: color.NRGBA{R: 60, G: 60, B: 60, A: 255}},
 	}
 	mesh := prepareGrid(grid, ViewShaded)
 	if len(mesh.faces.indices) == 0 || len(mesh.outlines) == 0 {
@@ -65,8 +65,8 @@ func TestLargePreparedOutlineGroups(t *testing.T) {
 	// before calling the vector tessellator, then use valid 32-bit indices.
 	grid := make(RockGrid, 5000)
 	for i := range grid {
-		x, y := float64(i%100)*8, float64(i/100)*8
-		grid[i] = RockCell{Center: V{x + 2, y + 2}, Polygon: []V{{x, y}, {x + 4, y}, {x + 4, y + 4}, {x, y + 4}}, Normal: V3{Z: 1}, Color: color.NRGBA{R: 60, G: 60, B: 60, A: 255}}
+		x, y := float64(i%100)*.008, float64(i/100)*.008
+		grid[i] = RockCell{Center: V{x + 0.002, y + 0.002}, Polygon: []V{{x, y}, {x + 0.004, y}, {x + 0.004, y + 0.004}, {x, y + 0.004}}, Normal: V3{Z: 1}, Color: color.NRGBA{R: 60, G: 60, B: 60, A: 255}}
 	}
 	mesh := prepareGrid(grid, ViewShaded)
 	total := 0
@@ -88,19 +88,19 @@ func TestLargePreparedOutlineGroups(t *testing.T) {
 func TestPrepareSectionMatchesSerialLayers(t *testing.T) {
 	data := sectionData{
 		id: 17,
-		background: RockGrid{{Center: V{50, 50}, Polygon: []V{{0, 0}, {100, 0}, {100, 100}, {0, 100}},
+		background: RockGrid{{Center: V{0.05, 0.05}, Polygon: []V{{0, 0}, {0.1, 0}, {0.1, 0.1}, {0, 0.1}},
 			Normal: V3{Z: 1}, Color: color.NRGBA{R: 40, G: 40, B: 40, A: 255}}},
-		foreground: RockGrid{{Center: V{40, 40}, Polygon: []V{{0, 20}, {80, 20}, {80, 80}, {0, 80}},
-			Normal: V3{Z: 1}, Color: color.NRGBA{R: 90, G: 80, B: 70, A: 255}, Raised: true, Z: 30, Shadow: 1, Ambient: 1}},
+		foreground: RockGrid{{Center: V{0.04, 0.04}, Polygon: []V{{0, 0.02}, {0.08, 0.02}, {0.08, 0.08}, {0, 0.08}},
+			Normal: V3{Z: 1}, Color: color.NRGBA{R: 90, G: 80, B: 70, A: 255}, Raised: true, Z: .030, Shadow: 1, Ambient: 1}},
 		vines: []Vine{
-			{Parent: -1, Points: []VinePoint{{P: V{100, 100}, Radius: 3}, {P: V{110, 110}, Radius: 2}, {P: V{120, 120}}}},
-			{Parent: 0, Joint: 1, Depth: 1, Points: []VinePoint{{P: V{110, 110}, Radius: 2}, {P: V{120, 110}, Radius: 1}, {P: V{130, 110}}}},
+			{Parent: -1, Points: []VinePoint{{P: V{0.1, 0.1}, Radius: 0.003}, {P: V{0.11, 0.11}, Radius: 0.002}, {P: V{0.12, 0.12}}}},
+			{Parent: 0, Joint: 1, Depth: 1, Points: []VinePoint{{P: V{0.11, 0.11}, Radius: 0.002}, {P: V{0.12, 0.11}, Radius: 0.001}, {P: V{0.13, 0.11}}}},
 		},
 		foregroundVines: []Vine{{Parent: -1, Foreground: true, Points: []VinePoint{
-			{P: V{30, 40}}, {P: V{40, 50}, Radius: 3}, {P: V{50, 60}},
+			{P: V{0.03, 0.04}}, {P: V{0.04, 0.05}, Radius: 0.003}, {P: V{0.05, 0.06}},
 		}}},
 		mushrooms: []MushroomGroup{{Mushrooms: []Mushroom{{
-			Stem: []V{{50, 40}, {52, 30}, {50, 20}}, CapCenter: V{50, 18}, CapWidth: 10, CapHeight: 4,
+			Stem: []V{{0.05, 0.04}, {0.052, 0.03}, {0.05, 0.02}}, CapCenter: V{0.05, 0.018}, CapWidth: 0.01, CapHeight: 0.004,
 			Color: mushroomColors[0],
 		}}}},
 	}

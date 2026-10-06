@@ -2,7 +2,7 @@ package infinicave
 
 import "math"
 
-const rockContourHeight = 8.0
+const rockContourHeight = .008
 
 // Clip the outer footprint through existing faces instead of exposing a row
 // of complete Voronoi tiles. Keep the original face normal and material so
@@ -12,7 +12,7 @@ func contourRockGrid(grid RockGrid, heightAt func(V) float64) RockGrid {
 	parallelFor(len(grid), func(n int) {
 		c := grid[n]
 		for _, poly := range contourRockFace(c.Polygon, c.Center, heightAt) {
-			if len(poly) < 3 || faceArea(poly) < 6 {
+			if len(poly) < 3 || faceArea(poly) < .000006 {
 				continue
 			}
 			face := c
@@ -59,7 +59,7 @@ func contourRockFace(poly []V, center V, heightAt func(V) float64) [][]V {
 	triangles := faceTriangles(poly)
 	fan := insideFace(center, poly)
 	for i, p := range poly {
-		if cross(poly[(i+1)%len(poly)].Sub(p), center.Sub(p)) < -1e-9 {
+		if cross(poly[(i+1)%len(poly)].Sub(p), center.Sub(p)) < -1e-15 {
 			fan = false
 		}
 	}
@@ -82,7 +82,7 @@ func contourRockFace(poly []V, center V, heightAt func(V) float64) [][]V {
 			points := []V{mid, poly[a], poly[b]}
 			heights := []float64{z, values[a], values[b]}
 			clipped := clipHeightTriangle(points, heights)
-			if len(clipped) >= 3 && faceArea(clipped) > 1e-7 {
+			if len(clipped) >= 3 && faceArea(clipped) > 1e-13 {
 				faces = append(faces, clipped)
 			}
 		}
@@ -124,7 +124,7 @@ func clipHeightTriangle(points []V, values []float64) []V {
 		}
 		prev, zp = p, z
 	}
-	if len(out) < 3 || math.Abs(faceArea(out)) < 1e-9 {
+	if len(out) < 3 || math.Abs(faceArea(out)) < 1e-15 {
 		return nil
 	}
 	return cleanFace(out)
@@ -135,7 +135,7 @@ func clipHeightTriangle(points []V, values []float64) []V {
 // teeth. Shared junctions move together, while guide lips stay exactly put.
 func polishRockContours(grid RockGrid, guides []Guide, heightAt func(V) float64) {
 	type key [2]int64
-	keyAt := func(p V) key { return key{int64(math.Round(p.X * 1e4)), int64(math.Round(p.Y * 1e4))} }
+	keyAt := func(p V) key { return key{int64(math.Round(p.X * 1e7)), int64(math.Round(p.Y * 1e7))} }
 	points := make(map[key]V)
 	adjacent := make(map[key][]V)
 	for _, edge := range exposedRockEdges(grid) {
@@ -158,24 +158,24 @@ func polishRockContours(grid RockGrid, guides []Guide, heightAt func(V) float64)
 			return
 		}
 		_, pr := nearestGuide(p, guides)
-		if pr.Dist < 4 || math.Abs(heightAt(p)-rockContourHeight) > 18 {
+		if pr.Dist < .004 || math.Abs(heightAt(p)-rockContourHeight) > .018 {
 			return
 		}
 		q := lerpV(p, adjacent[k][0].Add(adjacent[k][1]).Mul(.5), .18)
 		for iteration := 0; iteration < 6; iteration++ {
 			error := heightAt(q) - rockContourHeight
-			gradient := V{(heightAt(q.Add(V{1, 0})) - heightAt(q.Sub(V{1, 0}))) * .5,
-				(heightAt(q.Add(V{0, 1})) - heightAt(q.Sub(V{0, 1}))) * .5}
+			gradient := V{(heightAt(q.Add(V{.001, 0})) - heightAt(q.Sub(V{.001, 0}))) / .002,
+				(heightAt(q.Add(V{0, .001})) - heightAt(q.Sub(V{0, .001}))) / .002}
 			if gradient.Len2() < 1e-8 {
 				break
 			}
 			step := gradient.Mul(error / gradient.Len2())
-			if step.Len() > 3 {
-				step = step.Norm().Mul(3)
+			if step.Len() > .003 {
+				step = step.Norm().Mul(.003)
 			}
 			q = q.Sub(step)
 		}
-		if q.Sub(p).Len() <= 9 && math.Abs(heightAt(q)-rockContourHeight) < .25 {
+		if q.Sub(p).Len() <= .009 && math.Abs(heightAt(q)-rockContourHeight) < .00025 {
 			projected[n], accepted[n] = q, true
 		}
 	})
@@ -197,7 +197,7 @@ func polishRockContours(grid RockGrid, guides []Guide, heightAt func(V) float64)
 					poly[i], changed = q, true
 				}
 			}
-			if changed && (faceArea(poly) < 1 || len(faceTriangles(poly)) != len(poly)-2 || !simpleRockOutline(poly)) {
+			if changed && (faceArea(poly) < .000001 || len(faceTriangles(poly)) != len(poly)-2 || !simpleRockOutline(poly)) {
 				for _, p := range c.Polygon {
 					if _, ok := moves[keyAt(p)]; ok {
 						rejected[n] = append(rejected[n], keyAt(p))
@@ -239,7 +239,7 @@ func simpleRockOutline(poly []V) bool {
 			}
 			c, d := poly[j], poly[(j+1)%len(poly)]
 			den := cross(b.Sub(a), d.Sub(c))
-			if math.Abs(den) < 1e-10 {
+			if math.Abs(den) < 1e-16 {
 				continue
 			}
 			t, u := cross(c.Sub(a), d.Sub(c))/den, cross(c.Sub(a), b.Sub(a))/den

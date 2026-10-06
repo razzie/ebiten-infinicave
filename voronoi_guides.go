@@ -10,15 +10,17 @@ import (
 )
 
 const (
-	// Generation and cached raster layers retain a fixed resolution. Public
-	// geometry and viewports use scene units, with one square section per unit.
-	generationWidth       = 1000
-	generationHeight      = 3 * generationWidth // local generation window: a section plus padding above and below
-	foregroundScreenInset = 18.0
+	// All generation geometry uses scene units. The owned section is [0,1]²;
+	// its generation window adds one unit of padding above and below.
+	generationWidth       = Width
+	generationMinY        = -SectionHeight
+	generationMaxY        = 2 * SectionHeight
+	generationHeight      = generationMaxY - generationMinY
+	foregroundScreenInset = .018
 
-	guideSpacing   = 20.0
-	guideInfluence = 180.0
-	noiseScale     = 0.0034
+	guideSpacing   = .020
+	guideInfluence = .180
+	noiseScale     = 3.4
 )
 
 //go:embed grain.kage
@@ -196,7 +198,7 @@ func nearestGuide(p V, guides []Guide) (int, Projection) {
 
 // Site density follows terrain only; guides cut faces without adding sites.
 func desiredSpacing(p V, noise *Perlin) float64 {
-	return lerp(30, 22, smoothstep(.39, .58, fbm(noise, p)))
+	return lerp(.030, .022, smoothstep(.39, .58, fbm(noise, p)))
 }
 
 func generateSeeds(rng *rand.Rand, count int, noise *Perlin) []V {
@@ -210,7 +212,7 @@ func generateSeeds(rng *rand.Rand, count int, noise *Perlin) []V {
 			candidates = 8
 		}
 		for c := 0; c < candidates; c++ {
-			p := V{rng.Float64() * generationWidth, rng.Float64() * generationHeight}
+			p := V{rng.Float64() * generationWidth, generationMinY + rng.Float64()*generationHeight}
 			minD2 := math.Inf(1)
 			for _, q := range pts {
 				d2 := p.Sub(q).Len2()
@@ -252,8 +254,8 @@ func relaxSeeds(seeds []V, noise *Perlin) {
 		}
 		for i := range seeds {
 			seeds[i] = seeds[i].Add(shifts[i])
-			seeds[i].X = clamp(seeds[i].X, 1, generationWidth-1)
-			seeds[i].Y = clamp(seeds[i].Y, 1, generationHeight-1)
+			seeds[i].X = clamp(seeds[i].X, .001, generationWidth-.001)
+			seeds[i].Y = clamp(seeds[i].Y, generationMinY+.001, generationMaxY-.001)
 		}
 	}
 }
@@ -365,9 +367,9 @@ func backgroundSurfaceColor(p V, noise *Perlin, normal V3) color.NRGBA {
 // Rock occupancy follows relief, independently of light. Every existing face
 // is opaque, including its dark flank and the tapered ends of raised spurs.
 func guideCellColor(p V, guides []Guide, noise *Perlin, branches *BranchField) color.NRGBA {
-	dx := reliefHeight(p.Add(V{2, 0}), guides, noise, branches) - reliefHeight(p.Sub(V{2, 0}), guides, noise, branches)
-	dy := reliefHeight(p.Add(V{0, 2}), guides, noise, branches) - reliefHeight(p.Sub(V{0, 2}), guides, noise, branches)
-	return guideSurfaceColor(p, guides, noise, branches, (V3{-dx / 4, -dy / 4, 1}).Norm())
+	dx := reliefHeight(p.Add(V{.002, 0}), guides, noise, branches) - reliefHeight(p.Sub(V{.002, 0}), guides, noise, branches)
+	dy := reliefHeight(p.Add(V{0, .002}), guides, noise, branches) - reliefHeight(p.Sub(V{0, .002}), guides, noise, branches)
+	return guideSurfaceColor(p, guides, noise, branches, (V3{-dx / .004, -dy / .004, 1}).Norm())
 }
 
 func guideSurfaceColor(p V, guides []Guide, noise *Perlin, branches *BranchField, normal V3) color.NRGBA {
@@ -385,7 +387,7 @@ func clipHalfPlane(poly []V, n V, c float64) []V {
 	// polygon unchanged instead of allocating for every distant half-plane.
 	inside := 0
 	for _, p := range poly {
-		if p.Dot(n) <= c+1e-9 {
+		if p.Dot(n) <= c+1e-15 {
 			inside++
 		}
 	}
@@ -397,13 +399,13 @@ func clipHalfPlane(poly []V, n V, c float64) []V {
 	}
 	out := make([]V, 0, len(poly)+1)
 	prev := poly[len(poly)-1]
-	prevIn := prev.Dot(n) <= c+1e-9
+	prevIn := prev.Dot(n) <= c+1e-15
 	for _, cur := range poly {
-		curIn := cur.Dot(n) <= c+1e-9
+		curIn := cur.Dot(n) <= c+1e-15
 		if curIn != prevIn {
 			d := cur.Sub(prev)
 			den := d.Dot(n)
-			if math.Abs(den) > 1e-12 {
+			if math.Abs(den) > 1e-18 {
 				t := (c - prev.Dot(n)) / den
 				out = append(out, prev.Add(d.Mul(t)))
 			}
@@ -417,7 +419,7 @@ func clipHalfPlane(poly []V, n V, c float64) []V {
 }
 
 func voronoiCell(i int, pts []V) []V {
-	poly := []V{{0, 0}, {generationWidth, 0}, {generationWidth, generationHeight}, {0, generationHeight}}
+	poly := []V{{0, generationMinY}, {generationWidth, generationMinY}, {generationWidth, generationMaxY}, {0, generationMaxY}}
 	a := pts[i]
 	for j, b := range pts {
 		if i == j {
@@ -437,7 +439,7 @@ func orderPolygon(poly []V) []V {
 	if len(poly) > 0 {
 		first := 0
 		for j := 1; j < len(poly); j++ {
-			ax, bx := math.Round(poly[j].X*1e6), math.Round(poly[first].X*1e6)
+			ax, bx := math.Round(poly[j].X*1e9), math.Round(poly[first].X*1e9)
 			if ax < bx || (ax == bx && poly[j].Y < poly[first].Y) {
 				first = j
 			}
@@ -458,7 +460,7 @@ func appendCellMesh(vertices []ebiten.Vertex, indices []uint32, poly []V, center
 	for _, p := range poly {
 		radius = math.Max(radius, p.Sub(center).Len())
 	}
-	radius = math.Max(radius, 1)
+	radius = math.Max(radius, .001)
 	tilt := V{surface.X, surface.Y}
 	type facetTriangle struct {
 		center, a, b V
@@ -467,7 +469,7 @@ func appendCellMesh(vertices []ebiten.Vertex, indices []uint32, poly []V, center
 	var facets []facetTriangle
 	fan := true
 	for i, a := range poly {
-		if cross(poly[(i+1)%len(poly)].Sub(a), center.Sub(a)) < -1e-9 {
+		if cross(poly[(i+1)%len(poly)].Sub(a), center.Sub(a)) < -1e-15 {
 			fan = false
 			break
 		}
@@ -493,16 +495,16 @@ func appendCellMesh(vertices []ebiten.Vertex, indices []uint32, poly []V, center
 		}
 		first := uint32(len(vertices))
 		for _, p := range []V{triangle.center, a, b} {
-			edgeDistance := 2.0 // Internal triangulation edges have no rim.
+			edgeDistance := .002 // Internal triangulation edges have no rim.
 			if triangle.boundary {
 				edgeDistance = math.Max(0, p.Sub(a).Dot(normal))
 			}
 			vertices = append(vertices, ebiten.Vertex{
-				DstX: float32(p.X), DstY: float32(p.Y),
-				SrcX: float32(p.X), SrcY: float32(p.Y),
+				DstX: float32(p.X * rasterPixelsPerUnit), DstY: float32((p.Y - generationMinY) * rasterPixelsPerUnit),
+				SrcX: float32(p.X * rasterPixelsPerUnit), SrcY: float32((p.Y - generationMinY) * rasterPixelsPerUnit),
 				ColorR: float32(clr.R) / 255, ColorG: float32(clr.G) / 255,
 				ColorB: float32(clr.B) / 255, ColorA: float32(clr.A) / 255,
-				Custom0: float32(edgeDistance),
+				Custom0: float32(edgeDistance * rasterPixelsPerUnit),
 				Custom1: float32(p.Sub(center).Dot(tilt) / radius),
 				Custom2: float32(surface.X),
 				Custom3: float32(surface.Y),
@@ -514,8 +516,8 @@ func appendCellMesh(vertices []ebiten.Vertex, indices []uint32, poly []V, center
 }
 
 func edgeKey(a, b V) [4]int64 {
-	ax, ay := int64(math.Round(a.X*1e4)), int64(math.Round(a.Y*1e4))
-	bx, by := int64(math.Round(b.X*1e4)), int64(math.Round(b.Y*1e4))
+	ax, ay := int64(math.Round(a.X*1e7)), int64(math.Round(a.Y*1e7))
+	bx, by := int64(math.Round(b.X*1e7)), int64(math.Round(b.Y*1e7))
 	if ax > bx || (ax == bx && ay > by) {
 		ax, ay, bx, by = bx, by, ax, ay
 	}
@@ -527,7 +529,7 @@ func insetForegroundGrid(grid RockGrid) RockGrid {
 	for _, cell := range grid {
 		poly := clipHalfPlane(cell.Polygon, V{-1, 0}, -foregroundScreenInset)
 		poly = clipHalfPlane(poly, V{1, 0}, generationWidth-foregroundScreenInset)
-		if len(poly) < 3 || faceArea(poly) < 1e-9 {
+		if len(poly) < 3 || faceArea(poly) < 1e-15 {
 			continue
 		}
 		cell.Polygon = poly

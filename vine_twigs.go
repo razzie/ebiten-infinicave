@@ -5,7 +5,7 @@ import (
 	"math/rand"
 )
 
-const vineMinEdgeBranchLength = 12.0
+const vineMinEdgeBranchLength = .012
 
 type vineEdge struct{ a, b int }
 
@@ -16,7 +16,7 @@ type vineEdgeGraph struct {
 	bins   map[[2]int][]int
 }
 
-const vineEdgeBinSize = 32.0
+const vineEdgeBinSize = .032
 
 func vineEdgeBin(p V) [2]int {
 	return [2]int{int(math.Floor(p.X / vineEdgeBinSize)), int(math.Floor(p.Y / vineEdgeBinSize))}
@@ -27,7 +27,7 @@ func newVineEdgeGraph(background RockGrid) *vineEdgeGraph {
 	nodes := make(map[[2]int64]int)
 	seen := make(map[[4]int64]bool)
 	node := func(p V) int {
-		key := [2]int64{int64(math.Round(p.X * 1e4)), int64(math.Round(p.Y * 1e4))}
+		key := [2]int64{int64(math.Round(p.X * 1e7)), int64(math.Round(p.Y * 1e7))}
 		if i, ok := nodes[key]; ok {
 			return i
 		}
@@ -40,11 +40,11 @@ func newVineEdgeGraph(background RockGrid) *vineEdgeGraph {
 	for _, cell := range background {
 		for j, a := range cell.Polygon {
 			b := cell.Polygon[(j+1)%len(cell.Polygon)]
-			if (a.X == b.X && (a.X == 0 || a.X == generationWidth)) || (a.Y == b.Y && (a.Y == 0 || a.Y == generationHeight)) {
+			if (a.X == b.X && (a.X == 0 || a.X == generationWidth)) || (a.Y == b.Y && (a.Y == generationMinY || a.Y == generationMaxY)) {
 				continue
 			}
 			key := edgeKey(a, b)
-			if seen[key] || b.Sub(a).Len2() < 1e-12 {
+			if seen[key] || b.Sub(a).Len2() < 1e-18 {
 				continue
 			}
 			seen[key] = true
@@ -109,12 +109,12 @@ func addVineEdgeBranches(field *VineTerrain, vines []Vine, rng *rand.Rand) []Vin
 		// independent roots or recursively fill every seam in the rock grid.
 		for joint := 4 + rng.Intn(5); joint < len(stem.Points)-4; joint += 5 {
 			base := stem.Points[joint]
-			if base.Radius < .7 {
+			if base.Radius < .0007 {
 				continue
 			}
 			bin := vineEdgeBin(base.P)
-			radius := math.Min(.95, base.Radius*lerp(.32, .46, rng.Float64()))
-			reach := lerp(22, 68, rng.Float64())
+			radius := math.Min(.00095, base.Radius*lerp(.32, .46, rng.Float64()))
+			reach := lerp(.022, .068, rng.Float64())
 			best, bestScore := Vine{}, 0.0
 			var bestEdges []int
 			checked := make(map[int]bool)
@@ -129,7 +129,7 @@ func addVineEdgeBranches(field *VineTerrain, vines []Vine, rng *rand.Rand) []Vin
 						a, b := g.points[e.a], g.points[e.b]
 						d := b.Sub(a)
 						q := a.Add(d.Mul(clamp(base.P.Sub(a).Dot(d)/d.Len2(), 0, 1)))
-						if q.Sub(base.P).Len() > 6 {
+						if q.Sub(base.P).Len() > .006 {
 							continue
 						}
 						for _, end := range []int{e.a, e.b} {
@@ -171,18 +171,18 @@ func traceVineEdgeBranch(field *VineTerrain, occupied vineTwigOccupancy, used []
 	advance := func(target V) bool {
 		p := v.Points[len(v.Points)-1].P
 		distance := target.Sub(p).Len()
-		if distance < 1e-9 {
+		if distance < 1e-12 {
 			return true
 		}
 		d := target.Sub(p).Mul(1 / distance)
-		for distance > 1e-9 && length < reach {
-			step := math.Min(2, math.Min(distance, reach-length))
+		for distance > 1e-12 && length < reach {
+			step := math.Min(.002, math.Min(distance, reach-length))
 			q := p.Add(d.Mul(step))
-			if field.growthSpace(q) < radius+.5 || field.growthSpace(lerpV(p, q, .5)) < radius+.5 {
+			if field.growthSpace(q) < radius+.0005 || field.growthSpace(lerpV(p, q, .5)) < radius+.0005 {
 				return false
 			}
 			length += step
-			if length > 8 && occupied.clearance(q) > radius+.5 {
+			if length > .008 && occupied.clearance(q) > radius+.0005 {
 				exposed += step
 			}
 			v.Points = append(v.Points, VinePoint{q, radius})
@@ -214,11 +214,11 @@ func traceVineEdgeBranch(field *VineTerrain, occupied vineTwigOccupancy, used []
 					other = e.b
 				}
 				d := g.points[other].Sub(g.points[end]).Norm()
-				look := g.points[end].Add(d.Mul(math.Min(8, g.points[other].Sub(g.points[end]).Len())))
-				if field.growthSpace(look) < radius+.5 {
+				look := g.points[end].Add(d.Mul(math.Min(.008, g.points[other].Sub(g.points[end]).Len())))
+				if field.growthSpace(look) < radius+.0005 {
 					continue
 				}
-				score := occupied.clearance(look) + heading.Dot(d)*2
+				score := occupied.clearance(look) + heading.Dot(d)*.002
 				if score > best {
 					next, nextEnd, best = candidate, other, score
 				}
@@ -229,7 +229,7 @@ func traceVineEdgeBranch(field *VineTerrain, occupied vineTwigOccupancy, used []
 			edge, end = next, nextEnd
 		}
 	}
-	if length < vineMinEdgeBranchLength || exposed < 8 || exposed < length*.35 {
+	if length < vineMinEdgeBranchLength || exposed < .008 || exposed < length*.35 {
 		return Vine{}, nil, 0
 	}
 	along := 0.0
@@ -237,7 +237,7 @@ func traceVineEdgeBranch(field *VineTerrain, occupied vineTwigOccupancy, used []
 		if i > 0 {
 			along += v.Points[i].P.Sub(v.Points[i-1].P).Len()
 		}
-		v.Points[i].Radius = radius * smoothstep(0, math.Min(18, length*.5), length-along)
+		v.Points[i].Radius = radius * smoothstep(0, math.Min(.018, length*.5), length-along)
 	}
 	v.Points[len(v.Points)-1].Radius = 0
 	return v, path, exposed - .1*length

@@ -51,7 +51,7 @@ type siteGrid struct {
 }
 
 func newSiteGrid(pts []V) *siteGrid {
-	g := &siteGrid{pts: pts, size: 24}
+	g := &siteGrid{pts: pts, size: .024}
 	g.cols, g.rows = int(generationWidth/g.size)+1, int(generationHeight/g.size)+1
 	g.buckets = make([][]int32, g.cols*g.rows)
 	for i, p := range pts {
@@ -62,14 +62,14 @@ func newSiteGrid(pts []V) *siteGrid {
 }
 
 func (g *siteGrid) cellOf(p V) (int, int) {
-	return min(max(int(p.X/g.size), 0), g.cols-1), min(max(int(p.Y/g.size), 0), g.rows-1)
+	return min(max(int(p.X/g.size), 0), g.cols-1), min(max(int((p.Y-generationMinY)/g.size), 0), g.rows-1)
 }
 
 // A site farther than twice the cell's radius cannot cut it, so rings of
 // buckets are clipped nearest first until the next ring is out of reach.
 func (g *siteGrid) cell(i int) []V {
 	a := g.pts[i]
-	poly := []V{{0, 0}, {generationWidth, 0}, {generationWidth, generationHeight}, {0, generationHeight}}
+	poly := []V{{0, generationMinY}, {generationWidth, generationMinY}, {generationWidth, generationMaxY}, {0, generationMaxY}}
 	cx, cy := g.cellOf(a)
 	var ring []int32
 	reach2 := math.Inf(1)
@@ -113,7 +113,7 @@ func (g *siteGrid) cell(i int) []V {
 	}
 	// Overlapping windows must round identically, so redo the clips in site
 	// order over every site that could reach the cell.
-	reach := math.Sqrt(reach2) + 1
+	reach := math.Sqrt(reach2) + .001
 	span := int(math.Ceil(reach / g.size))
 	ring = ring[:0]
 	for y := max(cy-span, 0); y <= min(cy+span, g.rows-1); y++ {
@@ -126,7 +126,7 @@ func (g *siteGrid) cell(i int) []V {
 		}
 	}
 	sort.Slice(ring, func(p, q int) bool { return ring[p] < ring[q] })
-	poly = []V{{0, 0}, {generationWidth, 0}, {generationWidth, generationHeight}, {0, generationHeight}}
+	poly = []V{{0, generationMinY}, {generationWidth, generationMinY}, {generationWidth, generationMaxY}, {0, generationMaxY}}
 	for _, j := range ring {
 		b := g.pts[j]
 		poly = clipHalfPlane(poly, b.Sub(a), 0.5*(b.Len2()-a.Len2()))

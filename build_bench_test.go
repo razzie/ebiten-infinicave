@@ -21,11 +21,12 @@ func statsOf(s sectionData) sectionStats {
 }
 
 // Areas compare with a tolerance because contour clipping order can nudge
-// polished contours slightly.
+// polished contours slightly. Vine counts reflect generation in scene units;
+// rescaling floats can change steering ties and the resulting offshoots.
 func TestSectionStatsStable(t *testing.T) {
 	want := map[int64]sectionStats{
-		1:  {4809, 2064, 108, 1098988.6594},
-		42: {4910, 1948, 110, 993373.1121},
+		1:  {4809, 2064, 134, 1.0989886594},
+		42: {4910, 1948, 115, .9933731121},
 	}
 	for seed, w := range want {
 		got := statsOf(buildSection(seed, 0))
@@ -70,7 +71,7 @@ func BenchmarkBuildSection10(b *testing.B) {
 
 func TestVoronoiCellsMatchReference(t *testing.T) {
 	noise := NewPerlin(rand.New(rand.NewSource(42)))
-	seeds := worldSeeds(42, -1000, noise)
+	seeds := worldSeeds(42, -1, noise)
 	cells := voronoiCells(seeds)
 	for i := range seeds {
 		want := voronoiCell(i, seeds)
@@ -78,7 +79,7 @@ func TestVoronoiCellsMatchReference(t *testing.T) {
 			t.Fatalf("cell %d: %d vertices, want %d", i, len(cells[i]), len(want))
 		}
 		for k := range want {
-			if cells[i][k].Sub(want[k]).Len() > 1e-6 {
+			if cells[i][k].Sub(want[k]).Len() > 1e-9 {
 				t.Fatalf("cell %d vertex %d: %v, want %v", i, k, cells[i][k], want[k])
 			}
 		}

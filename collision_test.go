@@ -9,10 +9,10 @@ import (
 func TestCollisionUnionWithHoleAndPartialSharedBorders(t *testing.T) {
 	// Four strips enclose a hole. Their shared edges have different lengths.
 	grid := RockGrid{
-		hoverRect(30, 1100, 80, 20), hoverRect(30, 1160, 80, 20),
-		hoverRect(30, 1120, 20, 40), hoverRect(90, 1120, 20, 40),
+		hoverRect(0.03, 0.1, 0.08, 0.02), hoverRect(0.03, 0.16, 0.08, 0.02),
+		hoverRect(0.03, 0.12, 0.02, 0.04), hoverRect(0.09, 0.12, 0.02, 0.04),
 		// A corner-touching rectangle stays a separate block.
-		hoverRect(110, 1180, 20, 20),
+		hoverRect(0.11, 0.18, 0.02, 0.02),
 	}
 	geometry := prepareTerrainGeometry(sectionData{foreground: grid}, 0).collision
 	if len(geometry.Polygons) != 3 {
@@ -25,15 +25,15 @@ func TestCollisionUnionWithHoleAndPartialSharedBorders(t *testing.T) {
 			holes++
 		}
 	}
-	if math.Abs(area-5200) > 1e-6 || holes != 1 {
+	if math.Abs(area-.0052) > 1e-12 || holes != 1 {
 		t.Fatalf("area %v / holes %d; internal borders or hole are incorrect", area, holes)
 	}
-	for _, p := range []V{{40, -890}, {100, -850}, {40, -840}, {30, -880}, {120, -810}} {
+	for _, p := range []V{{0.04, -0.89}, {0.1, -0.85}, {0.04, -0.84}, {0.03, -0.88}, {0.12, -0.81}} {
 		if !geometry.Contains(p) {
 			t.Fatalf("solid point %v was missed", p)
 		}
 	}
-	for _, p := range []V{{70, -850}, {20, -850}, {140, -850}} {
+	for _, p := range []V{{0.07, -0.85}, {0.02, -0.85}, {0.14, -0.85}} {
 		if geometry.Contains(p) {
 			t.Fatalf("empty point %v was filled", p)
 		}
@@ -41,19 +41,19 @@ func TestCollisionUnionWithHoleAndPartialSharedBorders(t *testing.T) {
 	if got := prepareTerrainGeometry(sectionData{foreground: grid}, 0).collision; !reflect.DeepEqual(got, geometry) {
 		t.Fatal("collision contour ordering is nondeterministic")
 	}
-	for _, tolerance := range []float64{1, 10, 1000} {
+	for _, tolerance := range []float64{.001, .010, 1} {
 		g := prepareTerrainGeometry(sectionData{foreground: grid}, tolerance).collision
-		if g.Contains(V{70, -850}) || !g.Contains(V{40, -850}) {
+		if g.Contains(V{0.07, -0.85}) || !g.Contains(V{0.04, -0.85}) {
 			t.Fatal("simplification lost the hole or its enclosing rock")
 		}
 	}
 }
 
 func TestCollisionSimplificationToleranceAndSeams(t *testing.T) {
-	poly := []V{{30, 980}, {40, 980.1}, {50, 980}, {60, 980.1}, {70, 980},
-		{70, 1020}, {60, 1020.1}, {50, 1020}, {40, 1020.1}, {30, 1020}}
+	poly := []V{{0.03, 0.98}, {0.04, 0.9801}, {0.05, 0.98}, {0.06, 0.9801}, {0.07, 0.98},
+		{0.07, 1.02}, {0.06, 1.0201}, {0.05, 1.02}, {0.04, 1.0201}, {0.03, 1.02}}
 	before := append([]V(nil), poly...)
-	simplified := simplifyCollisionLoop(poly, .2)
+	simplified := simplifyCollisionLoop(poly, .0002)
 	if len(simplified) >= len(poly) {
 		t.Fatal("tolerance did not reduce boundary complexity")
 	}
@@ -65,11 +65,11 @@ func TestCollisionSimplificationToleranceAndSeams(t *testing.T) {
 		for i, a := range simplified {
 			best = math.Min(best, guideSegmentsDistance2(p, p, a, simplified[(i+1)%len(simplified)]))
 		}
-		if best > .2*.2+1e-9 {
+		if best > .0002*.0002+1e-15 {
 			t.Fatalf("vertex %v exceeds tolerance: %v", p, math.Sqrt(best))
 		}
 	}
-	for _, seam := range []V{{30, 1000}, {70, 1000}} {
+	for _, seam := range []V{{0.03, 1}, {0.07, 1}} {
 		found := false
 		for _, p := range simplified {
 			found = found || p == seam
@@ -79,8 +79,8 @@ func TestCollisionSimplificationToleranceAndSeams(t *testing.T) {
 		}
 	}
 	// Deep concavities and narrow features must never become self-crossing.
-	concave := []V{{30, 1100}, {70, 1100}, {70, 1110}, {40, 1110}, {40, 1140}, {30, 1140}}
-	for _, tolerance := range []float64{1, 10, 1000} {
+	concave := []V{{0.03, 1.1}, {0.07, 1.1}, {0.07, 1.11}, {0.04, 1.11}, {0.04, 1.14}, {0.03, 1.14}}
+	for _, tolerance := range []float64{.001, .010, 1} {
 		g := simplifyCollisionLoop(concave, tolerance)
 		if len(g) < 3 || !simpleCollisionLoop(g) || faceArea(g) <= 0 {
 			t.Fatal("simplification produced an invalid polygon")
@@ -89,7 +89,7 @@ func TestCollisionSimplificationToleranceAndSeams(t *testing.T) {
 }
 
 func TestSceneCollisionGeometryOwnershipAndAvailability(t *testing.T) {
-	h := prepareTerrainGeometry(sectionData{foreground: RockGrid{hoverRect(30, 1100, 30, 30)}}, 0)
+	h := prepareTerrainGeometry(sectionData{foreground: RockGrid{hoverRect(0.03, 0.1, 0.03, 0.03)}}, 0)
 	scene := &Scene{world: &world{sections: map[int64]*worldSection{0: {geometry: h}}}}
 	geometry, ok := scene.CollisionGeometry(0)
 	if !ok || len(geometry.Polygons) == 0 {
@@ -107,7 +107,7 @@ func TestSceneCollisionGeometryOwnershipAndAvailability(t *testing.T) {
 	if !ok || !copy.Contains(V{.04, -.89}) {
 		t.Fatal("repeated collision access changed the cached geometry")
 	}
-	upper := prepareTerrainGeometry(sectionData{id: 1, foreground: RockGrid{hoverRect(30, 1100, 30, 30)}}, 0)
+	upper := prepareTerrainGeometry(sectionData{id: 1, foreground: RockGrid{hoverRect(0.03, 0.1, 0.03, 0.03)}}, 0)
 	scene.world.sections[1] = &worldSection{geometry: upper}
 	if geometry, ok := scene.CollisionGeometry(-1); !ok || geometry.ID != -1 || geometry.Top != -2 || !geometry.Contains(V{.04, -1.89}) {
 		t.Fatal("negative section ID did not resolve the correct cached geometry")
@@ -128,8 +128,8 @@ func TestGeneratedCollisionMatchesRockFaces(t *testing.T) {
 	data := buildSectionMode(42, 0, StudyCurl, nil)
 	h := prepareTerrainGeometry(data, 0)
 	grid := insetForegroundGrid(data.foreground)
-	for y := 1001.25; y < 2000; y += 13 {
-		for x := 18.25; x < generationWidth-18; x += 13 {
+	for y := .00125; y < 1; y += 0.013 {
+		for x := 0.01825; x < generationWidth-0.018; x += 0.013 {
 			p := V{x, y}
 			inside := false
 			for _, cell := range grid {

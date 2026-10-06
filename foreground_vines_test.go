@@ -12,17 +12,17 @@ func TestForegroundVinesStayOnVisibleRock(t *testing.T) {
 	// Bright and shadowed rock share a continuous surface, with a real gap
 	// to the right. The growth field must use geometry instead of shading.
 	rock := RockGrid{
-		{Polygon: []V{{0, 0}, {400, 0}, {400, generationHeight}, {0, generationHeight}}, Color: color.NRGBA{220, 210, 190, 255}},
-		{Polygon: []V{{400, 0}, {700, 0}, {700, generationHeight}, {400, generationHeight}}, Color: color.NRGBA{8, 8, 8, 255}},
-		{Polygon: []V{{800, 0}, {generationWidth, 0}, {generationWidth, generationHeight}, {800, generationHeight}}},
+		{Polygon: []V{{0, generationMinY}, {0.4, generationMinY}, {0.4, generationMaxY}, {0, generationMaxY}}, Color: color.NRGBA{220, 210, 190, 255}},
+		{Polygon: []V{{0.4, generationMinY}, {0.7, generationMinY}, {0.7, generationMaxY}, {0.4, generationMaxY}}, Color: color.NRGBA{8, 8, 8, 255}},
+		{Polygon: []V{{0.8, generationMinY}, {generationWidth, generationMinY}, {generationWidth, generationMaxY}, {0.8, generationMaxY}}},
 	}
 	field := newForegroundVineTerrain(rock, nil)
-	for _, p := range []V{{200, 1500}, {500, 1500}, {400, 1500}} {
-		if field.growthSpace(p) < 15 {
+	for _, p := range []V{{0.2, 1.5}, {0.5, 1.5}, {0.4, 1.5}} {
+		if field.growthSpace(p) < .015 {
 			t.Fatalf("surface shading blocked growth at %v", p)
 		}
 	}
-	for _, p := range []V{{750, 1500}, {900, 1500}, {5, 1500}, {700, 1500}} {
+	for _, p := range []V{{0.75, 1.5}, {0.9, 1.5}, {0.005, 1.5}, {0.7, 1.5}} {
 		if field.growthSpace(p) > 0 {
 			t.Fatalf("surface vines can grow off visible rock at %v", p)
 		}
@@ -65,14 +65,14 @@ func TestForegroundVinesStayOnVisibleRock(t *testing.T) {
 }
 
 func TestForegroundVinesKeepClearOfGuideLines(t *testing.T) {
-	rock := testRockGrid([]V{{500, 1500}}, []color.NRGBA{{100, 90, 80, 255}})
-	guides := []Guide{splineGuide([]V{{350, 0}, {420, 1000}, {300, 2000}, {380, generationHeight}}, 1)}
+	rock := testRockGrid([]V{{0.5, 1.5}}, []color.NRGBA{{100, 90, 80, 255}})
+	guides := []Guide{splineGuide([]V{{0.35, generationMinY}, {0.42, 0}, {0.3, 1}, {0.38, generationMaxY}}, 1)}
 	field := newForegroundVineTerrain(rock, guides)
 	guide := &guides[0]
-	for _, s := range []float64{0, 750, 1500, 2250, guide.S[len(guide.S)-1]} {
+	for _, s := range []float64{0, .750, 1.500, 2.250, guide.S[len(guide.S)-1]} {
 		p, _, normal := guide.frameAt(s)
 		for _, side := range []float64{-1, 1} {
-			if field.growthSpace(p.Add(normal.Mul(side*(foregroundVineGuideClearance-2)))) != 0 {
+			if field.growthSpace(p.Add(normal.Mul(side*(foregroundVineGuideClearance-.002)))) != 0 {
 				t.Fatal("foreground vines can approach a guide line on one side")
 			}
 		}
@@ -99,14 +99,14 @@ func TestForegroundVinesKeepClearOfGuideLines(t *testing.T) {
 
 func TestForegroundVinesUseMutedInheritedColor(t *testing.T) {
 	vines := []Vine{
-		{Parent: -1, Foreground: true, Points: []VinePoint{{V{100, 80}, 3}, {V{100, 100}, 3}, {V{100, 120}, 0}}},
-		{Parent: 0, Joint: 1, Depth: 1, Foreground: true, Points: []VinePoint{{V{100, 100}, 2}, {V{120, 120}, 0}}},
+		{Parent: -1, Foreground: true, Points: []VinePoint{{V{0.1, 0.08}, 0.003}, {V{0.1, 0.1}, 0.003}, {V{0.1, 0.12}, 0}}},
+		{Parent: 0, Joint: 1, Depth: 1, Foreground: true, Points: []VinePoint{{V{0.1, 0.1}, 0.002}, {V{0.12, 0.12}, 0}}},
 	}
 	palette := vinePalette(vines, 0)
 	if max(palette[3].R, palette[3].G, palette[3].B) > 120 || int(palette[3].R)-int(palette[3].B) > 50 || vinePalette(vines, 1) != palette {
 		t.Fatal("foreground stems need subdued highlights inherited by their branches")
 	}
-	if got := vineJoinColor(vines, 1, V{100, 100}, palette[0]); got != vineBandColorFrom(palette, 0) {
+	if got := vineJoinColor(vines, 1, V{0.1, 0.1}, palette[0]); got != vineBandColorFrom(palette, 0) {
 		t.Fatal("foreground fork has a material discontinuity")
 	}
 	meshes := prepareForegroundVines(vines)

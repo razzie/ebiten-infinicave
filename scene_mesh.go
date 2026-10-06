@@ -85,7 +85,7 @@ func (g *Scene) drawGridFaces(dst *ebiten.Image, mesh triangleMesh, top float64)
 		AntiAlias: true,
 		Uniforms: map[string]any{
 			"Texture": float32(g.texture),
-			"Offset":  []float32{317, float32(top) + 791},
+			"Offset":  []float32{317, float32(top*rasterPixelsPerUnit) + 791},
 		},
 	})
 }
@@ -172,8 +172,8 @@ func prepareGrid(grid RockGrid, view View) gridMesh {
 			paths[edge.alpha] = group
 		}
 		path := group[len(group)-1]
-		path.path.MoveTo(float32(edge.a.X), float32(edge.a.Y))
-		path.path.LineTo(float32(edge.b.X), float32(edge.b.Y))
+		path.path.MoveTo(float32(edge.a.X*rasterPixelsPerUnit), float32((edge.a.Y-generationMinY)*rasterPixelsPerUnit))
+		path.path.LineTo(float32(edge.b.X*rasterPixelsPerUnit), float32((edge.b.Y-generationMinY)*rasterPixelsPerUnit))
 		path.edges++
 	}
 	for alpha, group := range paths {

@@ -23,7 +23,7 @@ func prepareVines(vines []Vine) []triangleMesh {
 				p := point.P.Add(n.Mul(band * point.Radius))
 				clr := weatherVineColor(vineJoinColor(vines, index, p, palette[j]), p, vineFamily(vines, index))
 				a := float32(clr.A) / 255
-				vertices = append(vertices, ebiten.Vertex{DstX: float32(p.X), DstY: float32(p.Y), SrcX: .5, SrcY: .5, ColorR: float32(clr.R) / 255 * a, ColorG: float32(clr.G) / 255 * a, ColorB: float32(clr.B) / 255 * a, ColorA: a})
+				vertices = append(vertices, ebiten.Vertex{DstX: float32(p.X * rasterPixelsPerUnit), DstY: float32((p.Y - generationMinY) * rasterPixelsPerUnit), SrcX: .5, SrcY: .5, ColorR: float32(clr.R) / 255 * a, ColorG: float32(clr.G) / 255 * a, ColorB: float32(clr.B) / 255 * a, ColorA: a})
 				if i > 0 && j > 0 {
 					k := uint32(len(vertices) - 1)
 					b := uint32(len(vineBands))
@@ -95,7 +95,7 @@ func vineFamily(vines []Vine, index int) int {
 
 func weatherVineColor(clr color.NRGBA, p V, family int) color.NRGBA {
 	familyOffset := float64(family)
-	grain := .5 + .25*math.Sin(p.X*.071+p.Y*.037+familyOffset*1.7) + .25*math.Sin(p.X*.029-p.Y*.083+familyOffset*.61)
+	grain := .5 + .25*math.Sin(p.X*71+(p.Y-generationMinY)*37+familyOffset*1.7) + .25*math.Sin(p.X*29-(p.Y-generationMinY)*83+familyOffset*.61)
 	factor := .9 + .1*grain
 	return color.NRGBA{
 		R: uint8(math.Round(float64(clr.R) * factor)),

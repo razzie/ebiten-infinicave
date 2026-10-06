@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	guideHoverRadius = 6.0
-	hoverPadding     = 16.0
+	guideHoverRadius = .006
+	hoverPadding     = .016
 )
 
 //go:embed hover.kage
@@ -45,7 +45,7 @@ func polygonBounds(poly []V) (lo, hi V) {
 }
 
 func prepareTerrainGeometry(data sectionData, tolerance float64) *terrainGeometry {
-	h := &terrainGeometry{guides: data.guides, top: sectionWindowTop(data.id)}
+	h := &terrainGeometry{guides: data.guides, top: sectionTop(data.id)}
 	var grid RockGrid
 	for _, cell := range insetForegroundGrid(data.foreground) {
 		if !cell.Raised || cell.Color.A == 0 {
@@ -53,7 +53,7 @@ func prepareTerrainGeometry(data sectionData, tolerance float64) *terrainGeometr
 		}
 		lo, hi := polygonBounds(cell.Polygon)
 		center := faceCenter(cell.Polygon)
-		key := [2]int64{int64(math.Round(center.X * 1000)), int64(math.Round((center.Y + sectionWindowTop(data.id)) * 1000))}
+		key := [2]int64{int64(math.Round(center.X * 1e6)), int64(math.Round((center.Y + sectionTop(data.id)) * 1e6))}
 		h.faces = append(h.faces, terrainFace{poly: cell.Polygon, min: lo, max: hi, block: -1, key: key})
 		grid = append(grid, cell)
 	}
@@ -106,7 +106,7 @@ func (h *terrainGeometry) hit(p V) hoverTarget {
 		// insideFace intentionally excludes boundaries for guide splitting;
 		// hover selection includes them to avoid flickering along cell seams.
 		for j, a := range face.poly {
-			if guideSegmentsDistance2(p, p, a, face.poly[(j+1)%len(face.poly)]) <= 1e-12 {
+			if guideSegmentsDistance2(p, p, a, face.poly[(j+1)%len(face.poly)]) <= 1e-18 {
 				return hoverTarget{geometry: h, index: face.block}
 			}
 		}
@@ -119,13 +119,13 @@ func (w *world) hoverAt(cursor V, cameraY float64, height float64) hoverTarget {
 		return hoverTarget{}
 	}
 	// Match world's rounded rendering origin, including during camera glides.
-	p := cursor.Add(V{Y: math.Round(cameraY)})
+	p := cursor.Add(V{Y: rasterAlignedY(cameraY)})
 	if p.Y >= 0 {
 		return hoverTarget{}
 	}
 	id := max(0, int64(math.Ceil(-p.Y/sectionHeight))-1)
 	if section := w.sections[id]; section != nil {
-		top := sectionWindowTop(id)
+		top := sectionTop(id)
 		return section.geometry.hit(p.Sub(V{Y: top}))
 	}
 	return hoverTarget{}
@@ -202,8 +202,8 @@ func (w *world) hoverPolygons(target hoverTarget, low, high int64) [][]V {
 			}
 			// Use each section's visible band once; padded overlaps must not
 			// brighten the tint or expose geometry outside the loaded terrain.
-			poly := clipHalfPlane(face.poly, V{0, -1}, -generationWidth)
-			poly = clipHalfPlane(poly, V{0, 1}, 2*generationWidth)
+			poly := clipHalfPlane(face.poly, V{0, -1}, 0)
+			poly = clipHalfPlane(poly, V{0, 1}, SectionHeight)
 			if len(poly) < 3 {
 				continue
 			}
@@ -262,16 +262,17 @@ func (r *hoverRenderer) selectTarget(target hoverTarget, w *world, low, high int
 		lo = V{math.Min(lo.X, a.X), math.Min(lo.Y, a.Y)}
 		hi = V{math.Max(hi.X, b.X), math.Max(hi.Y, b.Y)}
 	}
-	r.origin = V{math.Floor(lo.X - hoverPadding), math.Floor(lo.Y - hoverPadding)}
-	width := max(1, int(math.Ceil(hi.X+hoverPadding-r.origin.X)))
-	height := max(1, int(math.Ceil(hi.Y+hoverPadding-r.origin.Y)))
+	r.origin = V{math.Floor((lo.X-hoverPadding)*rasterPixelsPerUnit+1e-9) / rasterPixelsPerUnit,
+		math.Floor((lo.Y-hoverPadding)*rasterPixelsPerUnit+1e-9) / rasterPixelsPerUnit}
+	width := max(1, int(math.Ceil((hi.X+hoverPadding-r.origin.X)*rasterPixelsPerUnit-1e-9)))
+	height := max(1, int(math.Ceil((hi.Y+hoverPadding-r.origin.Y)*rasterPixelsPerUnit-1e-9)))
 	mask := ebiten.NewImage(width, height)
 	defer mask.Deallocate()
 	var path vector.Path
 	for _, poly := range polygons {
-		path.MoveTo(float32(poly[0].X-r.origin.X), float32(poly[0].Y-r.origin.Y))
+		path.MoveTo(float32((poly[0].X-r.origin.X)*rasterPixelsPerUnit), float32((poly[0].Y-r.origin.Y)*rasterPixelsPerUnit))
 		for _, p := range poly[1:] {
-			path.LineTo(float32(p.X-r.origin.X), float32(p.Y-r.origin.Y))
+			path.LineTo(float32((p.X-r.origin.X)*rasterPixelsPerUnit), float32((p.Y-r.origin.Y)*rasterPixelsPerUnit))
 		}
 		if !target.guide {
 			path.Close()
@@ -312,15 +313,13 @@ func (g *Scene) DrawHover(screen *ebiten.Image, viewport Viewport, x, y float64)
 	if g.closed || g.highlight == nil || !viewport.valid() {
 		return
 	}
-	viewport = viewport.generation()
-	x, y = x*generationWidth, y*generationWidth
 	target := g.world.hoverAt(V{x, y}, viewport.Y, viewport.Height)
-	low, high := visibleSections(math.Round(viewport.Y), viewport.Height)
+	low, high := visibleSections(rasterAlignedY(viewport.Y), viewport.Height)
 	g.highlight.selectTarget(target, g.world, low, high)
 	if g.highlight.image != nil {
 		op := &ebiten.DrawImageOptions{}
-		op.GeoM.Translate(g.highlight.origin.X, g.highlight.origin.Y-math.Round(viewport.Y))
-		scale := float64(screen.Bounds().Dx()) / generationWidth
+		op.GeoM.Translate(g.highlight.origin.X*rasterPixelsPerUnit, (g.highlight.origin.Y-rasterAlignedY(viewport.Y))*rasterPixelsPerUnit)
+		scale := float64(screen.Bounds().Dx()) / rasterPixelsPerUnit
 		op.GeoM.Scale(scale, scale)
 		screen.DrawImage(g.highlight.image, op)
 	}

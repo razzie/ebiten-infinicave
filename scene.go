@@ -69,11 +69,6 @@ func (v Viewport) valid() bool {
 		v.Y <= -v.Height && !math.IsNaN(v.Velocity) && !math.IsInf(v.Velocity, 0)
 }
 
-// generation converts scene units to the generator's fixed raster resolution.
-func (v Viewport) generation() Viewport {
-	return Viewport{Y: v.Y * generationWidth, Height: v.Height * generationWidth, Velocity: v.Velocity * generationWidth}
-}
-
 // Scene streams and renders an infinite cave. Create it with NewScene and
 // release it with Close. All Scene methods must run on the Ebitengine game
 // goroutine; generation and mesh preparation run in background workers.
@@ -97,7 +92,7 @@ func NewScene(config Config) (*Scene, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
-	g := &Scene{texture: config.Texture, study: config.Study, view: config.View, collisionTolerance: config.CollisionTolerance * generationWidth, loadGuides: config.LoadGuides}
+	g := &Scene{texture: config.Texture, study: config.Study, view: config.View, collisionTolerance: config.CollisionTolerance, loadGuides: config.LoadGuides}
 	if g.view != ViewShaded {
 		g.texture = 0
 	}
@@ -129,7 +124,6 @@ func (g *Scene) Update(viewport Viewport) bool {
 		return false
 	}
 	g.world.receive(g)
-	viewport = viewport.generation()
 	ready := g.world.ensure(viewport.Y, viewport.Height, viewport.Velocity)
 	g.world.prune(viewport.Y, viewport.Height, viewport.Velocity)
 	return ready
@@ -143,7 +137,6 @@ func (g *Scene) Update(viewport Viewport) bool {
 // or a closed Scene.
 func (g *Scene) Draw(dst *ebiten.Image, viewport Viewport) {
 	if !g.closed && viewport.valid() {
-		viewport = viewport.generation()
 		g.world.draw(dst, viewport.Y, viewport.Height)
 	}
 }

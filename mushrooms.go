@@ -22,7 +22,7 @@ type MushroomGroup struct {
 	Mushrooms []Mushroom
 }
 
-const mushroomSink = 4.0
+const mushroomSink = .004
 
 type mushroomGround struct {
 	poly []V
@@ -41,21 +41,21 @@ func mushroomsForGuides(guides []Guide, foreground RockGrid) []MushroomGroup {
 	var groups []MushroomGroup
 	for i := range guides {
 		g := &guides[i]
-		if len(g.Pts) < 2 || len(g.S) != len(g.Pts) || g.S[len(g.S)-1] < 90 {
+		if len(g.Pts) < 2 || len(g.S) != len(g.Pts) || g.S[len(g.S)-1] < .090 {
 			continue
 		}
 		seed := g.Seed
 		if seed == 0 {
-			seed = sectionSeed(int64(math.Round(g.Pts[0].X*1000)), int64(math.Round(g.Pts[0].Y*1000)))
+			seed = sectionSeed(int64(math.Round(g.Pts[0].X*1e6)), int64(math.Round(g.Pts[0].Y*1e6)))
 		}
 		rng := rand.New(rand.NewSource(sectionSeed(seed, 0x6d757368)))
 		length := g.S[len(g.S)-1]
-		for s := lerp(34, 74, rng.Float64()); s < length-32; s += lerp(155, 235, rng.Float64()) {
+		for s := lerp(.034, .074, rng.Float64()); s < length-.032; s += lerp(.155, .235, rng.Float64()) {
 			count := 3 + rng.Intn(3)
 			group := MushroomGroup{Mushrooms: make([]Mushroom, 0, count)}
 			for j := 0; j < count; j++ {
-				along := s + lerp(-31, 31, rng.Float64())
-				if along < 18 || along > length-18 {
+				along := s + lerp(-.031, .031, rng.Float64())
+				if along < .018 || along > length-.018 {
 					continue
 				}
 				anchor, _, rockNormal := g.frameAt(along)
@@ -67,15 +67,15 @@ func mushroomsForGuides(guides []Guide, foreground RockGrid) []MushroomGroup {
 					continue
 				}
 				size := lerp(.65, 1.2, rng.Float64())
-				stemLength := lerp(13, 23, rng.Float64()) * size
-				capWidth := lerp(9, 15, rng.Float64()) * size
+				stemLength := lerp(.013, .023, rng.Float64()) * size
+				capWidth := lerp(.009, .015, rng.Float64()) * size
 				capHeight := capWidth * lerp(.38, .53, rng.Float64())
 				// The root is buried in the rock; the foreground is drawn over it.
 				root := anchor.Sub(air.Mul(mushroomSink))
 				stemEnd := anchor.Add(air.Mul(stemLength * .38)).Add(V{0, -stemLength * .72})
 				capBack := capWidth*.5*math.Abs(air.X) + capHeight*(1.18*math.Max(air.Y, 0)+.02*math.Max(-air.Y, 0))
-				requiredAir := capBack + .5
-				requiredAir = math.Max(requiredAir, stemLength*.24*math.Max(-air.Y, 0)+.5)
+				requiredAir := capBack + .0005
+				requiredAir = math.Max(requiredAir, stemLength*.24*math.Max(-air.Y, 0)+.0005)
 				if distance := stemEnd.Sub(anchor).Dot(air); distance < requiredAir {
 					stemEnd = stemEnd.Add(air.Mul(requiredAir - distance))
 				}
@@ -117,7 +117,7 @@ func mushroomGroundFromCells(foreground RockGrid) []mushroomGround {
 
 func mushroomOnGround(p V, ground []mushroomGround) bool {
 	for _, cell := range ground {
-		if p.X < cell.lo.X-2 || p.X > cell.hi.X+2 || p.Y < cell.lo.Y-2 || p.Y > cell.hi.Y+2 {
+		if p.X < cell.lo.X-.002 || p.X > cell.hi.X+.002 || p.Y < cell.lo.Y-.002 || p.Y > cell.hi.Y+.002 {
 			continue
 		}
 		for i, a := range cell.poly {
@@ -126,7 +126,7 @@ func mushroomOnGround(p V, ground []mushroomGround) bool {
 				continue
 			}
 			q := a.Add(d.Mul(clamp(p.Sub(a).Dot(d)/d.Len2(), 0, 1)))
-			if p.Sub(q).Len2() <= 4 {
+			if p.Sub(q).Len2() <= .000004 {
 				return true
 			}
 		}
@@ -154,7 +154,7 @@ func prepareMushrooms(groups []MushroomGroup) triangleMesh {
 	var indices []uint32
 	vertex := func(p V, c color.NRGBA) uint32 {
 		a := float32(c.A) / 255
-		vertices = append(vertices, ebiten.Vertex{DstX: float32(p.X), DstY: float32(p.Y), SrcX: .5, SrcY: .5,
+		vertices = append(vertices, ebiten.Vertex{DstX: float32(p.X * rasterPixelsPerUnit), DstY: float32((p.Y - generationMinY) * rasterPixelsPerUnit), SrcX: .5, SrcY: .5,
 			ColorR: float32(c.R) / 255 * a, ColorG: float32(c.G) / 255 * a, ColorB: float32(c.B) / 255 * a, ColorA: a})
 		return uint32(len(vertices) - 1)
 	}
@@ -185,7 +185,7 @@ func prepareMushrooms(groups []MushroomGroup) triangleMesh {
 			ribbon(m.Stem, m.CapWidth*.11, color.NRGBA{R: 216, G: 190, B: 143, A: 255})
 			outline := m.capOutline()
 			center := V{m.CapCenter.X, m.CapCenter.Y - m.CapHeight*.4}
-			fan(center, outline, 1, color.NRGBA{R: 48, G: 36, B: 27, A: 255})
+			fan(center, outline, .001, color.NRGBA{R: 48, G: 36, B: 27, A: 255})
 			fan(center, outline, 0, m.Color)
 		}
 	}

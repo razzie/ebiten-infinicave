@@ -10,17 +10,17 @@ import (
 
 func TestTinyVineBranchesFollowExactCellEdges(t *testing.T) {
 	var seeds []V
-	for y := 200.0; y <= 1200; y += 40 {
-		seeds = append(seeds, V{470, y}, V{530, y})
+	for y := 0.2; y <= 1.2; y += 0.04 {
+		seeds = append(seeds, V{0.47, y}, V{0.53, y})
 	}
 	background := newRockGrid(seeds, func(V) color.NRGBA { return color.NRGBA{30, 30, 30, 255} })
 	// This raised face blocks the right side of the seam, while left-hand
 	// branches have open rock. The root is slightly off-seam to test joining.
-	foreground := RockGrid{{Polygon: []V{{520, 0}, {generationWidth, 0}, {generationWidth, generationHeight}, {520, generationHeight}}, Color: color.NRGBA{180, 180, 170, 255}}}
+	foreground := RockGrid{{Polygon: []V{{0.52, generationMinY}, {generationWidth, generationMinY}, {generationWidth, generationMaxY}, {0.52, generationMaxY}}, Color: color.NRGBA{180, 180, 170, 255}}}
 	field := newVineTerrain(background, foreground)
 	parent := Vine{Parent: -1}
-	for y := 250.0; y <= 1000; y += 2.5 {
-		parent.Points = append(parent.Points, VinePoint{V{498, y}, 2})
+	for y := 0.25; y <= 1; y += 0.0025 {
+		parent.Points = append(parent.Points, VinePoint{V{0.498, y}, 0.002})
 	}
 	generate := func(seed int64) []Vine {
 		return addVineEdgeBranches(field, []Vine{parent}, rand.New(rand.NewSource(seed)))
@@ -57,12 +57,12 @@ func TestTinyVineBranchesFollowExactCellEdges(t *testing.T) {
 		if !v.EdgeAligned || v.Parent != 0 || v.Depth != 1 || v.Points[0].P != parent.Points[v.Joint].P {
 			t.Fatal("fine branch has an invalid attachment")
 		}
-		if length < vineMinEdgeBranchLength || length > 68+1e-6 || v.Points[0].Radius > .95 || v.Points[len(v.Points)-1].Radius != 0 {
+		if length < vineMinEdgeBranchLength || length > .068+1e-9 || v.Points[0].Radius > .00095 || v.Points[len(v.Points)-1].Radius != 0 {
 			t.Fatalf("branch is not tiny and tapered: length %.2f", length)
 		}
 		along, onSeam := 0.0, false
 		for i, point := range v.Points {
-			if field.growthSpace(point.P) < point.Radius || point.P.X+point.Radius > 520+vineForegroundTouch {
+			if field.growthSpace(point.P) < point.Radius || point.P.X+point.Radius > .520+vineForegroundTouch {
 				t.Fatal("tiny branch entered raised rock")
 			}
 			if i == 0 {
@@ -75,13 +75,13 @@ func TestTinyVineBranchesFollowExactCellEdges(t *testing.T) {
 					t.Fatal("fine ribbon crosses unsupported terrain")
 				}
 			}
-			if distanceToEdge(point.P) > 1e-6 && (onSeam || along > 6) {
+			if distanceToEdge(point.P) > 1e-9 && (onSeam || along > .006) {
 				t.Fatalf("branch leaves polygon edge at %v", point.P)
 			}
-			if onSeam && distanceToEdge(lerpV(previous.P, point.P, .5)) > 1e-6 {
+			if onSeam && distanceToEdge(lerpV(previous.P, point.P, .5)) > 1e-9 {
 				t.Fatal("branch cuts across a cell corner")
 			}
-			onSeam = distanceToEdge(point.P) <= 1e-6
+			onSeam = distanceToEdge(point.P) <= 1e-9
 			if i > 1 {
 				a := v.Points[i-1].P.Sub(v.Points[i-2].P).Norm()
 				b := point.P.Sub(v.Points[i-1].P).Norm()
@@ -98,13 +98,13 @@ func TestTinyVineBranchesFollowExactCellEdges(t *testing.T) {
 
 func TestTinyVineBranchesNeedSupportedSeams(t *testing.T) {
 	parent := Vine{Parent: -1}
-	for y := 300.0; y <= 700; y += 2.5 {
-		parent.Points = append(parent.Points, VinePoint{V{498, y}, 2})
+	for y := 0.3; y <= 0.7; y += 0.0025 {
+		parent.Points = append(parent.Points, VinePoint{V{0.498, y}, 0.002})
 	}
 	dark := color.NRGBA{30, 30, 30, 255}
-	background := testRockGrid([]V{{470, 500}, {530, 500}}, []color.NRGBA{dark, dark})
+	background := testRockGrid([]V{{0.47, 0.5}, {0.53, 0.5}}, []color.NRGBA{dark, dark})
 	for _, field := range []*VineTerrain{
-		newVineTerrain(testRockGrid([]V{{500, 500}}, []color.NRGBA{dark}), nil),
+		newVineTerrain(testRockGrid([]V{{0.5, 0.5}}, []color.NRGBA{dark}), nil),
 		newVineTerrain(background, background),
 		newVineTerrain(nil, nil),
 	} {

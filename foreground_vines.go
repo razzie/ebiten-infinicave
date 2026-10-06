@@ -8,7 +8,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-const foregroundVineGuideClearance = 30.0
+const foregroundVineGuideClearance = .030
 
 func newForegroundVineTerrain(foreground RockGrid, guides []Guide) *VineTerrain {
 	// Growth is based on the visible footprint, including its screen inset,
@@ -30,20 +30,20 @@ func newForegroundVineTerrain(foreground RockGrid, guides []Guide) *VineTerrain 
 			a, b := guide.Pts[j-1], guide.Pts[j]
 			d := b.Sub(a)
 			length2 := d.Len2()
-			if length2 < 1e-12 {
+			if length2 < 1e-18 {
 				continue
 			}
 			x0 := max(0, int(math.Floor((math.Min(a.X, b.X)-reach)/vineFieldStep)))
 			x1 := min(vineFieldWidth-1, int(math.Ceil((math.Max(a.X, b.X)+reach)/vineFieldStep)))
-			y0 := max(0, int(math.Floor((math.Min(a.Y, b.Y)-reach)/vineFieldStep)))
-			y1 := min(vineFieldHeight-1, int(math.Ceil((math.Max(a.Y, b.Y)+reach)/vineFieldStep)))
+			y0 := max(0, int(math.Floor((math.Min(a.Y, b.Y)-reach-generationMinY)/vineFieldStep)))
+			y1 := min(vineFieldHeight-1, int(math.Ceil((math.Max(a.Y, b.Y)+reach-generationMinY)/vineFieldStep)))
 			for y := y0; y <= y1; y++ {
 				for x := x0; x <= x1; x++ {
 					i := y*vineFieldWidth + x
 					if field.clearance[i] == 0 {
 						continue
 					}
-					p := V{(float64(x) + .5) * vineFieldStep, (float64(y) + .5) * vineFieldStep}
+					p := V{(float64(x) + .5) * vineFieldStep, generationMinY + (float64(y)+.5)*vineFieldStep}
 					q := a.Add(d.Mul(clamp(p.Sub(a).Dot(d)/length2, 0, 1)))
 					distance := p.Sub(q).Len()
 					if distance < reach {
@@ -57,7 +57,7 @@ func newForegroundVineTerrain(foreground RockGrid, guides []Guide) *VineTerrain 
 }
 
 func generateForegroundVines(foreground RockGrid, guides []Guide, rng *rand.Rand) []Vine {
-	vines := generateVinesInBand(newForegroundVineTerrain(foreground, guides), rng, generationWidth, 2*generationWidth, 2)
+	vines := generateVinesInBand(newForegroundVineTerrain(foreground, guides), rng, 0, SectionHeight, 2)
 	for i := range vines {
 		vines[i].Foreground = true
 	}

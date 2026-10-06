@@ -22,7 +22,7 @@ type GuideLoader func(id int64) []Guide
 // Internal section indices increase upward; only the public loader sees IDs.
 func loadedWorldGuides(seed, id int64, load GuideLoader) []Guide {
 	var guides []Guide
-	top := sectionWindowTop(id)
+	top := sectionTop(id)
 	// Match the random generator's padding, including shoulders beyond it.
 	for owner := id + 2; owner >= max(0, id-2); owner-- {
 		for i, source := range load(-owner) {
@@ -49,7 +49,6 @@ func loadedGuide(source Guide) (Guide, bool) {
 		if math.IsNaN(p.X) || math.IsNaN(p.Y) || math.IsInf(p.X, 0) || math.IsInf(p.Y, 0) {
 			return Guide{}, false
 		}
-		p = p.Mul(generationWidth)
 		if len(g.Pts) == 0 || p != g.Pts[len(g.Pts)-1] {
 			g.Pts = append(g.Pts, p)
 		}

@@ -21,26 +21,26 @@ func generateBranches(guides []Guide, noise *Perlin, rng *rand.Rand) []BranchSeg
 			rng = rand.New(rand.NewSource(g.Seed ^ 0x6272616e6368))
 		}
 		length := g.S[len(g.S)-1]
-		count := int(math.Max(1, math.Round(length/115)))
+		count := int(math.Max(1, math.Round(length/0.115)))
 		for j := 0; j < count; j++ {
 			// Stratified roots leave gaps between the spreading shoulders.
 			s := length * (float64(j) + lerp(.25, .75, rng.Float64())) / float64(count)
 			q, tangent, normal := g.frameAt(s)
-			// The ridge flank reaches 70-140 from the guide; spurs must emerge from its foot.
-			root := q.Add(normal.Mul(lerp(70, 95, rng.Float64())))
+			// The ridge flank reaches 0.07–0.14 scene units from the guide; spurs must emerge from its foot.
+			root := q.Add(normal.Mul(lerp(0.07, 0.095, rng.Float64())))
 			direction := normal.Add(tangent.Mul(lerp(-.65, .65, rng.Float64()))).Norm()
-			reach := lerp(170, 300, rng.Float64())
-			width := lerp(26, 40, rng.Float64())
-			phase := rng.Float64() * 1000
+			reach := lerp(0.17, 0.3, rng.Float64())
+			width := lerp(0.026, 0.04, rng.Float64())
+			phase := rng.Float64() * 1000 // Dimensionless noise phase, independent of scene scale.
 			forkAt := lerp(.38, .60, rng.Float64())
 			forked := false
 			p := root
 			for d := 0.0; d < reach; {
-				next := math.Min(d+12, reach)
+				next := math.Min(d+0.012, reach)
 				u, v := d/reach, next/reach
 				// A coherent lateral drift makes connected fingers instead of
 				// isolated patches from thresholding a second noise field.
-				bend := noise.Noise(p.X*.009+phase, (p.Y+noise.OffsetY)*.009-phase)
+				bend := noise.Noise(p.X*9+phase, (p.Y+noise.OffsetY)*9-phase)
 				heading := direction.Add(direction.Perp().Mul(bend * 1.5)).Norm()
 				end := p.Add(heading.Mul(next - d))
 				branches = append(branches, BranchSegment{
@@ -66,9 +66,9 @@ func generateBranches(guides []Guide, noise *Perlin, rng *rand.Rand) []BranchSeg
 
 func appendBranchFork(branches []BranchSegment, p, direction V, reach, width, light, phase float64, noise *Perlin) []BranchSegment {
 	for d := 0.0; d < reach; {
-		next := math.Min(d+12, reach)
+		next := math.Min(d+0.012, reach)
 		u, v := d/reach, next/reach
-		bend := noise.Noise(p.X*.012+phase, (p.Y+noise.OffsetY)*.012-phase)
+		bend := noise.Noise(p.X*12+phase, (p.Y+noise.OffsetY)*12-phase)
 		heading := direction.Add(direction.Perp().Mul(bend)).Norm()
 		end := p.Add(heading.Mul(next - d))
 		branches = append(branches, BranchSegment{
@@ -81,7 +81,7 @@ func appendBranchFork(branches []BranchSegment, p, direction V, reach, width, li
 	return branches
 }
 
-const branchCell = 32.0
+const branchCell = .032
 
 // BranchField buckets segments by padded bounds; a spur contributes nothing
 // outside its support, and the max in branchBias is order independent.

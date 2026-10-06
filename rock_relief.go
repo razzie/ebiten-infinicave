@@ -5,7 +5,7 @@ import (
 	"math"
 )
 
-const foregroundEdgeFadeWidth = 140.0
+const foregroundEdgeFadeWidth = .140
 
 // All terrain lighting, including exposed walls, uses this one light.
 var rockLight = (V3{-.28, -.86, .65}).Norm()
@@ -28,7 +28,7 @@ func reliefHeight(p V, guides []Guide, noise *Perlin, branches *BranchField) flo
 	height, branchMask := 0.0, 1.0
 	for i := range guides {
 		g := &guides[i]
-		if g.distanceBound2(p) > 160*160 {
+		if g.distanceBound2(p) > 0.16*0.16 {
 			continue
 		}
 		pr := g.project(p)
@@ -39,20 +39,20 @@ func reliefHeight(p V, guides []Guide, noise *Perlin, branches *BranchField) flo
 		// Width and elevation vary along the crest, not independently per face.
 		q := pr.Q
 		q.Y += noise.OffsetY
-		variation := noise.Noise(q.X*.004+17, q.Y*.004+31)
-		width := 105 + 35*variation
-		elevation := 62 + 14*variation
-		bevel := 16 + 4*variation
+		variation := noise.Noise(q.X*4+17, q.Y*4+31)
+		width := 0.105 + 0.035*variation
+		elevation := 0.062 + 0.014*variation
+		bevel := 0.016 + 0.004*variation
 		along := math.Sqrt(math.Max(0, pr.Dist*pr.Dist-pr.Signed*pr.Signed))
-		end := 1 - smoothstep(0, 38, along)
+		end := 1 - smoothstep(0, 0.038, along)
 		height = math.Max(height, ridgeProfile(pr.Dist, width, elevation, bevel)*end)
 	}
 	// Offshoots carry low connected spurs of the same solid rock surface.
-	height = math.Max(height, 80*branchBias(p, branches)*branchMask)
+	height = math.Max(height, 0.08*branchBias(p, branches)*branchMask)
 	world := V{p.X, p.Y + noise.OffsetY}
-	chips := 1.2 * noise.Noise(world.X*.035+43, world.Y*.035+97)
+	chips := .0012 * noise.Noise(world.X*35+43, world.Y*35+97)
 	edgeFade := smoothstep(0, foregroundEdgeFadeWidth, math.Min(p.X, generationWidth-p.X))
-	return math.Max(0, height+chips*smoothstep(0, 15, height)) * edgeFade
+	return math.Max(0, height+chips*smoothstep(0, 0.015, height)) * edgeFade
 }
 
 // Compress site spacing across the lip and stretch it into the flank. The
@@ -61,13 +61,13 @@ func reliefSeeds(seeds []V, guides []Guide) []V {
 	out := append([]V(nil), seeds...)
 	for i, p := range out {
 		gi, pr := nearestGuide(p, guides)
-		if gi < 0 || pr.Signed <= 0 || pr.Dist >= 110 {
+		if gi < 0 || pr.Signed <= 0 || pr.Dist >= 0.11 {
 			continue
 		}
-		shift := -15 * math.Sin(math.Pi*pr.Dist/110)
+		shift := -0.015 * math.Sin(math.Pi*pr.Dist/0.11)
 		out[i] = p.Add(pr.N.Mul(shift))
-		out[i].X = clamp(out[i].X, 1, generationWidth-1)
-		out[i].Y = clamp(out[i].Y, 1, generationHeight-1)
+		out[i].X = clamp(out[i].X, .001, generationWidth-.001)
+		out[i].Y = clamp(out[i].Y, generationMinY+.001, generationMaxY-.001)
 	}
 	return out
 }
@@ -103,9 +103,9 @@ func shadeRockGrids(background, foreground RockGrid, noise *Perlin) {
 				c.Color = rockSurfaceColor(c.Normal, c.Shadow, c.Ambient)
 				// Weathering is coherent across a formation. Lower spurs and
 				// recessed feet stay subdued; only the raised crests catch ivory.
-				patina := .72 + .28*smoothstep(5, 65, c.Z)
+				patina := .72 + .28*smoothstep(0.005, 0.065, c.Z)
 				p := V{c.Center.X, c.Center.Y + noise.OffsetY}
-				patina *= .96 + .06*noise.Noise(p.X*.008+21, p.Y*.008+47)
+				patina *= .96 + .06*noise.Noise(p.X*8+21, p.Y*8+47)
 				c.Color.R = uint8(math.Round(float64(c.Color.R) * patina))
 				c.Color.G = uint8(math.Round(float64(c.Color.G) * patina * .985))
 				c.Color.B = uint8(math.Round(float64(c.Color.B) * patina * .955))
@@ -128,7 +128,7 @@ func artisticRockSeeds(seeds []V, guides []Guide, seed int64, top float64) []V {
 		gi, pr := nearestGuide(p, guides)
 		remove := 0.0
 		if gi >= 0 && pr.Signed > 0 {
-			remove = .15 * smoothstep(25, 95, pr.Dist) * (1 - smoothstep(190, 260, pr.Dist))
+			remove = .15 * smoothstep(0.025, 0.095, pr.Dist) * (1 - smoothstep(0.19, 0.26, pr.Dist))
 		}
 		r := float64(uint64(cellSeed(seed^0x617274, p, top))>>11) / (1 << 53)
 		if r >= remove {

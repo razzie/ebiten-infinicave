@@ -13,30 +13,30 @@ func TestGuideSegmentClearance(t *testing.T) {
 		a, b, c, d V
 		want       float64
 	}{
-		{"crossing interiors", V{0, 0}, V{100, 0}, V{50, -50}, V{50, 50}, 0},
-		{"parallel", V{0, 0}, V{100, 0}, V{20, 30}, V{80, 30}, 900},
-		{"collinear overlap", V{0, 0}, V{100, 0}, V{50, 0}, V{150, 0}, 0},
-		{"endpoints", V{0, 0}, V{100, 0}, V{130, 40}, V{130, 100}, 2500},
-		{"point segment", V{50, 30}, V{50, 30}, V{0, 0}, V{100, 0}, 900},
+		{"crossing interiors", V{0, 0}, V{0.1, 0}, V{0.05, -0.05}, V{0.05, 0.05}, 0},
+		{"parallel", V{0, 0}, V{0.1, 0}, V{0.02, 0.03}, V{0.08, 0.03}, .0009},
+		{"collinear overlap", V{0, 0}, V{0.1, 0}, V{0.05, 0}, V{0.15, 0}, 0},
+		{"endpoints", V{0, 0}, V{0.1, 0}, V{0.13, 0.04}, V{0.13, 0.1}, .0025},
+		{"point segment", V{0.05, 0.03}, V{0.05, 0.03}, V{0, 0}, V{0.1, 0}, .0009},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := guideSegmentsDistance2(tc.a, tc.b, tc.c, tc.d); math.Abs(got-tc.want) > 1e-9 {
+			if got := guideSegmentsDistance2(tc.a, tc.b, tc.c, tc.d); math.Abs(got-tc.want) > 1e-15 {
 				t.Fatalf("distance squared = %v, want %v", got, tc.want)
 			}
 		})
 	}
-	if guideSelfClear(splineGuide([]V{{100, 100}, {600, 100}, {600, 200}, {100, 200}}, 1)) {
+	if guideSelfClear(splineGuide([]V{{0.1, 0.1}, {0.6, 0.1}, {0.6, 0.2}, {0.1, 0.2}}, 1)) {
 		t.Fatal("tight returning curve was accepted")
 	}
-	if !guideSelfClear(splineGuide([]V{{100, 100}, {500, 80}, {700, 300}}, 1)) {
+	if !guideSelfClear(splineGuide([]V{{0.1, 0.1}, {0.5, 0.08}, {0.7, 0.3}}, 1)) {
 		t.Fatal("open curve was rejected")
 	}
 }
 
 func guideSampleCoverage(guides []Guide, minY, maxY float64) float64 {
 	covered, total := 0, 0
-	for y := minY + 25; y < maxY; y += 50 {
-		for x := 25.0; x < generationWidth; x += 50 {
+	for y := minY + 0.025; y < maxY; y += 0.05 {
+		for x := 0.025; x < generationWidth; x += 0.05 {
 			_, pr := nearestGuide(V{x, y}, guides)
 			if pr.Dist <= guideCoverageRadius {
 				covered++
@@ -95,7 +95,7 @@ func TestRandomGuideSectionsHaveCoverageClearanceAndVariety(t *testing.T) {
 			}
 		}
 	}
-	if hi.X-lo.X < generationWidth*.35 || hi.Y-lo.Y < generationWidth*.35 || maxLength-minLength < 250 || len(counts) < 3 {
+	if hi.X-lo.X < generationWidth*.35 || hi.Y-lo.Y < generationWidth*.35 || maxLength-minLength < .250 || len(counts) < 3 {
 		t.Fatalf("scenes still repeat anchors, lengths, or counts: centers %v..%v, lengths %.1f..%.1f, counts %v", lo, hi, minLength, maxLength, counts)
 	}
 	a := generateGuideSection(rand.New(rand.NewSource(42)))
@@ -111,14 +111,14 @@ func TestWorldGuidesKeepClearanceCoverageAndStableOverlaps(t *testing.T) {
 		checkGuideClearance(t, a)
 		checkGuideClearance(t, b)
 		for _, guides := range [][]Guide{a, b} {
-			coverage := guideSampleCoverage(guides, generationWidth, 2*generationWidth)
+			coverage := guideSampleCoverage(guides, 0, SectionHeight)
 			if coverage < .55 || coverage > .85 {
 				t.Errorf("seed %d: streamed section coverage %.3f", seed, coverage)
 			}
 		}
 		bySeed := make(map[int64]Guide)
 		for _, g := range a {
-			bySeed[g.Seed] = shiftedGuide(g, sectionWindowTop(id))
+			bySeed[g.Seed] = shiftedGuide(g, sectionTop(id))
 		}
 		shared := 0
 		for _, g := range b {
@@ -127,7 +127,7 @@ func TestWorldGuidesKeepClearanceCoverageAndStableOverlaps(t *testing.T) {
 				continue
 			}
 			shared++
-			g = shiftedGuide(g, sectionWindowTop(id+1))
+			g = shiftedGuide(g, sectionTop(id+1))
 			if len(g.Pts) != len(other.Pts) || !reflect.DeepEqual(g.S, other.S) {
 				t.Fatal("overlapping windows changed a guide's shape")
 			}

@@ -6,10 +6,10 @@ import (
 )
 
 const (
-	minGuideFaceArea    = 100.0 // about a tenth of an ordinary terrain cell
-	minGuideFaceWidth   = 3.0
+	minGuideFaceArea    = .0001 // about a tenth of an ordinary terrain cell
+	minGuideFaceWidth   = .003
 	minGuideCompactness = .45 // 1 for a circle; long strips and needles approach 0
-	mergeTolerance      = 1e-6
+	mergeTolerance      = 1e-9
 )
 
 type guideFragment struct {
@@ -66,7 +66,7 @@ func mergeGuideFragments(faces []guideFragment, guides []Guide) {
 	}
 	sort.SliceStable(order, func(i, j int) bool {
 		// Ignore roundoff from translating overlapping generation windows.
-		return math.Round(faces[order[i]].area*1e5) < math.Round(faces[order[j]].area*1e5)
+		return math.Round(faces[order[i]].area*1e11) < math.Round(faces[order[j]].area*1e11)
 	})
 	for changed := true; changed; {
 		changed = false
@@ -112,7 +112,7 @@ func mergeGuideFragments(faces []guideFragment, guides []Guide) {
 				if qa != qb {
 					return qa > qb
 				}
-				return math.Round(a.shared*1e5) > math.Round(b.shared*1e5)
+				return math.Round(a.shared*1e8) > math.Round(b.shared*1e8)
 			})
 			if len(neighbors) > 0 {
 				best := neighbors[0]
@@ -162,7 +162,7 @@ func mergeableBorder(a, b []V, guides []Guide) float64 {
 // single rock face and must not be filled by the renderer.
 func joinFaces(a, b []V) []V {
 	type pointKey [2]int64
-	key := func(p V) pointKey { return pointKey{int64(math.Round(p.X * 1e5)), int64(math.Round(p.Y * 1e5))} }
+	key := func(p V) pointKey { return pointKey{int64(math.Round(p.X * 1e8)), int64(math.Round(p.Y * 1e8))} }
 	type edgeKey [2]pointKey
 	edges := make(map[edgeKey]bool)
 	points := make(map[pointKey]V)
@@ -232,7 +232,7 @@ func joinFaces(a, b []V) []V {
 		return nil
 	}
 	poly = cleanFace(poly)
-	if math.Abs(faceArea(poly)-faceArea(a)-faceArea(b)) > 1e-5 || len(faceTriangles(poly)) != len(poly)-2 {
+	if math.Abs(faceArea(poly)-faceArea(a)-faceArea(b)) > 1e-11 || len(faceTriangles(poly)) != len(poly)-2 {
 		return nil
 	}
 	return poly

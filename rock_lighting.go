@@ -21,7 +21,7 @@ func surfaceLight(normal V3) float64 {
 // both layers stable across overlapping windows, reloads, and cache eviction.
 func rockHeight(p V, noise *Perlin) float64 {
 	p.Y += noise.OffsetY
-	return -8 + 4*noise.Noise(p.X*.006, p.Y*.006) + noise.Noise(p.X*.025+73, p.Y*.025+149)
+	return -.008 + .004*noise.Noise(p.X*6, p.Y*6) + .001*noise.Noise(p.X*25+73, p.Y*25+149)
 }
 
 func shapeRockGrid(grid RockGrid, guides []Guide, noise *Perlin) {
@@ -73,7 +73,7 @@ func rockNormal(grid RockGrid, i int, neighbors []int) V3 {
 	var xx, xy, yy, xz, yz float64
 	for _, j := range neighbors {
 		d := grid[j].Center.Sub(grid[i].Center)
-		if d.Len2() < 1e-12 {
+		if d.Len2() < 1e-18 {
 			continue
 		}
 		w, dz := 1/d.Len2(), grid[j].Z-grid[i].Z
@@ -103,7 +103,7 @@ func guideFacing(cell RockCell, guides []Guide) (V, bool) {
 	bounds := makeGuideFragment(cell.Polygon, cell.Center, false)
 	consider := func(q V) {
 		d := q.Sub(cell.Center)
-		if d.Len2() > 1e-12 && d.Len2() < best2 {
+		if d.Len2() > 1e-18 && d.Len2() < best2 {
 			best2, toward = d.Len2(), d.Norm()
 		}
 	}
@@ -119,7 +119,7 @@ func guideFacing(cell RockCell, guides []Guide) (V, bool) {
 		}
 		for j, a := range cell.Polygon {
 			d := cell.Polygon[(j+1)%len(cell.Polygon)].Sub(a)
-			if d.Len2() < 1e-12 {
+			if d.Len2() < 1e-18 {
 				continue
 			}
 			q := a.Add(d.Mul(clamp(cell.Center.Sub(a).Dot(d)/d.Len2(), 0, 1)))

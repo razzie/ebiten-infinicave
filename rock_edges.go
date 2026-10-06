@@ -29,11 +29,11 @@ func rockBoundaryEdges(grid RockGrid, neighbors [][]int, includeWindow bool) []r
 		for j, a := range c.Polygon {
 			b := c.Polygon[(j+1)%len(c.Polygon)]
 			d := b.Sub(a)
-			if d.Len2() < 1e-12 {
+			if d.Len2() < 1e-18 {
 				continue
 			}
 			// Generation-window cuts have no physical thickness.
-			if !includeWindow && ((a.X == b.X && (a.X == 0 || a.X == generationWidth)) || (a.Y == b.Y && (a.Y == 0 || a.Y == generationHeight))) {
+			if !includeWindow && ((a.X == b.X && (a.X == 0 || a.X == generationWidth)) || (a.Y == b.Y && (a.Y == generationMinY || a.Y == generationMaxY))) {
 				continue
 			}
 			ts := []float64{0, 1}
@@ -84,7 +84,7 @@ func appendRockQuad(vertices []ebiten.Vertex, indices []uint32, points [4]V, clr
 	first := uint32(len(vertices))
 	for _, p := range points {
 		vertices = append(vertices, ebiten.Vertex{
-			DstX: float32(p.X), DstY: float32(p.Y), SrcX: float32(p.X), SrcY: float32(p.Y),
+			DstX: float32(p.X * rasterPixelsPerUnit), DstY: float32((p.Y - generationMinY) * rasterPixelsPerUnit), SrcX: float32(p.X * rasterPixelsPerUnit), SrcY: float32((p.Y - generationMinY) * rasterPixelsPerUnit),
 			ColorR: float32(clr.R) / 255, ColorG: float32(clr.G) / 255, ColorB: float32(clr.B) / 255, ColorA: float32(clr.A) / 255,
 			Custom0: 2,
 		})
@@ -105,7 +105,7 @@ func appendRockWalls(vertices []ebiten.Vertex, indices []uint32, grid RockGrid, 
 		if outward.Dot(view) <= 0 {
 			continue
 		}
-		za, zb := math.Max(0, c.depthAt(edge.A)+8), math.Max(0, c.depthAt(edge.B)+8)
+		za, zb := math.Max(0, c.depthAt(edge.A)+.008), math.Max(0, c.depthAt(edge.B)+.008)
 		a := edge.A.Add(view.Mul(za))
 		b := edge.B.Add(view.Mul(zb))
 		normal := (V3{outward.X, outward.Y, .1}).Norm()
@@ -119,7 +119,7 @@ func appendRockWalls(vertices []ebiten.Vertex, indices []uint32, grid RockGrid, 
 func rockViewColor(c RockCell, view View) color.NRGBA {
 	switch view {
 	case ViewHeight:
-		v := uint8(math.Round(255 * clamp((c.Z+12)/112, 0, 1)))
+		v := uint8(math.Round(255 * clamp((c.Z+.012)/.112, 0, 1)))
 		return color.NRGBA{v, v, v, 255}
 	case ViewNormals:
 		return color.NRGBA{uint8(127.5 * (c.Normal.X + 1)), uint8(127.5 * (c.Normal.Y + 1)), uint8(127.5 * (c.Normal.Z + 1)), 255}
@@ -139,7 +139,7 @@ func appendRockBevels(vertices []ebiten.Vertex, indices []uint32, grid RockGrid,
 	for _, edge := range edges {
 		c := grid[edge.Cell]
 		inward := edge.B.Sub(edge.A).Perp().Norm()
-		width := math.Min(.45, edge.B.Sub(edge.A).Len()*.06)
+		width := math.Min(.00045, edge.B.Sub(edge.A).Len()*.06)
 		a, b := edge.A.Add(inward.Mul(width)), edge.B.Add(inward.Mul(width))
 		if !insideFace(lerpV(a, b, .5), c.Polygon) {
 			continue

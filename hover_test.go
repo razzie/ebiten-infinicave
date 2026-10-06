@@ -17,38 +17,38 @@ func hoverRect(x, y, width, height float64) RockCell {
 
 func TestHoverConnectedBlocks(t *testing.T) {
 	grid := RockGrid{
-		hoverRect(30, 1100, 20, 40),
+		hoverRect(0.03, 0.1, 0.02, 0.04),
 		// Two shorter edges share the first cell's long edge.
-		hoverRect(50, 1100, 30, 20),
-		hoverRect(50, 1120, 30, 20),
+		hoverRect(0.05, 0.1, 0.03, 0.02),
+		hoverRect(0.05, 0.12, 0.03, 0.02),
 		// Corner contact and empty space must not join formations.
-		hoverRect(80, 1140, 20, 20),
-		hoverRect(130, 1100, 30, 40),
+		hoverRect(0.08, 0.14, 0.02, 0.02),
+		hoverRect(0.13, 0.1, 0.03, 0.04),
 		// Deep concavity: its empty notch remains unselectable.
-		hoverRock([]V{{200, 1100}, {240, 1100}, {240, 1110}, {210, 1110}, {210, 1140}, {200, 1140}}),
+		hoverRock([]V{{0.2, 0.1}, {0.24, 0.1}, {0.24, 0.11}, {0.21, 0.11}, {0.21, 0.14}, {0.2, 0.14}}),
 	}
-	hidden := hoverRect(300, 1100, 40, 40)
+	hidden := hoverRect(0.3, 0.1, 0.04, 0.04)
 	hidden.Color.A = 0
 	grid = append(grid, hidden)
-	background := hoverRect(350, 1100, 40, 40)
+	background := hoverRect(0.35, 0.1, 0.04, 0.04)
 	background.Raised = false
 	grid = append(grid, background)
 	h := prepareTerrainGeometry(sectionData{foreground: grid}, 0)
 	if len(h.blocks) != 4 {
 		t.Fatalf("got %d blocks, want 4", len(h.blocks))
 	}
-	first := h.hit(V{40, 1110})
-	for _, p := range []V{{60, 1110}, {60, 1130}, {50, 1120}} {
+	first := h.hit(V{0.04, 0.11})
+	for _, p := range []V{{0.06, 0.11}, {0.06, 0.13}, {0.05, 0.12}} {
 		if got := h.hit(p); got != first {
 			t.Fatalf("connected face at %v did not select the entire block", p)
 		}
 	}
-	for _, p := range []V{{90, 1150}, {140, 1110}, {205, 1130}} {
+	for _, p := range []V{{0.09, 0.15}, {0.14, 0.11}, {0.205, 0.13}} {
 		if got := h.hit(p); got.geometry == nil || got == first {
 			t.Fatalf("separate block at %v selected incorrectly", p)
 		}
 	}
-	for _, p := range []V{{120, 1120}, {230, 1130}, {320, 1120}, {370, 1120}} {
+	for _, p := range []V{{0.12, 0.12}, {0.23, 0.13}, {0.32, 0.12}, {0.37, 0.12}} {
 		if got := h.hit(p); got.geometry != nil {
 			t.Fatalf("empty, transparent, or background point %v selected a block", p)
 		}
@@ -56,19 +56,19 @@ func TestHoverConnectedBlocks(t *testing.T) {
 }
 
 func TestHoverGuidePriorityAndScreenInset(t *testing.T) {
-	g := splineGuide([]V{{30, 1100}, {100, 1100}}, 1)
+	g := splineGuide([]V{{0.03, 0.1}, {0.1, 0.1}}, 1)
 	h := prepareTerrainGeometry(sectionData{
-		foreground: RockGrid{hoverRect(0, 1080, 120, 60)}, guides: []Guide{g},
+		foreground: RockGrid{hoverRect(0, 0.08, 0.12, 0.06)}, guides: []Guide{g},
 	}, 0)
-	for _, p := range []V{{60, 1100}, {60, 1106}, {27, 1100}} {
+	for _, p := range []V{{0.06, 0.1}, {0.06, 0.106}, {0.027, 0.1}} {
 		if got := h.hit(p); got.geometry != h || !got.guide {
 			t.Fatalf("point %v should highlight only the guide", p)
 		}
 	}
-	if got := h.hit(V{60, 1107}); got.geometry != h || got.guide {
+	if got := h.hit(V{0.06, 0.107}); got.geometry != h || got.guide {
 		t.Fatal("rock outside the guide hover margin did not select its block")
 	}
-	if got := h.hit(V{17, 1100}); got.geometry != nil {
+	if got := h.hit(V{0.017, 0.1}); got.geometry != nil {
 		t.Fatal("inset rock margin was selectable")
 	}
 	if h.faces[0].min.X != foregroundScreenInset {
@@ -79,7 +79,7 @@ func TestHoverGuidePriorityAndScreenInset(t *testing.T) {
 func TestHoverWorldCoordinatesAndMissingSections(t *testing.T) {
 	w := &world{sections: map[int64]*worldSection{}}
 	for _, id := range []int64{0, 1} {
-		h := prepareTerrainGeometry(sectionData{id: id, foreground: RockGrid{hoverRect(30, 1000, 30, 30)}}, 0)
+		h := prepareTerrainGeometry(sectionData{id: id, foreground: RockGrid{hoverRect(0.03, 0, 0.03, 0.03)}}, 0)
 		w.sections[id] = &worldSection{geometry: h}
 	}
 	for _, tc := range []struct {
@@ -87,12 +87,12 @@ func TestHoverWorldCoordinatesAndMissingSections(t *testing.T) {
 		cursor V
 		id     int64
 	}{
-		{-1000.49, V{40, 10}, 0},
-		{-1000.49, V{40, 0}, 0},
-		{-2000.49, V{40, 10}, 1},
-		{-1500, V{40, 510}, 0},
+		{-1.00049, V{0.04, 0.01}, 0},
+		{-1.00049, V{0.04, 0}, 0},
+		{-2.00049, V{0.04, 0.01}, 1},
+		{-1.500, V{0.04, 0.51}, 0},
 	} {
-		target := w.hoverAt(tc.cursor, tc.camera, 800)
+		target := w.hoverAt(tc.cursor, tc.camera, .800)
 		if target.geometry != w.sections[tc.id].geometry {
 			t.Fatalf("camera %v and cursor %v did not match the rendered section", tc.camera, tc.cursor)
 		}
@@ -101,43 +101,43 @@ func TestHoverWorldCoordinatesAndMissingSections(t *testing.T) {
 		camera float64
 		cursor V
 	}{
-		{-3000, V{40, 10}}, // missing section
-		{-800, V{-1, 10}},
-		{-800, V{generationWidth, 10}},
-		{-800, V{40, -1}},
-		{-800, V{40, 800}},
-		{0, V{40, 0}}, // below world floor
+		{-3, V{0.04, 0.01}}, // missing section
+		{-.800, V{-0.001, 0.01}},
+		{-.800, V{generationWidth, 0.01}},
+		{-.800, V{0.04, -0.001}},
+		{-.800, V{0.04, 0.8}},
+		{0, V{0.04, 0}}, // below world floor
 	} {
-		if target := w.hoverAt(tc.cursor, tc.camera, 800); target.geometry != nil {
+		if target := w.hoverAt(tc.cursor, tc.camera, .800); target.geometry != nil {
 			t.Fatalf("out-of-view cursor %v with camera %v selected terrain", tc.cursor, tc.camera)
 		}
 	}
 }
 
 func TestHoverBlockAcrossSections(t *testing.T) {
-	// Both windows contain the same cells crossing the seam at world Y=-1000.
+	// Both windows contain the same cells crossing the seam at world Y=-1.
 	// A connected cell only in section 1 extends the selected formation there.
 	data := []sectionData{
-		{id: 0, foreground: RockGrid{hoverRect(30, 980, 30, 40), hoverRect(100, 980, 30, 40)}},
-		{id: 1, foreground: RockGrid{hoverRect(30, 1980, 30, 40), hoverRect(30, 1940, 30, 40), hoverRect(100, 1980, 30, 40)}},
+		{id: 0, foreground: RockGrid{hoverRect(0.03, -0.02, 0.03, 0.04), hoverRect(0.1, -0.02, 0.03, 0.04)}},
+		{id: 1, foreground: RockGrid{hoverRect(0.03, 0.98, 0.03, 0.04), hoverRect(0.03, 0.94, 0.03, 0.04), hoverRect(0.1, 0.98, 0.03, 0.04)}},
 	}
 	w := &world{sections: map[int64]*worldSection{}}
 	for _, d := range data {
 		w.sections[d.id] = &worldSection{geometry: prepareTerrainGeometry(d, 0)}
 	}
-	target := w.sections[0].geometry.hit(V{40, 1010})
+	target := w.sections[0].geometry.hit(V{0.04, 0.01})
 	polys := w.hoverPolygons(target, 0, 1)
 	area := 0.0
 	for _, poly := range polys {
 		area += faceArea(poly)
 		for _, p := range poly {
-			if p.X > 60 {
+			if p.X > .060 {
 				t.Fatal("unrelated formation was included across the section seam")
 			}
 		}
 	}
-	if math.Abs(area-2400) > 1e-6 {
-		t.Fatalf("highlighted area %v, want the entire 2400 pixel formation without duplicated overlaps", area)
+	if math.Abs(area-.0024) > 1e-12 {
+		t.Fatalf("highlighted area %v, want the entire 0.0024-unit² formation without duplicated overlaps", area)
 	}
 	// Reloading the neighbor must discover its new geometry, not keep stale pointers.
 	w.sections[1].geometry = prepareTerrainGeometry(data[1], 0)
@@ -152,19 +152,19 @@ func TestHoverShaderAndOverlayCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.close()
-	h := prepareTerrainGeometry(sectionData{foreground: RockGrid{hoverRect(30, 1100, 30, 30), hoverRect(60, 1100, 30, 30)}}, 0)
+	h := prepareTerrainGeometry(sectionData{foreground: RockGrid{hoverRect(0.03, 0.1, 0.03, 0.03), hoverRect(0.06, 0.1, 0.03, 0.03)}}, 0)
 	w := &world{sections: map[int64]*worldSection{0: {geometry: h}}}
-	r.selectTarget(h.hit(V{40, 1110}), w, 0, 0)
+	r.selectTarget(h.hit(V{0.04, 0.11}), w, 0, 0)
 	if r.image == nil || r.image.Bounds().Dx() != 92 {
 		t.Fatal("overlay did not span the entire connected block plus glow padding")
 	}
 	image := r.image
-	r.selectTarget(h.hit(V{70, 1110}), w, 0, 0)
+	r.selectTarget(h.hit(V{0.07, 0.11}), w, 0, 0)
 	if r.image != image {
 		t.Fatal("moving between connected cells rebuilt the hover overlay")
 	}
 	w.revision++
-	r.selectTarget(h.hit(V{70, 1110}), w, 0, 0)
+	r.selectTarget(h.hit(V{0.07, 0.11}), w, 0, 0)
 	if r.image == image {
 		t.Fatal("newly loaded terrain did not invalidate the overlay")
 	}

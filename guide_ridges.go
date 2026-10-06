@@ -13,21 +13,21 @@ func ridgedGuide(g Guide, seed int64) Guide {
 	length := g.S[len(g.S)-1]
 	pts := []V{g.Pts[0]}
 	for s := 0.0; s < length; {
-		step := math.Min(lerp(12, 23, rng.Float64()), length-s)
+		step := math.Min(lerp(0.012, 0.023, rng.Float64()), length-s)
 		// Shorten facets at tight bends so the original curl remains intact.
-		for step > 5 {
+		for step > 0.005 {
 			a, _, _ := g.frameAt(s)
 			b, _, _ := g.frameAt(s + step)
 			mid, _, _ := g.frameAt(s + step*.5)
-			if mid.Sub(lerpV(a, b, .5)).Len() < .8 {
+			if mid.Sub(lerpV(a, b, .5)).Len() < .0008 {
 				break
 			}
 			step *= .7
 		}
 		s += step
 		p, _, n := g.frameAt(s)
-		taper := smoothstep(0, 18, math.Min(s, length-s))
-		pts = append(pts, p.Add(n.Mul(lerp(-2.5, 2.5, rng.Float64())*taper)))
+		taper := smoothstep(0, 0.018, math.Min(s, length-s))
+		pts = append(pts, p.Add(n.Mul(lerp(-0.0025, 0.0025, rng.Float64())*taper)))
 	}
 	g.Pts, g.S = pts, make([]float64, len(pts))
 	g.Min, g.Max = pts[0], pts[0]

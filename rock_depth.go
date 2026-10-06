@@ -5,7 +5,7 @@ import (
 	"sort"
 )
 
-const rockDepthStep = 4.0
+const rockDepthStep = .004
 const rockDepthWidth = int(generationWidth / rockDepthStep)
 const rockDepthHeight = int(generationHeight / rockDepthStep)
 
@@ -20,9 +20,9 @@ func (c RockCell) depthAt(p V) float64 {
 	d := p.Sub(c.Center)
 	z := c.Z - (d.X*c.Normal.X+d.Y*c.Normal.Y)/c.Normal.Z
 	if c.Raised {
-		return clamp(z, math.Max(1, c.Z-28), c.Z+28)
+		return clamp(z, math.Max(.001, c.Z-.028), c.Z+.028)
 	}
-	return clamp(z, c.Z-4, c.Z+4)
+	return clamp(z, c.Z-.004, c.Z+.004)
 }
 
 // Rasterize real faces into a shared height buffer. world-aligned samples and
@@ -30,17 +30,17 @@ func (c RockCell) depthAt(p V) float64 {
 func newRockDepth(grids ...RockGrid) *rockDepth {
 	d := &rockDepth{heights: make([]float64, rockDepthWidth*rockDepthHeight)}
 	for i := range d.heights {
-		d.heights[i] = -16
+		d.heights[i] = -.016
 	}
 	for _, grid := range grids {
 		for _, c := range grid {
-			minY, maxY := float64(generationHeight), 0.0
+			minY, maxY := float64(generationMaxY), float64(generationMinY)
 			for _, p := range c.Polygon {
 				minY, maxY = math.Min(minY, p.Y), math.Max(maxY, p.Y)
 			}
 			var crossings []float64
-			for y := max(0, int(minY/rockDepthStep)); y < min(rockDepthHeight, int(maxY/rockDepthStep)+1); y++ {
-				py := (float64(y) + .5) * rockDepthStep
+			for y := max(0, int((minY-generationMinY)/rockDepthStep)); y < min(rockDepthHeight, int((maxY-generationMinY)/rockDepthStep)+1); y++ {
+				py := generationMinY + (float64(y)+.5)*rockDepthStep
 				crossings = crossings[:0]
 				for j, a := range c.Polygon {
 					b := c.Polygon[(j+1)%len(c.Polygon)]
@@ -63,21 +63,21 @@ func newRockDepth(grids ...RockGrid) *rockDepth {
 }
 
 func (d *rockDepth) at(p V) float64 {
-	if p.X < 0 || p.X >= generationWidth || p.Y < 0 || p.Y >= generationHeight {
-		return -16
+	if p.X < 0 || p.X >= generationWidth || p.Y < generationMinY || p.Y >= generationMaxY {
+		return -.016
 	}
-	return d.heights[int(p.Y/rockDepthStep)*rockDepthWidth+int(p.X/rockDepthStep)]
+	return d.heights[int((p.Y-generationMinY)/rockDepthStep)*rockDepthWidth+int(p.X/rockDepthStep)]
 }
 
 func (d *rockDepth) visibility(p V, z float64) float64 {
 	direction := (V{rockLight.X, rockLight.Y}).Norm()
 	rise := rockLight.Z / math.Hypot(rockLight.X, rockLight.Y)
 	visible := 1.0
-	for distance := 8.0; distance <= 184; distance += 4 {
+	for distance := .008; distance <= .184; distance += .004 {
 		blocker := d.at(p.Add(direction.Mul(distance))) - z - distance*rise
 		// A small bias avoids self-shadow acne; increasing softness models a
 		// finite light source and leaves a sharper contact near the blocker.
-		visible = math.Min(visible, 1-smoothstep(2, 5+distance*.05, blocker))
+		visible = math.Min(visible, 1-smoothstep(.002, .005+distance*.05, blocker))
 		if visible == 0 {
 			break
 		}
@@ -91,8 +91,8 @@ func (d *rockDepth) ambient(p V, z float64) float64 {
 		angle := float64(i) * math.Pi / 4
 		direction := V{math.Cos(angle), math.Sin(angle)}
 		horizon := 0.0
-		for _, distance := range []float64{8, 20, 40} {
-			horizon = math.Max(horizon, (d.at(p.Add(direction.Mul(distance)))-z-3)/distance)
+		for _, distance := range []float64{.008, .020, .040} {
+			horizon = math.Max(horizon, (d.at(p.Add(direction.Mul(distance)))-z-.003)/distance)
 		}
 		occlusion += clamp(horizon, 0, 1)
 	}

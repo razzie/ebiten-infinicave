@@ -10,8 +10,8 @@ import (
 func TestBackgroundContainsBlackAndDarkCells(t *testing.T) {
 	noise := NewPerlin(rand.New(rand.NewSource(42)))
 	tones := make(map[color.NRGBA]bool)
-	for y := 0.0; y < generationHeight; y += 20 {
-		for x := 0.0; x < generationWidth; x += 20 {
+	for y := float64(generationMinY); y < generationMaxY; y += 0.02 {
+		for x := 0.0; x < generationWidth; x += 0.02 {
 			clr := backgroundCellColor(V{x, y}, noise)
 			if clr.A != 255 || clr.R > 50 || clr.G > 51 || clr.B > 49 {
 				t.Fatalf("background must stay opaque and dark: %v", clr)
@@ -22,8 +22,8 @@ func TestBackgroundContainsBlackAndDarkCells(t *testing.T) {
 	if !tones[color.NRGBA{A: 255}] || len(tones) < 10 {
 		t.Fatalf("expected exact black and varied charcoal cells, got %d tones", len(tones))
 	}
-	for y := 0.0; y < generationHeight; y += 20 {
-		for x := 0.0; x < generationWidth; x += 20 {
+	for y := float64(generationMinY); y < generationMaxY; y += 0.02 {
+		for x := 0.0; x < generationWidth; x += 0.02 {
 			p := V{x, y}
 			lit := backgroundSurfaceColor(p, noise, V3{0, -1, 0})
 			shadowed := backgroundSurfaceColor(p, noise, V3{0, 1, 0})
@@ -37,22 +37,22 @@ func TestBackgroundContainsBlackAndDarkCells(t *testing.T) {
 
 func TestGuideLayerOccupancyIsOpaqueAndIndependentOfLight(t *testing.T) {
 	noise := NewPerlin(rand.New(rand.NewSource(42)))
-	guides := []Guide{splineGuide([]V{{100, 400}, {900, 400}}, 1)}
-	for _, p := range []V{{500, 100}, {500, 390}, {500, 900}} {
+	guides := []Guide{splineGuide([]V{{0.1, 0.4}, {0.9, 0.4}}, 1)}
+	for _, p := range []V{{0.5, 0.1}, {0.5, 0.39}, {0.5, 0.9}} {
 		if clr := guideCellColor(p, guides, noise, nil); clr != (color.NRGBA{}) {
 			t.Errorf("unlit guide cell at %v must be transparent, got %v", p, clr)
 		}
 	}
-	if clr := guideCellColor(V{500, 408}, nil, noise, nil); clr.A != 0 {
+	if clr := guideCellColor(V{0.5, 0.408}, nil, noise, nil); clr.A != 0 {
 		t.Errorf("empty guide grid must be transparent, got %v", clr)
 	}
-	crest := guideCellColor(V{500, 408}, guides, noise, nil)
+	crest := guideCellColor(V{0.5, 0.408}, guides, noise, nil)
 	if crest.A != 255 || crest.R < 75 || crest.R > 175 {
 		t.Errorf("crest must remain bright and opaque, got %v", crest)
 	}
 	solid, empty := 0, 0
-	for y := 420.0; y < 680; y += 5 {
-		clr := guideCellColor(V{500, y}, guides, noise, nil)
+	for y := 0.42; y < 0.68; y += 0.005 {
+		clr := guideCellColor(V{0.5, y}, guides, noise, nil)
 		switch clr.A {
 		case 0:
 			empty++
@@ -67,10 +67,10 @@ func TestGuideLayerOccupancyIsOpaqueAndIndependentOfLight(t *testing.T) {
 	}
 
 	// An isolated offshoot remains visible in the subdued flank palette.
-	p := V{500, 650}
+	p := V{0.5, 0.65}
 	branches := newBranchField([]BranchSegment{{
-		A: V{500, 620}, B: V{500, 680},
-		WidthA: 30, WidthB: 20, LightA: .4, LightB: .3,
+		A: V{0.5, 0.62}, B: V{0.5, 0.68},
+		WidthA: .030, WidthB: .020, LightA: .4, LightB: .3,
 	}})
 	if clr := guideCellColor(p, guides, noise, branches); clr.A != 255 || clr.R < 25 {
 		t.Errorf("branch must reveal foreground faces beyond the guide band, got %v", clr)
@@ -84,10 +84,10 @@ func TestBackgroundSeedsWorkWithoutGuides(t *testing.T) {
 	relaxSeeds(seeds, noise)
 	for _, p := range seeds {
 		spacing := desiredSpacing(p, noise)
-		if math.IsNaN(p.X) || math.IsNaN(p.Y) || p.X < 0 || p.X > generationWidth || p.Y < 0 || p.Y > generationHeight {
+		if math.IsNaN(p.X) || math.IsNaN(p.Y) || p.X < 0 || p.X > generationWidth || p.Y < generationMinY || p.Y > generationMaxY {
 			t.Fatalf("invalid background seed: %v", p)
 		}
-		if math.IsNaN(spacing) || spacing < 22 || spacing > 30 {
+		if math.IsNaN(spacing) || spacing < .022 || spacing > .030 {
 			t.Fatalf("invalid background spacing at %v: %v", p, spacing)
 		}
 	}

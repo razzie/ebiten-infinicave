@@ -8,19 +8,19 @@ import (
 )
 
 func TestBranchesExtendReliefBeyondGuideBandAndLeaveGaps(t *testing.T) {
-	guides := []Guide{splineGuide([]V{{100, 400}, {900, 400}}, 1)}
+	guides := []Guide{splineGuide([]V{{0.1, 0.4}, {0.9, 0.4}}, 1)}
 	noise := NewPerlin(rand.New(rand.NewSource(42)))
 	branches := newBranchField(generateBranches(guides, noise, rand.New(rand.NewSource(42))))
 	lit, dark := 0, 0
-	for y := 400 + guideInfluence; y <= 400+guideInfluence+40; y += 10 {
-		for x := 100.0; x <= 900; x += 10 {
+	for y := 0.4 + guideInfluence; y <= 0.4+guideInfluence+0.04; y += 0.01 {
+		for x := 0.1; x <= 0.9; x += 0.01 {
 			p := V{x, y}
 			base := reliefHeight(p, guides, noise, nil)
 			got := reliefHeight(p, guides, noise, branches)
-			if got > base+6 {
+			if got > base+.006 {
 				lit++
 			}
-			if got < .01 {
+			if got < .00001 {
 				dark++
 			}
 		}
@@ -32,14 +32,14 @@ func TestBranchesExtendReliefBeyondGuideBandAndLeaveGaps(t *testing.T) {
 
 func TestBranchesPreserveGuideShadows(t *testing.T) {
 	guides := []Guide{
-		splineGuide([]V{{100, 400}, {900, 400}}, 1),
+		splineGuide([]V{{0.1, 0.4}, {0.9, 0.4}}, 1),
 		// A second ridge intercepts some of the first ridge's branches.
-		splineGuide([]V{{100, 570}, {900, 570}}, 1),
+		splineGuide([]V{{0.1, 0.57}, {0.9, 0.57}}, 1),
 	}
 	noise := NewPerlin(rand.New(rand.NewSource(42)))
 	branches := newBranchField(generateBranches(guides, noise, rand.New(rand.NewSource(42))))
-	for _, y := range []float64{392, 375, 350, 562, 545, 520} {
-		for x := 120.0; x <= 880; x += 10 {
+	for _, y := range []float64{.392, .375, .350, .562, .545, .520} {
+		for x := 0.12; x <= 0.88; x += 0.01 {
 			p := V{x, y}
 			want := reliefHeight(p, guides, noise, nil)
 			got := reliefHeight(p, guides, noise, branches)

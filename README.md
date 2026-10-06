@@ -49,8 +49,9 @@ be finite and positive. Invalid viewports do no work and report not ready.
 Rendering scales scene units uniformly to the destination image's width. Use a
 `Layout` with the same aspect ratio as the viewport: for example, a 1000 × 800
 image for a viewport height of 0.8, or a 500 × 500 image for a single unit square.
-The generator and cached textures retain their fixed resolution independently
-of scene coordinates.
+Generation, spatial fields, and collision calculations use scene units throughout.
+Only mesh preparation and rendering convert coordinates to pixels; cached
+textures use 1000 pixels per scene unit independently of generation.
 
 `scene.DrawHover(screen, viewport, x, y)` adds an optional highlight after drawing;
 pass cursor coordinates in viewport-local scene units and call it only when the

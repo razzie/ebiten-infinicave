@@ -7,15 +7,15 @@ import (
 
 func TestMushroomsFollowGuidesAndKeepCapsUpright(t *testing.T) {
 	guides := []Guide{
-		splineGuide([]V{{100, 300}, {450, 300}, {850, 300}}, 1),
-		splineGuide([]V{{150, 750}, {150, 450}, {150, 180}}, 1),
+		splineGuide([]V{{0.1, 0.3}, {0.45, 0.3}, {0.85, 0.3}}, 1),
+		splineGuide([]V{{0.15, 0.75}, {0.15, 0.45}, {0.15, 0.18}}, 1),
 	}
 	for i := range guides {
 		guides[i].Seed = int64(i + 1)
 	}
 	ground := RockGrid{
-		{Center: V{500, 450}, Polygon: []V{{18, 300}, {982, 300}, {982, 600}, {18, 600}}},
-		{Center: V{325, 450}, Polygon: []V{{150, 18}, {500, 18}, {500, 982}, {150, 982}}},
+		{Center: V{0.5, 0.45}, Polygon: []V{{0.018, 0.3}, {0.982, 0.3}, {0.982, 0.6}, {0.018, 0.6}}},
+		{Center: V{0.325, 0.45}, Polygon: []V{{0.15, 0.018}, {0.5, 0.018}, {0.5, 0.982}, {0.15, 0.982}}},
 	}
 	groups := mushroomsForGuides(guides, ground)
 	if len(groups) < 4 {
@@ -36,7 +36,7 @@ func TestMushroomsFollowGuidesAndKeepCapsUpright(t *testing.T) {
 		}
 		guideIndex, projection := nearestGuide(mushroom.Anchor, guides)
 		rootSegment := mushroom.Stem[1].Sub(mushroom.Stem[0]).Norm()
-		if guideIndex < 0 || projection.Dist > 1e-6 || mathAbs(mushroom.RootDirection.Dot(projection.T)) > 1e-6 || mathAbs(rootSegment.Dot(projection.T)) > .2 {
+		if guideIndex < 0 || projection.Dist > 1e-9 || mathAbs(mushroom.RootDirection.Dot(projection.T)) > 1e-6 || mathAbs(rootSegment.Dot(projection.T)) > .2 {
 			t.Fatalf("stem root is not perpendicular to its guide: root=%+v dist=%.6g direction=%+v tangent=%+v segmentDot=%.6g", mushroom.Anchor, projection.Dist, mushroom.RootDirection, projection.T, rootSegment.Dot(projection.T))
 		}
 		if !mushroomOnGround(mushroom.Anchor, groundBounds) {
@@ -46,7 +46,7 @@ func TestMushroomsFollowGuidesAndKeepCapsUpright(t *testing.T) {
 			t.Fatal("mushroom extends beyond the visible foreground inset")
 		}
 		for _, p := range mushroom.Stem {
-			if p.Sub(mushroom.Anchor).Dot(mushroom.RootDirection) < -mushroomSink-1e-6 {
+			if p.Sub(mushroom.Anchor).Dot(mushroom.RootDirection) < -mushroomSink-1e-9 {
 				t.Fatal("mushroom stem crosses to the rock side of its guide")
 			}
 		}
@@ -69,18 +69,18 @@ func TestMushroomsFollowGuidesAndKeepCapsUpright(t *testing.T) {
 }
 
 func TestMushroomsSkipUnsupportedAndScreenEdgeGuides(t *testing.T) {
-	guide := splineGuide([]V{{4, 300}, {400, 300}}, 1)
+	guide := splineGuide([]V{{0.004, 0.3}, {0.4, 0.3}}, 1)
 	guide.Seed = 42
 	if groups := mushroomsForGuides([]Guide{guide}, nil); len(groups) != 0 {
 		t.Fatal("mushrooms were generated without foreground support")
 	}
-	ground := RockGrid{{Center: V{200, 300}, Polygon: []V{{18, 280}, {300, 280}, {300, 320}, {18, 320}}}}
+	ground := RockGrid{{Center: V{0.2, 0.3}, Polygon: []V{{0.018, 0.28}, {0.3, 0.28}, {0.3, 0.32}, {0.018, 0.32}}}}
 	if groups := mushroomsForGuides([]Guide{guide}, ground); len(groups) != 0 {
 		t.Fatal("mushrooms were generated along an unsupported screen-edge section")
 	}
-	guide = splineGuide([]V{{100, 300}, {500, 300}, {900, 300}}, -1)
+	guide = splineGuide([]V{{0.1, 0.3}, {0.5, 0.3}, {0.9, 0.3}}, -1)
 	guide.Seed = 43
-	ground = RockGrid{{Center: V{500, 300}, Polygon: []V{{18, 280}, {982, 280}, {982, 320}, {18, 320}}}}
+	ground = RockGrid{{Center: V{0.5, 0.3}, Polygon: []V{{0.018, 0.28}, {0.982, 0.28}, {0.982, 0.32}, {0.018, 0.32}}}}
 	if groups := mushroomsForGuides([]Guide{guide}, ground); len(groups) != 0 {
 		t.Fatal("mushrooms were generated with their air side pointing down")
 	}

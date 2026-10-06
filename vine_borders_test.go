@@ -8,15 +8,15 @@ import (
 
 func TestVineBordersUseBackgroundGeometry(t *testing.T) {
 	dark := color.NRGBA{30, 30, 30, 255}
-	background := testRockGrid([]V{{250, 500}, {750, 500}}, []color.NRGBA{dark, dark})
-	foreground := testRockGrid([]V{{500, 250}, {500, 750}}, []color.NRGBA{dark, dark})
+	background := testRockGrid([]V{{0.25, 0.5}, {0.75, 0.5}}, []color.NRGBA{dark, dark})
+	foreground := testRockGrid([]V{{0.5, 0.25}, {0.5, 0.75}}, []color.NRGBA{dark, dark})
 	field := newVineTerrain(background, foreground)
-	for _, p := range []V{{500, 250}, {500, 750}} {
+	for _, p := range []V{{0.5, 0.25}, {0.5, 0.75}} {
 		if got := field.borderDistance(p); got > vineFieldStep {
 			t.Fatalf("equal-tone background seam missing at %v: %.2f", p, got)
 		}
 	}
-	for _, p := range []V{{250, 500}, {1, 500}, {250, 1}, {generationWidth - 1, 500}, {250, generationHeight - 1}} {
+	for _, p := range []V{{0.25, 0.5}, {0.001, 0.5}, {0.25, generationMinY + .001}, {generationWidth - 0.001, 0.5}, {0.25, generationMaxY - .001}} {
 		if got := field.borderDistance(p); got != vineBorderRange {
 			t.Fatalf("foreground seam or window edge attracts vines at %v: %.2f", p, got)
 		}
@@ -25,13 +25,13 @@ func TestVineBordersUseBackgroundGeometry(t *testing.T) {
 
 func TestVineFollowsSeamsAndRoundsJunction(t *testing.T) {
 	dark := color.NRGBA{30, 30, 30, 255}
-	// Three equal-tone cells meet at (500, 487.5). A downward-growing vine
+	// Three equal-tone cells meet at (0.5, 0.4875). A downward-growing vine
 	// must turn onto a diagonal seam, although brightness offers no guidance.
-	background := testRockGrid([]V{{450, 450}, {550, 450}, {500, 550}}, []color.NRGBA{dark, dark, dark})
+	background := testRockGrid([]V{{0.45, 0.45}, {0.55, 0.45}, {0.5, 0.55}}, []color.NRGBA{dark, dark, dark})
 	field := newVineTerrain(background, nil)
-	vine := growVine(field, V{493, 300}, V{0, 1}, 5, 400, 0, 1, 0)
+	vine := growVine(field, V{0.493, 0.3}, V{0, 1}, 0.005, 0.4, 0, 1, 0)
 	length, span := vine.extent()
-	if length < 350 || span < 250 {
+	if length < .350 || span < .250 {
 		t.Fatalf("vine stopped at the cell junction: length %.1f, span %.1f", length, span)
 	}
 	close, samples, totalTurn := 0, 0, 0.0
@@ -52,7 +52,7 @@ func TestVineFollowsSeamsAndRoundsJunction(t *testing.T) {
 			}
 		}
 		samples++
-		if distance < 6 {
+		if distance < .006 {
 			close++
 		}
 		a := vine.Points[i-1].P.Sub(vine.Points[i-2].P).Norm()

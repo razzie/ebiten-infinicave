@@ -47,7 +47,7 @@ func GenerateSectionWithConfig(config Config, id int64) (Section, error) {
 	// Streaming uses nonnegative indices internally; public IDs follow world Y.
 	index := -id
 	data := buildSectionMode(config.Seed, index, config.Study, config.LoadGuides)
-	geometry := prepareTerrainGeometry(data, config.CollisionTolerance*generationWidth)
+	geometry := prepareTerrainGeometry(data, config.CollisionTolerance)
 	section := Section{
 		ID: id, Top: sectionTop(index), WindowTop: sectionWindowTop(index),
 		Background: data.background, Foreground: data.foreground,
@@ -55,6 +55,5 @@ func GenerateSectionWithConfig(config Config, id int64) (Section, error) {
 		Mushrooms: data.mushrooms, Guides: data.guides,
 		Collision: geometry.collision,
 	}
-	section.normalize()
 	return section, nil
 }
