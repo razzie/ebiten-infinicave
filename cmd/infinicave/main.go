@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"math/rand"
 
@@ -38,7 +39,14 @@ func run() error {
 		return err
 	}
 	defer scene.Close()
-	g := &Game{scene: scene, seed: *seed, output: *output, hover: *hover && *output == ""}
+	g := &Game{scene: scene, seed: *seed, output: *output}
+	if *hover && *output == "" {
+		g.highlight, err = newHoverRenderer()
+		if err != nil {
+			return fmt.Errorf("compile hover shader: %w", err)
+		}
+		defer g.highlight.close()
+	}
 
 	_, displayHeight := ebiten.Monitor().Size()
 	windowHeight := displayHeight * 4 / 5

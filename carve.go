@@ -34,7 +34,7 @@ type CarveResult struct {
 // CarveCircle removes foreground rock in a blast centered at a world point.
 // Radius must be finite and positive. The circle uses a 96-sided inscribed
 // polygon (maximum radial error about 0.00054 * radius). Rendering, exact
-// queries, hover, and collision use the same cut. Unsupported mushrooms are
+// queries and collision use the same cut. Unsupported mushrooms are
 // removed and both vine layers are cut. Background rock is retained.
 // Edits persist until Reset or Close, including across eviction.
 // Call on the game goroutine after Update. Closed scenes return an error.
@@ -139,7 +139,9 @@ func (g *Scene) carve(cut rockCut) (CarveResult, error) {
 	sort.Slice(result.SectionIDs, func(i, j int) bool { return result.SectionIDs[i] > result.SectionIDs[j] })
 	w.cuts = append(w.cuts, cut)
 	g.carveUpload(cut)
-	w.revision++
+	if len(result.SectionIDs) > 0 {
+		w.revision++
+	}
 	q = w.queryIndex()
 	remaining := make(map[uint64]map[uint64]bool)
 	for key, parent := range origins {

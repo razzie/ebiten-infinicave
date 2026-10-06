@@ -85,7 +85,7 @@ func TestSectionLoaderHolesCarveGeneratedGeometry(t *testing.T) {
 }
 
 func TestCarveRimsFollowCutBoundariesAndDiagnosticViews(t *testing.T) {
-	scene := queryScene(sectionData{foreground: RockGrid{hoverRect(.1, .1, .8, .8)}})
+	scene := queryScene(sectionData{foreground: RockGrid{terrainRect(.1, .1, .8, .8)}})
 	if _, err := scene.CarveCircle(V{.5, -.5}, .12); err != nil {
 		t.Fatal(err)
 	}

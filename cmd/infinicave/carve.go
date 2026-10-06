@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"image/color"
-	"math"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
@@ -51,7 +50,7 @@ func (c *carveGesture) advance(cursor, world infinicave.V, pressed, released, ca
 func viewerWorldPoint(cursor infinicave.V, cameraY float64, screenWidth int) infinicave.V {
 	// Match the scene's native raster origin; cursor scaling follows Layout.
 	return cursor.Mul(float64(infinicave.Width) / float64(screenWidth)).
-		Add(infinicave.V{Y: math.Round(cameraY*float64(screenWidth)) / float64(screenWidth)})
+		Add(infinicave.V{Y: viewerCameraY(cameraY, screenWidth)})
 }
 
 func (g *Game) updateCarving() {
@@ -111,7 +110,7 @@ func (g *Game) drawCarving(screen *ebiten.Image) {
 		return
 	}
 	scale := float64(screen.Bounds().Dx()) / infinicave.Width
-	cameraY := math.Round(g.camera.Y*scale) / scale
+	cameraY := viewerCameraY(g.camera.Y, screen.Bounds().Dx())
 	pixel := func(p infinicave.V) (float32, float32) {
 		return float32(p.X * scale), float32((p.Y - cameraY) * scale)
 	}

@@ -46,18 +46,19 @@ type world struct {
 	results  chan sectionMesh
 	terrain  chan sectionTerrain
 	// Early collision topology is retained until terrain images publish.
-	collision map[int64]*terrainGeometry
-	done      chan struct{}
-	closing   sync.Once
-	working   bool
-	upload    *sectionUpload
-	white     *ebiten.Image
-	revision  uint64 // invalidates hover overlays when cached sections change
-	queries   *worldQueryIndex
-	cuts      []rockCut // world-space edits survive section eviction
-	pixels    int
-	pending   map[int64]sectionMesh
-	viewport  Viewport
+	collision         map[int64]*terrainGeometry
+	done              chan struct{}
+	closing           sync.Once
+	working           bool
+	upload            *sectionUpload
+	white             *ebiten.Image
+	revision          uint64 // queryable terrain version for the lazy query index
+	collisionRevision uint64 // early collision availability changes
+	queries           *worldQueryIndex
+	cuts              []rockCut // world-space edits survive section eviction
+	pixels            int
+	pending           map[int64]sectionMesh
+	viewport          Viewport
 }
 
 type sectionTerrain struct {
@@ -519,6 +520,7 @@ func (w *world) prune(y float64, height float64, velocity float64) {
 	for id := range w.collision {
 		if !keep[id] && (id < max(0, low-2) || id > high+3) {
 			delete(w.collision, id)
+			w.collisionRevision++
 		}
 	}
 }

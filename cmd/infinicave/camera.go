@@ -23,6 +23,11 @@ type Camera struct {
 	Height              float64
 }
 
+// Match the scene's native raster origin for all viewer interactions.
+func viewerCameraY(y float64, pixels int) float64 {
+	return math.Round(y*float64(pixels)) / float64(pixels)
+}
+
 func (c *Camera) floor() float64 { return -c.Height }
 
 // push adds momentum; negative moves up.

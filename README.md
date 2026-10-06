@@ -56,10 +56,8 @@ at the native screen width; the default is 1000 pixels per scene unit. Resizing
 reuses prepared meshes, queries, and runtime cuts. Sections contributing to the
 viewport refresh first; offscreen images refresh when they become visible.
 
-`scene.DrawHover(screen, viewport, x, y)` adds an optional highlight after drawing;
-pass cursor coordinates in viewport-local scene units and call it only when the
-cursor is active. Convert cursor pixels to scene units with
-`float64(infinicave.Width) / float64(screen.Bounds().Dx())`.
+The viewer implements hover locally using `Query`, `Formation`, and `Guide`;
+applications can use the same APIs to draw their own selection effects.
 `scene.Reset(seed)` discards cached sections and starts a new
 world with the same rendering settings, section content loader, and collision callback. Rendering does not include UI or exports.
 Call every `Scene` method on the Ebitengine game goroutine. `Close` is idempotent
@@ -134,7 +132,7 @@ synchronous generation calls it directly. Protect shared mutable state against
 concurrent calls, including during `Reset`.
 
 Foreground geometry is always prepared and retained, including in diagnostic
-views. Calling `DrawHover` is optional and has no effect on collision availability.
+views. Client selection effects have no effect on collision availability.
 
 Set `Config.OnCollisionReady` before creating a scene to set up physics as soon
 as a section's foreground polygons are available:
@@ -218,6 +216,25 @@ unloaded terrain. Incomplete outlines have closing edges at the cache limits.
 Fetched guide polylines are complete. No individual face or shading details are
 exposed by these APIs, and their coordinates and IDs do not depend on pixel
 resolution.
+
+Use `scene.GeometryRevision()` to detect changes before reusing fetched geometry.
+Formation IDs can stay valid while their cached outlines grow, shrink, or merge.
+The scene-wide revision advances when early collision geometry arrives, terrain
+becomes queryable, sections are evicted, or terrain is edited. Query publication
+advances it separately from early collision availability. It also advances on
+`Reset` and the first `Close`, stays monotonic across resets, and is unaffected by
+resizing, rendering, or reads. Compare versions within one scene; a difference
+means cached geometry may be stale, not a count of changes. Refetch affected IDs
+and handle unavailable objects; formation fetches resolve merge aliases.
+
+```go
+// After scene.Update and any runtime edits:
+revision := scene.GeometryRevision()
+if revision != cachedRevision {
+    // Invalidate your cached geometry and refetch objects as needed.
+    cachedRevision = revision
+}
+```
 
 Carve foreground rock at runtime with world coordinates:
 
@@ -350,7 +367,7 @@ destroyed formations, marking partial reports when terrain is unloaded.
 
 The viewer renders at the window's native pixel resolution, including on HiDPI displays. Resizing rerasterizes visible sections using cached geometry and preserves runtime cuts and camera position. Offscreen sections refresh when they become visible. Scrolling continues while missing sections are prepared in the background, with “Growing upward…” displayed until they are ready. Rocks share world coordinates across sections, and vines keep their full geometry across boundaries.
 
-Hover over a foreground rock for a soft warm highlight and glow over its entire connected block of cells, including across cached section boundaries. Point within 0.006 scene units of a guide to highlight only that guide line instead. Hover effects are enabled by default; use `-hover=false` to disable them (or `-hover=true` to enable them). PNG exports never include hover effects.
+Hover over a foreground rock for a soft warm highlight and glow over its entire connected block of cells, including across cached section boundaries. Point within 0.006 scene units of a guide to highlight only that guide line instead. Hover effects are disabled by default; use `-hover=true` to enable them. PNG exports never include hover effects.
 
 `go run ./cmd/infinicave -seed 42 -output scene.png` exports the bottom 1000 × 2400 pixels and exits. `-texture 0` disables the surface texture. `-fog=false` disables the moving fog. `-collision-tolerance 0.002` simplifies collision polygons with a 0.002-unit tolerance.
 

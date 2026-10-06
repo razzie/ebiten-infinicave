@@ -15,7 +15,7 @@ func rockAt(t *testing.T, scene *Scene, p V) QueryResult {
 
 func TestCarveCircleHoleAndIdentity(t *testing.T) {
 	scene := queryScene(sectionData{foreground: RockGrid{
-		hoverRect(.1, .1, .6, .6), hoverRect(.8, .2, .1, .1),
+		terrainRect(.1, .1, .6, .6), terrainRect(.8, .2, .1, .1),
 	}, guides: []Guide{splineGuide([]V{{.2, .2}, {.6, .2}}, 1)}})
 	parent := rockAt(t, scene, V{.4, -.6}).Hit.FormationID
 	untouched := rockAt(t, scene, V{.85, -.75}).Hit.FormationID
@@ -60,10 +60,6 @@ func TestCarveCircleHoleAndIdentity(t *testing.T) {
 	if !ray.Found || math.Abs(ray.Hit.Distance-.1) > 1e-9 || ray.Hit.Normal.X > -.99 {
 		t.Fatalf("ray did not hit blast wall: %+v", ray)
 	}
-	h := scene.world.sections[0].geometry
-	if h.hit(V{.4, .4}).geometry != nil {
-		t.Fatal("hover still selects blast hole")
-	}
 	// Repeating a cut removes no new area and preserves the survivor ID.
 	again, err := scene.CarveCircle(V{.4, -.6}, .1)
 	if err != nil || len(again.Changes) != 0 || len(again.SectionIDs) != 0 {
@@ -75,7 +71,7 @@ func TestCarveCircleHoleAndIdentity(t *testing.T) {
 }
 
 func TestCarveSegmentSplitsAndDestroys(t *testing.T) {
-	scene := queryScene(sectionData{foreground: RockGrid{hoverRect(.1, .1, .8, .8)}})
+	scene := queryScene(sectionData{foreground: RockGrid{terrainRect(.1, .1, .8, .8)}})
 	parent := rockAt(t, scene, V{.2, -.5}).Hit.FormationID
 	result, err := scene.CarveSegment(V{.5, -.95}, V{.5, -.05}, .04)
 	if err != nil || !result.Complete || len(result.Changes) != 1 ||
@@ -117,8 +113,8 @@ func TestCarveSegmentSplitsAndDestroys(t *testing.T) {
 func TestCarveOneCutCreatesThreeParts(t *testing.T) {
 	// A comb: remove its backbone to detach three independent teeth.
 	scene := queryScene(sectionData{foreground: RockGrid{
-		hoverRect(.2, .15, .1, .7), hoverRect(.3, .15, .4, .1),
-		hoverRect(.3, .45, .4, .1), hoverRect(.3, .75, .4, .1),
+		terrainRect(.2, .15, .1, .7), terrainRect(.3, .15, .4, .1),
+		terrainRect(.3, .45, .4, .1), terrainRect(.3, .75, .4, .1),
 	}})
 	result, err := scene.CarveSegment(V{.25, -.9}, V{.25, -.1}, .12)
 	if err != nil || len(result.Changes) != 1 || len(result.Changes[0].Remaining) != 3 {
@@ -134,7 +130,7 @@ func TestCarveOneCutCreatesThreeParts(t *testing.T) {
 }
 
 func TestCarveBlastSplitsFormation(t *testing.T) {
-	scene := queryScene(sectionData{foreground: RockGrid{hoverRect(.1, .35, .8, .1)}})
+	scene := queryScene(sectionData{foreground: RockGrid{terrainRect(.1, .35, .8, .1)}})
 	result, err := scene.CarveCircle(V{.5, -.6}, .15)
 	if err != nil || len(result.Changes) != 1 || len(result.Changes[0].Remaining) != 2 {
 		t.Fatalf("blast split: %+v / %v", result, err)
@@ -202,8 +198,8 @@ func TestCarveGeneratedTerrainAndOverlappingCuts(t *testing.T) {
 
 func TestCarveAcrossSeamsAndReload(t *testing.T) {
 	data := []sectionData{
-		{id: 0, foreground: RockGrid{hoverRect(.2, -.2, .6, .4)}},
-		{id: 1, foreground: RockGrid{hoverRect(.2, .8, .6, .4)}},
+		{id: 0, foreground: RockGrid{terrainRect(.2, -.2, .6, .4)}},
+		{id: 1, foreground: RockGrid{terrainRect(.2, .8, .6, .4)}},
 	}
 	scene := queryScene(data...)
 	parent := rockAt(t, scene, V{.3, -.95}).Hit.FormationID
@@ -245,7 +241,7 @@ func TestCarveUnloadedTerrainAndQueuedMesh(t *testing.T) {
 	if err != nil || result.Complete || len(result.Changes) != 0 {
 		t.Fatalf("unloaded blast: %+v / %v", result, err)
 	}
-	data := sectionData{id: 2, foreground: RockGrid{hoverRect(.2, .2, .4, .6)}}
+	data := sectionData{id: 2, foreground: RockGrid{terrainRect(.2, .2, .4, .6)}}
 	mesh := sectionMesh{id: 2, geometry: prepareTerrainGeometry(data, 0)}
 	scene.applyStoredCuts(&mesh)
 	if mesh.geometry.collision.Contains(V{.4, -2.5}) || len(mesh.foreground.faces.indices) == 0 {
@@ -253,7 +249,7 @@ func TestCarveUnloadedTerrainAndQueuedMesh(t *testing.T) {
 	}
 	checkMesh(t, mesh.foreground.faces)
 	// A cut to an incomplete formation must not claim a definitive split.
-	partial := queryScene(sectionData{foreground: RockGrid{hoverRect(.2, -.1, .4, .3)}})
+	partial := queryScene(sectionData{foreground: RockGrid{terrainRect(.2, -.1, .4, .3)}})
 	result, err = partial.CarveCircle(V{.4, -.95}, .02)
 	if err != nil || result.Complete || len(result.Changes) != 1 || result.Changes[0].Complete {
 		t.Fatalf("partial formation reported complete: %+v / %v", result, err)
@@ -261,7 +257,7 @@ func TestCarveUnloadedTerrainAndQueuedMesh(t *testing.T) {
 }
 
 func TestCarveConcaveFaceAndRectangleEnds(t *testing.T) {
-	scene := queryScene(sectionData{foreground: RockGrid{hoverRock([]V{
+	scene := queryScene(sectionData{foreground: RockGrid{terrainRock([]V{
 		{.1, .1}, {.8, .1}, {.8, .3}, {.3, .3}, {.3, .8}, {.1, .8},
 	})}})
 	_, err := scene.CarveSegment(V{.15, -.75}, V{.45, -.75}, .08)
@@ -333,7 +329,7 @@ func TestCarveValidationAndCoverage(t *testing.T) {
 
 func TestCarveOutsideWorldLeavesPaddingAndIdentityAlone(t *testing.T) {
 	// This face extends below the world floor in the generation padding.
-	scene := queryScene(sectionData{foreground: RockGrid{hoverRect(.2, .8, .4, .5)}})
+	scene := queryScene(sectionData{foreground: RockGrid{terrainRect(.2, .8, .4, .5)}})
 	id := rockAt(t, scene, V{.4, -.1}).Hit.FormationID
 	result, err := scene.CarveCircle(V{.4, .15}, .05)
 	if err != nil || !result.Complete || len(result.Changes) != 0 || len(result.SectionIDs) != 0 || len(scene.world.cuts) != 0 {
@@ -345,7 +341,7 @@ func TestCarveOutsideWorldLeavesPaddingAndIdentityAlone(t *testing.T) {
 }
 
 func TestCarveDuringEveryUploadStage(t *testing.T) {
-	data := sectionData{foreground: RockGrid{hoverRect(.2, .2, .6, .6)}}
+	data := sectionData{foreground: RockGrid{terrainRect(.2, .2, .6, .6)}}
 	for stage := 0; stage <= 8; stage++ {
 		t.Run(string(rune('0'+stage)), func(t *testing.T) {
 			scene := queryScene()

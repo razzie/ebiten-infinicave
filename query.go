@@ -74,6 +74,8 @@ type QueryResult struct {
 // CollisionTolerance. SectionIDs list the contributing owned section bands.
 // Complete is false if the formation continues into uncached terrain; in that
 // case Polygons include closing edges at the loaded bands' limits.
+// Geometry can grow or shrink under the same ID as sections load or evict.
+// Use Scene.GeometryRevision to detect when a retained copy may be stale.
 // No individual face, shading, or generation details are exposed.
 type Formation struct {
 	ID         FormationID

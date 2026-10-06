@@ -76,6 +76,7 @@ func (w *world) receiveCollision(g *Scene) {
 			w.collision = make(map[int64]*terrainGeometry)
 		}
 		w.collision[terrain.id] = geometry
+		w.collisionRevision++
 		if g.onCollisionReady != nil {
 			g.onCollisionReady(copyCollisionGeometry(geometry.collision))
 		}

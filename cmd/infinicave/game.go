@@ -22,7 +22,7 @@ type Game struct {
 	loading      bool
 	seed         int64
 	output       string
-	hover        bool
+	highlight    *hoverRenderer
 	exported     bool
 	exportErr    error
 	carving      carveGesture
@@ -63,12 +63,7 @@ func (g *Game) Update() error {
 
 func (g *Game) Draw(screen *ebiten.Image) {
 	g.scene.Draw(screen, g.viewport())
-	if g.hover && ebiten.IsFocused() {
-		x, y := ebiten.CursorPositionF()
-		scale := float64(infinicave.Width) / float64(screen.Bounds().Dx())
-		x, y = x*scale, y*scale
-		g.scene.DrawHover(screen, g.viewport(), x, y)
-	}
+	g.drawHover(screen)
 	if g.loading {
 		ebitenutil.DebugPrintAt(screen, "Growing upward...", 8, 24)
 	}

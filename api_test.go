@@ -199,6 +199,5 @@ func TestPublicSceneConfigurationAndLifecycle(t *testing.T) {
 		}
 		// Closed scenes must leave rendering destinations untouched.
 		scene.Draw(nil, infinicave.Viewport{Y: -.8, Height: .8})
-		scene.DrawHover(nil, infinicave.Viewport{Y: -.8, Height: .8}, 1, 1)
 	}
 }

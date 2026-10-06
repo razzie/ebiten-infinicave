@@ -22,7 +22,7 @@ func TestCarveRemovesWholeUnsupportedMushroomsIndividually(t *testing.T) {
 	group := MushroomGroup{Mushrooms: []Mushroom{
 		testGroundedMushroom(.3, .4), testGroundedMushroom(.5, .4), testGroundedMushroom(.7, .4),
 	}}
-	scene := queryScene(sectionData{foreground: RockGrid{hoverRect(.1, .4, .8, .3)}, mushrooms: []MushroomGroup{group}})
+	scene := queryScene(sectionData{foreground: RockGrid{terrainRect(.1, .4, .8, .3)}, mushrooms: []MushroomGroup{group}})
 	if _, err := scene.CarveCircle(V{.3, -.6}, .014); err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestCarveRemovesWholeUnsupportedMushroomsIndividually(t *testing.T) {
 
 func TestCarveRetainsMushroomWhileBuriedRootStillTouchesRock(t *testing.T) {
 	m := testGroundedMushroom(.5, .4)
-	scene := queryScene(sectionData{foreground: RockGrid{hoverRect(.1, .4, .8, .3)}, mushrooms: []MushroomGroup{{Mushrooms: []Mushroom{m}}}})
+	scene := queryScene(sectionData{foreground: RockGrid{terrainRect(.1, .4, .8, .3)}, mushrooms: []MushroomGroup{{Mushrooms: []Mushroom{m}}}})
 	// Anchor is removed, but the buried root still has support.
 	if _, err := scene.CarveCircle(V{.5, -.6}, .0025); err != nil {
 		t.Fatal(err)
@@ -152,8 +152,8 @@ func TestCarveVineTangencyAndRibbonOnlyOverlap(t *testing.T) {
 
 func TestCarvePlantsAcrossSectionSeamsAndReload(t *testing.T) {
 	data := []sectionData{
-		{id: 0, foreground: RockGrid{hoverRect(.1, -.1, .8, .2)}, mushrooms: []MushroomGroup{{Mushrooms: []Mushroom{testGroundedMushroom(.4, -.1)}}}},
-		{id: 1, foreground: RockGrid{hoverRect(.1, .9, .8, .2)}, vines: []Vine{{Parent: -1, Points: []VinePoint{{V{.2, 1}, .003}, {V{.8, 1}, .003}}}}},
+		{id: 0, foreground: RockGrid{terrainRect(.1, -.1, .8, .2)}, mushrooms: []MushroomGroup{{Mushrooms: []Mushroom{testGroundedMushroom(.4, -.1)}}}},
+		{id: 1, foreground: RockGrid{terrainRect(.1, .9, .8, .2)}, vines: []Vine{{Parent: -1, Points: []VinePoint{{V{.2, 1}, .003}, {V{.8, 1}, .003}}}}},
 	}
 	scene := queryScene(data...)
 	if _, err := scene.CarveCircle(V{.4, -1.1}, .02); err != nil {
@@ -181,7 +181,7 @@ func TestCarvePlantsAcrossSectionSeamsAndReload(t *testing.T) {
 }
 
 func TestCarvePlantsDuringEveryUploadStage(t *testing.T) {
-	data := sectionData{foreground: RockGrid{hoverRect(.1, .4, .8, .3)}, mushrooms: []MushroomGroup{{Mushrooms: []Mushroom{testGroundedMushroom(.5, .4)}}},
+	data := sectionData{foreground: RockGrid{terrainRect(.1, .4, .8, .3)}, mushrooms: []MushroomGroup{{Mushrooms: []Mushroom{testGroundedMushroom(.5, .4)}}},
 		vines: []Vine{{Parent: -1, Points: []VinePoint{{V{.1, .4}, .003}, {V{.9, .4}, .003}}}}}
 	for stage := 0; stage <= 8; stage++ {
 		t.Run(string(rune('0'+stage)), func(t *testing.T) {

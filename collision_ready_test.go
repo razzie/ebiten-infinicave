@@ -50,7 +50,7 @@ func TestCollisionReadyDuringUploadIncludesStoredCutsAndOwnsPolygons(t *testing.
 	defer g.Close()
 	cut, _ := (Hole{Shape: HoleCircle, Center: V{.5, -1.5}, Radius: .1}).rockCut()
 	w.cuts = []rockCut{cut}
-	early := prepareTerrainGeometry(sectionData{id: 1, foreground: RockGrid{hoverRect(.2, .2, .6, .6)}}, 0)
+	early := prepareTerrainGeometry(sectionData{id: 1, foreground: RockGrid{terrainRect(.2, .2, .6, .6)}}, 0)
 	w.terrain <- sectionTerrain{id: 1, geometry: early}
 	called := 0
 	g.onCollisionReady = func(geometry CollisionGeometry) {

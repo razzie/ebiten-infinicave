@@ -9,10 +9,10 @@ import (
 func TestCollisionUnionWithHoleAndPartialSharedBorders(t *testing.T) {
 	// Four strips enclose a hole. Their shared edges have different lengths.
 	grid := RockGrid{
-		hoverRect(0.03, 0.1, 0.08, 0.02), hoverRect(0.03, 0.16, 0.08, 0.02),
-		hoverRect(0.03, 0.12, 0.02, 0.04), hoverRect(0.09, 0.12, 0.02, 0.04),
+		terrainRect(0.03, 0.1, 0.08, 0.02), terrainRect(0.03, 0.16, 0.08, 0.02),
+		terrainRect(0.03, 0.12, 0.02, 0.04), terrainRect(0.09, 0.12, 0.02, 0.04),
 		// A corner-touching rectangle stays a separate block.
-		hoverRect(0.11, 0.18, 0.02, 0.02),
+		terrainRect(0.11, 0.18, 0.02, 0.02),
 	}
 	geometry := prepareTerrainGeometry(sectionData{foreground: grid}, 0).collision
 	if len(geometry.Polygons) != 3 {
@@ -89,7 +89,7 @@ func TestCollisionSimplificationToleranceAndSeams(t *testing.T) {
 }
 
 func TestSceneCollisionGeometryOwnershipAndAvailability(t *testing.T) {
-	h := prepareTerrainGeometry(sectionData{foreground: RockGrid{hoverRect(0.03, 0.1, 0.03, 0.03)}}, 0)
+	h := prepareTerrainGeometry(sectionData{foreground: RockGrid{terrainRect(0.03, 0.1, 0.03, 0.03)}}, 0)
 	scene := &Scene{world: &world{sections: map[int64]*worldSection{0: {geometry: h}}}}
 	geometry, ok := scene.CollisionGeometry(0)
 	if !ok || len(geometry.Polygons) == 0 {
@@ -107,7 +107,7 @@ func TestSceneCollisionGeometryOwnershipAndAvailability(t *testing.T) {
 	if !ok || !copy.Contains(V{.04, -.89}) {
 		t.Fatal("repeated collision access changed the cached geometry")
 	}
-	upper := prepareTerrainGeometry(sectionData{id: 1, foreground: RockGrid{hoverRect(0.03, 0.1, 0.03, 0.03)}}, 0)
+	upper := prepareTerrainGeometry(sectionData{id: 1, foreground: RockGrid{terrainRect(0.03, 0.1, 0.03, 0.03)}}, 0)
 	scene.world.sections[1] = &worldSection{geometry: upper}
 	if geometry, ok := scene.CollisionGeometry(-1); !ok || geometry.ID != -1 || geometry.Top != -2 || !geometry.Contains(V{.04, -1.89}) {
 		t.Fatal("negative section ID did not resolve the correct cached geometry")

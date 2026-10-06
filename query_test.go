@@ -25,8 +25,8 @@ func mustQuery(t *testing.T, scene *Scene, ray Ray, options QueryOptions) QueryR
 
 func TestQueryFormationPointRayAndFetch(t *testing.T) {
 	scene := queryScene(sectionData{foreground: RockGrid{
-		hoverRect(.2, .2, .1, .2), hoverRect(.3, .2, .1, .2),
-		hoverRect(.6, .2, .1, .2),
+		terrainRect(.2, .2, .1, .2), terrainRect(.3, .2, .1, .2),
+		terrainRect(.6, .2, .1, .2),
 	}})
 	options := QueryOptions{Targets: TargetRock}
 	point := mustQuery(t, scene, Ray{Origin: V{.25, -.7}}, options)
@@ -78,8 +78,8 @@ func TestQueryFormationPointRayAndFetch(t *testing.T) {
 
 func TestQueryHoleAndConcavity(t *testing.T) {
 	scene := queryScene(sectionData{foreground: RockGrid{
-		hoverRect(.2, .2, .3, .05), hoverRect(.2, .45, .3, .05),
-		hoverRect(.2, .25, .05, .2), hoverRect(.45, .25, .05, .2),
+		terrainRect(.2, .2, .3, .05), terrainRect(.2, .45, .3, .05),
+		terrainRect(.2, .25, .05, .2), terrainRect(.45, .25, .05, .2),
 	}})
 	options := QueryOptions{Targets: TargetRock}
 	if r := mustQuery(t, scene, Ray{Origin: V{.3, -.65}}, options); r.Found || !r.Complete {
@@ -94,7 +94,7 @@ func TestQueryHoleAndConcavity(t *testing.T) {
 		t.Fatal("formation fetch lost its hole")
 	}
 	// Hit testing stays exact even when collision contours are simplified.
-	concave := queryScene(sectionData{foreground: RockGrid{hoverRock([]V{
+	concave := queryScene(sectionData{foreground: RockGrid{terrainRock([]V{
 		{.2, .2}, {.4, .2}, {.4, .3}, {.3, .3}, {.3, .4}, {.2, .4},
 	})}})
 	if r := mustQuery(t, concave, Ray{Origin: V{.35, -.65}}, options); r.Found {
@@ -104,7 +104,7 @@ func TestQueryHoleAndConcavity(t *testing.T) {
 
 func TestQueryGuidesRadiusNearestAndFetch(t *testing.T) {
 	g := splineGuide([]V{{.3, .2}, {.3, .4}}, 1)
-	scene := queryScene(sectionData{guides: []Guide{g}, foreground: RockGrid{hoverRect(.5, .2, .1, .2)}})
+	scene := queryScene(sectionData{guides: []Guide{g}, foreground: RockGrid{terrainRect(.5, .2, .1, .2)}})
 	for _, tc := range []struct {
 		options  QueryOptions
 		kind     TargetMask
@@ -149,7 +149,7 @@ func TestQueryGuidesRadiusNearestAndFetch(t *testing.T) {
 func TestQueryNearestRockAndGuideTie(t *testing.T) {
 	for _, guideX := range []float64{.2, .4} {
 		scene := queryScene(sectionData{
-			foreground: RockGrid{hoverRect(.2, .2, .1, .2)},
+			foreground: RockGrid{terrainRect(.2, .2, .1, .2)},
 			guides:     []Guide{{Pts: []V{{guideX, .2}, {guideX, .4}}}},
 		})
 		want := TargetRock
@@ -188,9 +188,9 @@ func TestQueryCapsuleEndCapsTangencyAndCollinear(t *testing.T) {
 
 func TestQueryAcrossSectionsAndNoInternalSeam(t *testing.T) {
 	data := []sectionData{
-		{id: 0, foreground: RockGrid{hoverRect(.2, -.1, .1, .2)},
+		{id: 0, foreground: RockGrid{terrainRect(.2, -.1, .1, .2)},
 			guides: []Guide{{Pts: []V{{.5, -.1}, {.5, .1}}}}},
-		{id: 1, foreground: RockGrid{hoverRect(.2, .9, .1, .2)},
+		{id: 1, foreground: RockGrid{terrainRect(.2, .9, .1, .2)},
 			guides: []Guide{{Pts: []V{{.5, .9}, {.5, 1.1}}}}},
 	}
 	scene := queryScene(data...)
@@ -232,7 +232,7 @@ func TestQueryAcrossSectionsAndNoInternalSeam(t *testing.T) {
 func TestQueryMissingTerrainAndOutOfWorld(t *testing.T) {
 	scene := queryScene(
 		sectionData{id: 0},
-		sectionData{id: 2, foreground: RockGrid{hoverRect(.2, .2, .1, .2)}},
+		sectionData{id: 2, foreground: RockGrid{terrainRect(.2, .2, .1, .2)}},
 	)
 	options := QueryOptions{Targets: TargetRock}
 	for _, ray := range []Ray{
@@ -253,7 +253,7 @@ func TestQueryMissingTerrainAndOutOfWorld(t *testing.T) {
 		}
 	}
 	scene.world.sections[0].geometry = prepareTerrainGeometry(sectionData{
-		foreground: RockGrid{hoverRect(.2, .2, .1, .2)},
+		foreground: RockGrid{terrainRect(.2, .2, .1, .2)},
 	}, 0)
 	scene.world.revision++
 	// A confirmed hit before the unknown part is still useful.
@@ -270,8 +270,8 @@ func TestQueryMissingTerrainAndOutOfWorld(t *testing.T) {
 
 func TestQueryIDMergesAndLifecycle(t *testing.T) {
 	// Two loaded ends have no shared faces until their connecting section loads.
-	bottom := sectionData{id: 0, foreground: RockGrid{hoverRect(.2, -.1, .1, .2)}}
-	top := sectionData{id: 2, foreground: RockGrid{hoverRect(.2, .9, .1, .2)}}
+	bottom := sectionData{id: 0, foreground: RockGrid{terrainRect(.2, -.1, .1, .2)}}
+	top := sectionData{id: 2, foreground: RockGrid{terrainRect(.2, .9, .1, .2)}}
 	scene := queryScene(bottom, top)
 	options := QueryOptions{Targets: TargetRock}
 	a := mustQuery(t, scene, Ray{Origin: V{.25, -.95}}, options).Hit.FormationID
@@ -280,7 +280,7 @@ func TestQueryIDMergesAndLifecycle(t *testing.T) {
 		t.Fatal("unconnected cached ends already share identity")
 	}
 	middle := sectionData{id: 1, foreground: RockGrid{
-		hoverRect(.2, .9, .1, .2), hoverRect(.2, -.1, .1, .2), hoverRect(.2, .1, .1, .8),
+		terrainRect(.2, .9, .1, .2), terrainRect(.2, -.1, .1, .2), terrainRect(.2, .1, .1, .8),
 	}}
 	scene.world.sections[1] = &worldSection{geometry: prepareTerrainGeometry(middle, 0)}
 	scene.world.revision++
@@ -372,7 +372,7 @@ func TestQueryGeneratedTerrainMatchesExactCollision(t *testing.T) {
 }
 
 func TestQueryIDsExpireOnPruneWithoutAnInterveningQuery(t *testing.T) {
-	d := sectionData{foreground: RockGrid{hoverRect(.2, .2, .1, .2)},
+	d := sectionData{foreground: RockGrid{terrainRect(.2, .2, .1, .2)},
 		guides: []Guide{{Pts: []V{{.5, .2}, {.5, .4}}}}}
 	scene := queryScene(d)
 	f := mustQuery(t, scene, Ray{Origin: V{.25, -.7}}, QueryOptions{Targets: TargetRock}).Hit.FormationID

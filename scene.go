@@ -81,17 +81,17 @@ func (v Viewport) valid() bool {
 // goroutine; generation and mesh preparation run in background workers.
 // The zero value is not usable.
 type Scene struct {
-	world              *world
-	material           *ebiten.Shader
-	vineMaterial       *ebiten.Shader
-	fog                *fogRenderer
-	highlight          *hoverRenderer
-	texture            float64
-	view               View
-	collisionTolerance float64
-	loadSection        SectionLoader
-	onCollisionReady   func(CollisionGeometry)
-	closed             bool
+	world                *world
+	material             *ebiten.Shader
+	vineMaterial         *ebiten.Shader
+	fog                  *fogRenderer
+	geometryRevisionBase uint64 // revisions accumulated across world resets
+	texture              float64
+	view                 View
+	collisionTolerance   float64
+	loadSection          SectionLoader
+	onCollisionReady     func(CollisionGeometry)
+	closed               bool
 }
 
 // NewScene validates config, compiles embedded shaders, and starts generation.
@@ -113,11 +113,6 @@ func NewScene(config Config) (*Scene, error) {
 	if err != nil {
 		g.Close()
 		return nil, fmt.Errorf("infinicave: compile vine shader: %w", err)
-	}
-	g.highlight, err = newHoverRenderer()
-	if err != nil {
-		g.Close()
-		return nil, fmt.Errorf("infinicave: compile hover shader: %w", err)
 	}
 	if config.Fog && g.view == ViewShaded {
 		g.fog, err = newFogRenderer()
@@ -158,6 +153,24 @@ func (g *Scene) Update(viewport Viewport) bool {
 	return ready
 }
 
+// GeometryRevision returns a scene-wide version for cached foreground geometry.
+// Compare it after Update and runtime edits before reusing Formation, Guide, or
+// CollisionGeometry copies. A change means geometry or availability may differ,
+// even if an object's ID is unchanged; refetch IDs to resolve merges or expiry.
+// Early collision publication, queryable terrain publication, eviction, and
+// terrain edits advance the version. Collision can become available before
+// Query sees that section; query publication advances the version again.
+// Reset and the first Close advance it, and it stays monotonic across Reset.
+// Rendering, camera movement alone, resizing, and reads do not advance it.
+// Versions are local to this Scene; their numeric difference is not an event count.
+// Like other Scene methods, call it on the Ebitengine game goroutine.
+func (g *Scene) GeometryRevision() uint64 {
+	if g.closed || g.world == nil {
+		return g.geometryRevisionBase
+	}
+	return g.geometryRevisionBase + g.world.revision + g.world.collisionRevision
+}
+
 // SetRenderWidth sets the number of cached pixels across one scene unit.
 // Pass the native screen width before Update. Resizing retains generation,
 // queries, and runtime cuts, and rerasterizes only sections contributing to the
@@ -169,9 +182,6 @@ func (g *Scene) SetRenderWidth(pixels int) {
 	}
 	g.world.pixels = pixels
 	g.world.deferUpload()
-	if g.highlight != nil {
-		g.highlight.clear()
-	}
 }
 
 // Draw draws available terrain, fog, and vegetation into dst, scaling uniformly so
@@ -194,10 +204,8 @@ func (g *Scene) Reset(seed int64) {
 		return
 	}
 	pixels := g.world.renderWidth()
+	g.geometryRevisionBase = g.GeometryRevision() + 1
 	g.world.close()
-	if g.highlight != nil {
-		g.highlight.clear()
-	}
 	g.world = newWorld(seed, g.view, g.collisionTolerance, g.loadSection)
 	g.world.pixels = pixels
 }
@@ -209,12 +217,10 @@ func (g *Scene) Close() {
 	if g.closed {
 		return
 	}
+	g.geometryRevisionBase = g.GeometryRevision() + 1
 	g.closed = true
 	if g.world != nil {
 		g.world.close()
-	}
-	if g.highlight != nil {
-		g.highlight.close()
 	}
 	if g.fog != nil {
 		g.fog.shader.Deallocate()
