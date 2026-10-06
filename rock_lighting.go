@@ -1,6 +1,9 @@
 package infinicave
 
-import "math"
+import (
+	"math"
+	"sort"
+)
 
 // Screen Y increases downward; positive Z points toward the camera.
 type V3 struct{ X, Y, Z float64 }
@@ -45,16 +48,51 @@ func shapeRockGrid(grid RockGrid, guides []Guide, noise *Perlin) {
 // Match shared boundary lengths, including partial edges left by guide cuts
 // and merged fragments. Corner contact alone does not make cells neighbors.
 func rockNeighbors(grid RockGrid) [][]int {
+	const bucketSize = .05
+	type bin [2]int
 	bounds := make([]guideFragment, len(grid))
+	buckets := make(map[bin][]int)
+	bins := make([][2]bin, len(grid))
 	for i, c := range grid {
 		bounds[i] = makeGuideFragment(c.Polygon, c.Center, false)
+		if len(c.Polygon) < 3 {
+			continue
+		}
+		a := bounds[i]
+		lo := bin{int(math.Floor((a.lo.X - mergeTolerance) / bucketSize)), int(math.Floor((a.lo.Y - mergeTolerance) / bucketSize))}
+		hi := bin{int(math.Floor((a.hi.X + mergeTolerance) / bucketSize)), int(math.Floor((a.hi.Y + mergeTolerance) / bucketSize))}
+		bins[i] = [2]bin{lo, hi}
+		for y := lo[1]; y <= hi[1]; y++ {
+			for x := lo[0]; x <= hi[0]; x++ {
+				key := bin{x, y}
+				buckets[key] = append(buckets[key], i)
+			}
+		}
 	}
 	neighbors := make([][]int, len(grid))
+	seen := make([]int, len(grid))
+	candidates := make([]int, 0, 32)
 	for i, a := range bounds {
-		for j := i + 1; j < len(bounds); j++ {
+		if len(a.poly) < 3 {
+			continue
+		}
+		candidates = candidates[:0]
+		lo, hi := bins[i][0], bins[i][1]
+		for y := lo[1]; y <= hi[1]; y++ {
+			for x := lo[0]; x <= hi[0]; x++ {
+				for _, j := range buckets[bin{x, y}] {
+					if j > i && seen[j] != i+1 {
+						seen[j] = i + 1
+						candidates = append(candidates, j)
+					}
+				}
+			}
+		}
+		// Preserve the previous site-order sums when fitting normals.
+		sort.Ints(candidates)
+		for _, j := range candidates {
 			b := bounds[j]
-			if a.lo.X > b.hi.X+mergeTolerance || a.hi.X < b.lo.X-mergeTolerance ||
-				a.lo.Y > b.hi.Y+mergeTolerance || a.hi.Y < b.lo.Y-mergeTolerance {
+			if a.lo.X > b.hi.X+mergeTolerance || a.hi.X < b.lo.X-mergeTolerance || a.lo.Y > b.hi.Y+mergeTolerance || a.hi.Y < b.lo.Y-mergeTolerance {
 				continue
 			}
 			if mergeableBorder(a.poly, b.poly, nil) > mergeTolerance {

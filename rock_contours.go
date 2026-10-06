@@ -175,6 +175,11 @@ func polishRockContours(grid RockGrid, guides []Guide, heightAt func(V) float64)
 			}
 			q = q.Sub(step)
 		}
+		// A newly sampled world can put a contour near the padding boundary.
+		// Reject polishing that would grow geometry outside its generation window.
+		if q.X < 0 || q.X > generationWidth || q.Y < generationMinY || q.Y > generationMaxY {
+			return
+		}
 		if q.Sub(p).Len() <= .009 && math.Abs(heightAt(q)-rockContourHeight) < .00025 {
 			projected[n], accepted[n] = q, true
 		}

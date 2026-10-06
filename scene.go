@@ -117,7 +117,8 @@ func NewScene(config Config) (*Scene, error) {
 
 // Update uploads prepared meshes, requests missing sections, and evicts distant
 // sections. Call once per game tick. It never waits for generation and returns
-// true when all layers needed by viewport are ready. An invalid viewport or a
+// true when all layers needed by viewport are ready. Complete terrain and
+// collision become available while vegetation is still uploading. An invalid viewport or a
 // closed Scene returns false without doing work.
 func (g *Scene) Update(viewport Viewport) bool {
 	if g.closed || !viewport.valid() {

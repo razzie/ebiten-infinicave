@@ -11,16 +11,14 @@ import (
 const foregroundVineGuideClearance = .030
 
 func newForegroundVineTerrain(foreground RockGrid, guides []Guide) *VineTerrain {
+	return newForegroundVineTerrainWithWorkspace(foreground, guides, nil)
+}
+
+func newForegroundVineTerrainWithWorkspace(foreground RockGrid, guides []Guide, workspace *vineWorkspace) *VineTerrain {
 	// Growth is based on the visible footprint, including its screen inset,
 	// rather than rock brightness: shaded and lit faces both support vines.
 	support := insetForegroundGrid(foreground)
-	for i := range support {
-		if support[i].Color.A != 0 {
-			support[i].Color = color.NRGBA{36, 36, 36, 255}
-		}
-	}
-	field := newVineTerrain(support, nil)
-	field.onForeground = true
+	field := newVineTerrainWithWorkspace(support, nil, true, workspace)
 	// Restrict the same clearance field used by root placement, steering,
 	// and seam-following twigs so the full family keeps off the crests.
 	// The existing conservative sampler also reserves room for ribbon width.
@@ -33,10 +31,10 @@ func newForegroundVineTerrain(foreground RockGrid, guides []Guide) *VineTerrain 
 			if length2 < 1e-18 {
 				continue
 			}
-			x0 := max(0, int(math.Floor((math.Min(a.X, b.X)-reach)/vineFieldStep)))
-			x1 := min(vineFieldWidth-1, int(math.Ceil((math.Max(a.X, b.X)+reach)/vineFieldStep)))
-			y0 := max(0, int(math.Floor((math.Min(a.Y, b.Y)-reach-generationMinY)/vineFieldStep)))
-			y1 := min(vineFieldHeight-1, int(math.Ceil((math.Max(a.Y, b.Y)+reach-generationMinY)/vineFieldStep)))
+			x0 := max(0, int(math.Floor((min(a.X, b.X)-reach)/vineFieldStep)))
+			x1 := min(vineFieldWidth-1, int(math.Ceil((max(a.X, b.X)+reach)/vineFieldStep)))
+			y0 := max(0, int(math.Floor((min(a.Y, b.Y)-reach-generationMinY)/vineFieldStep)))
+			y1 := min(vineFieldHeight-1, int(math.Ceil((max(a.Y, b.Y)+reach-generationMinY)/vineFieldStep)))
 			for y := y0; y <= y1; y++ {
 				for x := x0; x <= x1; x++ {
 					i := y*vineFieldWidth + x
@@ -47,7 +45,7 @@ func newForegroundVineTerrain(foreground RockGrid, guides []Guide) *VineTerrain 
 					q := a.Add(d.Mul(clamp(p.Sub(a).Dot(d)/length2, 0, 1)))
 					distance := p.Sub(q).Len()
 					if distance < reach {
-						field.clearance[i] = math.Min(field.clearance[i], math.Max(0, distance-foregroundVineGuideClearance))
+						field.clearance[i] = min(field.clearance[i], max(0, distance-foregroundVineGuideClearance))
 					}
 				}
 			}
@@ -57,7 +55,13 @@ func newForegroundVineTerrain(foreground RockGrid, guides []Guide) *VineTerrain 
 }
 
 func generateForegroundVines(foreground RockGrid, guides []Guide, rng *rand.Rand) []Vine {
-	vines := generateVinesInBand(newForegroundVineTerrain(foreground, guides), rng, 0, SectionHeight, 2)
+	return generateForegroundVinesWithWorkspace(foreground, guides, rng, nil)
+}
+
+func generateForegroundVinesWithWorkspace(foreground RockGrid, guides []Guide, rng *rand.Rand, workspace *vineWorkspace) []Vine {
+	field := newForegroundVineTerrainWithWorkspace(foreground, guides, workspace)
+	defer field.release()
+	vines := generateVinesInBand(field, rng, 0, SectionHeight, 2)
 	for i := range vines {
 		vines[i].Foreground = true
 	}

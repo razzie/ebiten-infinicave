@@ -6,7 +6,7 @@ import (
 	"math/rand"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/razzie/ebiten-infinicave"
+	infinicave "github.com/razzie/ebiten-infinicave"
 )
 
 func main() {

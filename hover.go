@@ -47,7 +47,11 @@ func polygonBounds(poly []V) (lo, hi V) {
 func prepareTerrainGeometry(data sectionData, tolerance float64) *terrainGeometry {
 	h := &terrainGeometry{guides: data.guides, top: sectionTop(data.id)}
 	var grid RockGrid
-	for _, cell := range insetForegroundGrid(data.foreground) {
+	source := data.foregroundTopology
+	if source == nil {
+		source = newRockTopology(data.foreground)
+	}
+	for _, cell := range source.grid {
 		if !cell.Raised || cell.Color.A == 0 {
 			continue
 		}
@@ -59,7 +63,10 @@ func prepareTerrainGeometry(data sectionData, tolerance float64) *terrainGeometr
 	}
 	// Shared edges connect an entire formation, including partial borders
 	// left by guide cuts. A corner contact alone keeps two blocks separate.
-	neighbors := rockNeighbors(grid)
+	neighbors := source.neighbors
+	if len(grid) != len(source.grid) {
+		neighbors = rockNeighbors(grid)
+	}
 	for i := range h.faces {
 		if h.faces[i].block >= 0 {
 			continue

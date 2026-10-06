@@ -2,6 +2,7 @@ package infinicave
 
 import (
 	"fmt"
+	"image"
 	"image/color"
 	"math"
 	"reflect"
@@ -152,31 +153,59 @@ func TestWorldWorkerPreparesAllLayers(t *testing.T) {
 	}
 }
 
-func TestSectionUploadsAreBoundedAndPublishedTogether(t *testing.T) {
-	w := &world{sections: make(map[int64]*worldSection), results: make(chan sectionMesh, 1), done: make(chan struct{}), working: true}
+func TestSectionUploadsPublishTerrainBeforeVegetation(t *testing.T) {
+	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1), results: make(chan sectionMesh, 1), done: make(chan struct{}), working: true}
 	defer w.close()
-	// Empty meshes isolate scheduling from rendering and shader setup.
-	w.results <- sectionMesh{id: 0, background: gridMesh{outlines: make([]triangleMesh, uploadDrawsPerTick*2+1)}, vines: make([]triangleMesh, uploadDrawsPerTick*2+1), foregroundVines: make([]triangleMesh, uploadDrawsPerTick*2+1)}
+	// Empty batches isolate the scheduler; nonempty crop bounds exercise image ownership.
+	bounds := image.Rect(10, 20, 30, 40)
+	w.results <- sectionMesh{id: 0, background: gridMesh{outlines: make([]triangleMesh, uploadDrawsPerTick*2+1)}, vines: make([]triangleMesh, uploadDrawsPerTick*2+1), foregroundVines: make([]triangleMesh, uploadDrawsPerTick*2+1), vinesBounds: bounds, foregroundVinesBounds: bounds, mushroomsBounds: bounds}
 	g := &Scene{world: w, view: ViewShaded}
 	w.receive(g)
 	if w.upload == nil || w.working {
 		t.Fatal("result was not handed off to the upload queue")
 	}
+	// Neighbor is complete, so readiness below depends only on the pending upload.
+	w.sections[1] = &worldSection{}
+	published := false
 	for tick := 0; tick < 30; tick++ {
 		stage, next := w.upload.stage, w.upload.next
 		w.receive(g)
-		if w.upload == nil {
-			if stage != 8 {
-				t.Fatal("section was published before every layer finished")
+		section := w.sections[0]
+		if stage < 4 && section != nil {
+			t.Fatal("incomplete terrain became visible")
+		}
+		if stage == 4 {
+			if section == nil || section.terrain == nil || section.foreground == nil || !section.vegetationPending {
+				t.Fatal("complete terrain was not published early")
 			}
-			s := w.sections[0]
-			if s == nil || s.terrain == nil || s.foreground == nil || s.vines == nil || s.foregroundVines == nil || s.mushrooms == nil {
-				t.Fatal("completed section is missing a layer")
+			if w.upload.img != nil || w.upload.foreground != nil {
+				t.Fatal("upload retained ownership of published images")
+			}
+			if w.ensure(-.8, .8, 0) {
+				t.Fatal("pending vegetation reported ready")
+			}
+			published = true
+			// Camera jumps must not deallocate the section still being completed.
+			w.prune(-100.8, .8, 0)
+			if w.sections[0] != section {
+				t.Fatal("pruning evicted an active upload")
+			}
+			w.sections[1] = &worldSection{}
+		}
+		if w.upload == nil {
+			if !published || stage != 8 || section == nil || section.vegetationPending {
+				t.Fatal("upload did not finish both publication stages")
+			}
+			if section.vines == nil || section.foregroundVines == nil || section.mushrooms == nil {
+				t.Fatal("completed vegetation is missing a layer")
+			}
+			if section.vines.Bounds() != image.Rect(0, 0, 20, 20) || section.vinesBounds != bounds {
+				t.Fatal("vegetation lost its crop or origin")
+			}
+			if !w.ensure(-.8, .8, 0) {
+				t.Fatal("completed viewport is not ready")
 			}
 			return
-		}
-		if len(w.sections) != 0 {
-			t.Fatal("partially uploaded section became visible")
 		}
 		if stage == w.upload.stage && w.upload.next-next > uploadDrawsPerTick {
 			t.Fatal("tick submitted too many mesh uploads")

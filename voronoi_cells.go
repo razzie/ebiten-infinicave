@@ -18,7 +18,9 @@ func parallelFor(n int, fn func(i int)) {
 		}
 		return
 	}
-	const chunk = 8
+	// Small jobs (notably the four distance fields) must not all land in
+	// one eight-item chunk. Keep larger loops amortized over several items.
+	chunk := min(8, max(1, n/(workers*4)))
 	var next sync.Mutex
 	start := 0
 	var wg sync.WaitGroup

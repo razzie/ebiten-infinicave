@@ -1,6 +1,7 @@
 package infinicave
 
 import (
+	"image"
 	"math"
 	"runtime"
 	"sort"
@@ -25,19 +26,20 @@ type gridMesh struct {
 }
 
 type sectionMesh struct {
-	id                     int64
-	background, foreground gridMesh
-	vines                  []triangleMesh
-	foregroundVines        []triangleMesh
-	mushrooms              triangleMesh
-	geometry               *terrainGeometry
+	id                                                  int64
+	background, foreground                              gridMesh
+	vines                                               []triangleMesh
+	foregroundVines                                     []triangleMesh
+	mushrooms                                           triangleMesh
+	geometry                                            *terrainGeometry
+	vinesBounds, foregroundVinesBounds, mushroomsBounds image.Rectangle
 }
 
 func prepareSection(data sectionData, view View) sectionMesh {
 	mesh := sectionMesh{id: data.id}
 	jobs := make(chan func(), 5)
 	jobs <- func() { mesh.background = prepareGrid(data.background, view) }
-	jobs <- func() { mesh.foreground = prepareGrid(data.foreground, view) }
+	jobs <- func() { mesh.foreground = prepareGridWithTopology(data.foreground, view, data.foregroundTopology) }
 	if view == ViewShaded {
 		jobs <- func() { mesh.vines = prepareVines(data.vines) }
 		jobs <- func() { mesh.foregroundVines = prepareForegroundVines(data.foregroundVines) }
@@ -93,14 +95,24 @@ func (g *Scene) drawGridFaces(dst *ebiten.Image, mesh triangleMesh, top float64)
 // Render each tessellation separately so transparent guide cells contribute
 // neither faces nor outlines, and the foreground covers the background mesh.
 func prepareGrid(grid RockGrid, view View) gridMesh {
-	if len(grid) > 0 && grid[0].Raised {
+	return prepareGridWithTopology(grid, view, nil)
+}
+
+func prepareGridWithTopology(grid RockGrid, view View, topology *rockTopology) gridMesh {
+	if topology != nil {
+		grid = topology.grid
+	} else if len(grid) > 0 && grid[0].Raised {
 		grid = insetForegroundGrid(grid)
 	}
 	vertices := make([]ebiten.Vertex, 0, len(grid)*18)
 	indices := make([]uint32, 0, len(grid)*18)
 	var boundary []rockEdge
 	if len(grid) > 0 && grid[0].Raised && (view == ViewShaded || view == ViewClay) {
-		boundary = exposedRockEdges(grid)
+		if topology != nil {
+			boundary = topology.boundary
+		} else {
+			boundary = exposedRockEdges(grid)
+		}
 		vertices, indices = appendRockWalls(vertices, indices, grid, boundary, view)
 	}
 	type cellEdge struct {

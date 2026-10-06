@@ -13,6 +13,21 @@ type rockEdge struct {
 	Cell int
 }
 
+// The final inset grid is immutable through mesh/collision preparation. Share
+// its adjacency and boundary instead of rediscovering partial edges per layer.
+type rockTopology struct {
+	grid      RockGrid
+	neighbors [][]int
+	boundary  []rockEdge
+}
+
+func newRockTopology(grid RockGrid) *rockTopology {
+	t := &rockTopology{grid: insetForegroundGrid(grid)}
+	t.neighbors = rockNeighbors(t.grid)
+	t.boundary = rockBoundaryEdges(t.grid, t.neighbors, false)
+	return t
+}
+
 // Subdivide partial shared edges before cancellation, so merged guide faces
 // never grow a side wall through a neighboring rock. Corner contacts survive.
 func exposedRockEdges(grid RockGrid) []rockEdge {

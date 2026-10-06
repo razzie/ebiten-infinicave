@@ -25,8 +25,8 @@ func statsOf(s sectionData) sectionStats {
 // rescaling floats can change steering ties and the resulting offshoots.
 func TestSectionStatsStable(t *testing.T) {
 	want := map[int64]sectionStats{
-		1:  {4809, 2064, 134, 1.0989886594},
-		42: {4910, 1948, 115, .9933731121},
+		1:  {4898, 2002, 120, 1.0971447622},
+		42: {4906, 1970, 109, .9921188598},
 	}
 	for seed, w := range want {
 		got := statsOf(buildSection(seed, 0))

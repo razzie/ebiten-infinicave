@@ -75,7 +75,8 @@ func cubicBezier(a, b, c, d V, t float64) V {
 // Sample Catmull-Rom curves as Beziers for both drawing and projection.
 func splineGuide(knots []V, sign float64) Guide {
 	const samplesPerSegment = 64
-	pts := []V{knots[0]}
+	pts := make([]V, 1, 1+(len(knots)-1)*samplesPerSegment)
+	pts[0] = knots[0]
 	for i := 0; i < len(knots)-1; i++ {
 		a, d := knots[i], knots[i+1]
 		prev, next := a.Mul(2).Sub(d), d.Mul(2).Sub(a)

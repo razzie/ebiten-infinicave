@@ -7,59 +7,37 @@ import "math"
 const vineBorderRange = .032
 
 func newVineBorders(background RockGrid) []float64 {
-	distances := make([]float64, vineFieldWidth*vineFieldHeight)
+	return vineBordersForEdges(newVineEdgeGraph(background), nil)
+}
+
+// Seed exact distances in a narrow band around each seam, then propagate
+// them in two linear scans. The graph still supplies exact twig geometry;
+// the field is only a smooth steering attraction, capped at one cell width.
+func vineBordersForEdges(graph *vineEdgeGraph, workspace *vineWorkspace) []float64 {
+	distances := workspace.take()
 	for i := range distances {
-		distances[i] = vineBorderRange * vineBorderRange
+		distances[i] = vineBorderRange
 	}
-	type borderEdge struct {
-		a, d                   V
-		invLength2             float64
-		minX, maxX, minY, maxY int
-	}
-	var edges []borderEdge
-	seen := make(map[[4]int64]bool)
-	for _, cell := range background {
-		for i, a := range cell.Polygon {
-			b := cell.Polygon[(i+1)%len(cell.Polygon)]
-			// Window clipping edges are not seams in the world tessellation.
-			if (a.X == b.X && (a.X == 0 || a.X == generationWidth)) || (a.Y == b.Y && (a.Y == generationMinY || a.Y == generationMaxY)) {
-				continue
+	const reach = 2 * vineFieldStep
+	for _, edge := range graph.edges {
+		a, b := graph.points[edge.a], graph.points[edge.b]
+		d := b.Sub(a)
+		inverse := 1 / d.Len2()
+		x0 := max(0, int(math.Floor((min(a.X, b.X)-reach)/vineFieldStep)))
+		x1 := min(vineFieldWidth-1, int(math.Ceil((max(a.X, b.X)+reach)/vineFieldStep)))
+		y0 := max(0, int(math.Floor((min(a.Y, b.Y)-reach-generationMinY)/vineFieldStep)))
+		y1 := min(vineFieldHeight-1, int(math.Ceil((max(a.Y, b.Y)+reach-generationMinY)/vineFieldStep)))
+		for y := y0; y <= y1; y++ {
+			for x := x0; x <= x1; x++ {
+				p := V{(float64(x) + .5) * vineFieldStep, generationMinY + (float64(y)+.5)*vineFieldStep}
+				t := clamp(p.Sub(a).Dot(d)*inverse, 0, 1)
+				distance := p.Sub(a.Add(d.Mul(t))).Len()
+				i := y*vineFieldWidth + x
+				distances[i] = min(distances[i], distance)
 			}
-			key := edgeKey(a, b)
-			d := b.Sub(a)
-			if seen[key] || d.Len2() < 1e-18 {
-				continue
-			}
-			seen[key] = true
-			edges = append(edges, borderEdge{a, d, 1 / d.Len2(),
-				max(0, int(math.Floor((math.Min(a.X, b.X)-vineBorderRange)/vineFieldStep))),
-				min(vineFieldWidth-1, int(math.Ceil((math.Max(a.X, b.X)+vineBorderRange)/vineFieldStep))),
-				max(0, int(math.Floor((math.Min(a.Y, b.Y)-vineBorderRange-generationMinY)/vineFieldStep))),
-				min(vineFieldHeight-1, int(math.Ceil((math.Max(a.Y, b.Y)+vineBorderRange-generationMinY)/vineFieldStep)))})
 		}
 	}
-	// Bands own disjoint rows; min is order independent, so the result is exact.
-	const band = 16
-	parallelFor((vineFieldHeight+band-1)/band, func(n int) {
-		y0, y1 := n*band, min((n+1)*band, vineFieldHeight)-1
-		for _, e := range edges {
-			if e.maxY < y0 || e.minY > y1 {
-				continue
-			}
-			for y := max(y0, e.minY); y <= min(y1, e.maxY); y++ {
-				for x := e.minX; x <= e.maxX; x++ {
-					p := V{(float64(x) + .5) * vineFieldStep, generationMinY + (float64(y)+.5)*vineFieldStep}
-					t := clamp(p.Sub(e.a).Dot(e.d)*e.invLength2, 0, 1)
-					distance2 := p.Sub(e.a.Add(e.d.Mul(t))).Len2()
-					index := y*vineFieldWidth + x
-					distances[index] = math.Min(distances[index], distance2)
-				}
-			}
-		}
-	})
-	for i := range distances {
-		distances[i] = math.Sqrt(distances[i])
-	}
+	chamferVineField(distances)
 	return distances
 }
 

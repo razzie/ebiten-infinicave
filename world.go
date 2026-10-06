@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/rand"
 	"sync"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
@@ -24,12 +25,15 @@ type sectionData struct {
 	foregroundVines        []Vine
 	mushrooms              []MushroomGroup
 	guides                 []Guide
+	foregroundTopology     *rockTopology
 }
 
 type worldSection struct {
-	terrain, vines, mushrooms, foreground *ebiten.Image
-	foregroundVines                       *ebiten.Image
-	geometry                              *terrainGeometry
+	terrain, vines, mushrooms, foreground               *ebiten.Image
+	foregroundVines                                     *ebiten.Image
+	geometry                                            *terrainGeometry
+	vinesBounds, foregroundVinesBounds, mushroomsBounds image.Rectangle
+	vegetationPending                                   bool
 }
 
 type world struct {
@@ -71,22 +75,7 @@ func sectionTop(id int64) float64       { return -float64(id+1) * sectionHeight 
 func sectionWindowTop(id int64) float64 { return sectionTop(id) - sectionHeight }
 
 func worldGuides(seed, id int64) []Guide {
-	var guides []Guide
-	top := sectionTop(id)
-	proposals := make(map[int64][]Guide)
-	for owner := id - 3; owner <= id+3; owner++ {
-		proposals[owner] = generateGuideSection(rand.New(rand.NewSource(sectionSeed(seed, owner))))
-	}
-	// Include guides outside the window whose shoulders could reach inside.
-	for owner := id + 2; owner >= id-2; owner-- {
-		section := spacedWorldGuideSection(seed, owner, proposals)
-		for i := range section {
-			section[i].Seed = sectionSeed(sectionSeed(seed, owner), int64(i+1)) | 1
-			section[i] = shiftedGuide(section[i], sectionTop(owner)-top)
-		}
-		guides = append(guides, section...)
-	}
-	return guides
+	return newGuideCache(seed).window(id)
 }
 
 // Jittered world-space sites give neighboring generation windows exactly the
@@ -99,14 +88,13 @@ func worldSeeds(seed int64, top float64, noise *Perlin) []V {
 	parallelFor(len(rows), func(n int) {
 		row := first + int64(n)
 		for col := int64(0); float64(col)*step < generationWidth; col++ {
-			rng := rand.New(rand.NewSource(sectionSeed(sectionSeed(seed, row), col)))
-			p := V{(float64(col)+.5)*step + (rng.Float64()-.5)*step*.85,
-				(float64(row)+.5)*step + (rng.Float64()-.5)*step*.85 - top}
+			p := V{(float64(col)+.5)*step + (siteRandom(seed, row, col, 0)-.5)*step*.85,
+				(float64(row)+.5)*step + (siteRandom(seed, row, col, 1)-.5)*step*.85 - top}
 			if p.X <= .001 || p.X >= generationWidth-.001 || p.Y <= generationMinY+.001 || p.Y >= generationMaxY-.001 {
 				continue
 			}
 			spacing := desiredSpacing(p, noise)
-			if rng.Float64() < math.Min(1, step*step/(spacing*spacing)) {
+			if siteRandom(seed, row, col, 2) < min(1, step*step/(spacing*spacing)) {
 				rows[n] = append(rows[n], p)
 			}
 		}
@@ -123,6 +111,10 @@ func buildSection(seed, id int64) sectionData {
 }
 
 func buildSectionMode(seed, id int64, study Study, loadGuides GuideLoader) sectionData {
+	return newSectionBuilder(seed, study, loadGuides).build(id)
+}
+
+func buildSectionCached(seed, id int64, study Study, loadGuides GuideLoader, guideCache *guideCache, fields *vineWorkspace) sectionData {
 	top := sectionTop(id)
 	backgroundNoise := NewPerlin(rand.New(rand.NewSource(seed ^ 0x62617365)))
 	backgroundNoise.OffsetY = top
@@ -134,7 +126,7 @@ func buildSectionMode(seed, id int64, study Study, loadGuides GuideLoader) secti
 	} else if study != StudyNone {
 		guides = studyGuides(id, study)
 	} else {
-		guides = worldGuides(seed, id)
+		guides = guideCache.window(id)
 	}
 	backgroundSeeds := worldSeeds(seed^0x62617365, top, backgroundNoise)
 	seeds := artisticRockSeeds(worldSeeds(seed, top, noise), guides, seed, top)
@@ -153,24 +145,28 @@ func buildSectionMode(seed, id int64, study Study, loadGuides GuideLoader) secti
 		return reliefHeight(p, guides, noise, branches)
 	})
 	shadeRockGrids(background, foreground, backgroundNoise)
-	mushrooms := mushroomsForGuides(guides, insetForegroundGrid(foreground))
+	topology := newRockTopology(foreground)
+	mushrooms := mushroomsForGuides(guides, topology.grid)
 	var vines, foregroundVines []Vine
 	if study == StudyNone {
-		vines = generateVinesInBand(newVineTerrain(background, foreground), rand.New(rand.NewSource(sectionSeed(seed^0x76696e6573, id))), 0, SectionHeight, 5)
-		foregroundVines = generateForegroundVines(foreground, guides, rand.New(rand.NewSource(sectionSeed(seed^0x73757266616365, id))))
+		field := newVineTerrainWithWorkspace(background, foreground, false, fields)
+		vines = generateVinesInBand(field, rand.New(rand.NewSource(sectionSeed(seed^0x76696e6573, id))), 0, SectionHeight, 5)
+		field.release()
+		foregroundVines = generateForegroundVinesWithWorkspace(foreground, guides, rand.New(rand.NewSource(sectionSeed(seed^0x73757266616365, id))), fields)
 	}
-	return sectionData{id: id, background: background, foreground: foreground, vines: vines, foregroundVines: foregroundVines, mushrooms: mushrooms, guides: guides}
+	return sectionData{id: id, background: background, foreground: foreground, vines: vines, foregroundVines: foregroundVines, mushrooms: mushrooms, guides: guides, foregroundTopology: topology}
 }
 
 func newWorld(seed int64, study Study, view View, tolerance float64, loadGuides GuideLoader) *world {
 	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1), results: make(chan sectionMesh, 1), done: make(chan struct{})}
 	go func() {
+		builder := newSectionBuilder(seed, study, loadGuides)
 		for {
 			select {
 			case <-w.done:
 				return
 			case id := <-w.jobs:
-				data := buildSectionMode(seed, id, study, loadGuides)
+				data := builder.build(id)
 				select {
 				case <-w.done:
 					return
@@ -178,6 +174,7 @@ func newWorld(seed int64, study Study, view View, tolerance float64, loadGuides 
 				}
 				mesh := prepareSection(data, view)
 				mesh.geometry = prepareTerrainGeometry(data, tolerance)
+				finishSectionMesh(&mesh)
 				select {
 				case <-w.done:
 					return
@@ -212,17 +209,7 @@ func (w *world) close() {
 		w.white = nil
 	}
 	for id, section := range w.sections {
-		section.terrain.Deallocate()
-		section.vines.Deallocate()
-		if section.foregroundVines != nil {
-			section.foregroundVines.Deallocate()
-		}
-		if section.foreground != nil {
-			section.foreground.Deallocate()
-		}
-		if section.mushrooms != nil {
-			section.mushrooms.Deallocate()
-		}
+		section.deallocate()
 		delete(w.sections, id)
 	}
 }
@@ -235,19 +222,28 @@ func newSectionImage(height int) *ebiten.Image {
 
 // Limit draw submissions per tick as well as separating the large layer
 // uploads. CPU tessellation has already finished before a result arrives.
-const uploadDrawsPerTick = 4
+const uploadDrawsPerTick = 16
+const uploadTimePerTick = 2 * time.Millisecond
+const uploadIndicesPerTick = 128 * 1024
 
 func (w *world) uploadMeshes(dst *ebiten.Image, meshes []triangleMesh) bool {
 	u := w.upload
 	end := min(u.next+uploadDrawsPerTick, len(meshes))
+	start := time.Now()
+	indices := 0
 	for ; u.next < end; u.next++ {
+		// Always make progress, even when a single batch exceeds the budget.
+		if indices > 0 && (indices+len(meshes[u.next].indices) > uploadIndicesPerTick || time.Since(start) >= uploadTimePerTick) {
+			break
+		}
 		meshes[u.next].draw(dst, w.white)
+		indices += len(meshes[u.next].indices)
 	}
 	return u.next == len(meshes)
 }
 
-// GPU resources stay on the game thread. Publish all layers together only
-// after their uploads finish, so drawing never sees a partial section.
+// GPU resources stay on the game thread. Publish complete terrain/collision
+// first, then add vegetation together once all its layers have finished.
 func (w *world) receive(g *Scene) {
 	if w.upload == nil {
 		select {
@@ -291,42 +287,52 @@ func (w *world) receive(g *Scene) {
 		foreground.DrawImage(u.foreground, op)
 		u.foreground.Deallocate()
 		u.foreground = foreground
+		w.sections[u.data.id] = &worldSection{terrain: u.img, foreground: u.foreground,
+			geometry: u.data.geometry, vegetationPending: true}
+		u.img, u.foreground = nil, nil // ownership moved to the cache
+		w.revision++
 	case 5:
+		if u.data.vinesBounds.Empty() {
+			break
+		}
 		if u.vines == nil {
-			u.vines = newSectionImage(generationHeight)
+			u.vines = newVegetationImage(u.data.vinesBounds)
 		}
 		if !w.uploadMeshes(u.vines, u.data.vines) {
 			return
 		}
 	case 6:
-		if len(u.data.vines) > 0 && g.vineMaterial != nil {
-			softened := newSectionImage(generationHeight)
-			softened.DrawRectShader(rasterPixelsPerUnit, generationHeight*rasterPixelsPerUnit, g.vineMaterial, &ebiten.DrawRectShaderOptions{
+		if u.vines != nil && g.vineMaterial != nil {
+			bounds := u.data.vinesBounds
+			softened := newVegetationImage(bounds)
+			softened.DrawRectShader(bounds.Dx(), bounds.Dy(), g.vineMaterial, &ebiten.DrawRectShaderOptions{
 				Images: [4]*ebiten.Image{u.vines},
 				Uniforms: map[string]any{
-					"Offset":  []float32{0, float32(top * rasterPixelsPerUnit)},
+					"Offset":  []float32{float32(bounds.Min.X), float32(top*rasterPixelsPerUnit) + float32(bounds.Min.Y)},
 					"Texture": float32(g.texture / 8),
 				},
 			})
 			u.vines.Deallocate()
 			u.vines = softened
 		}
-		if g.view == ViewShaded {
-			u.mushrooms = newSectionImage(generationHeight)
+		if !u.data.mushroomsBounds.Empty() {
+			u.mushrooms = newVegetationImage(u.data.mushroomsBounds)
 			u.data.mushrooms.draw(u.mushrooms, w.white)
 		}
 	case 7:
-		if len(u.data.foregroundVines) > 0 {
+		if !u.data.foregroundVinesBounds.Empty() {
 			if u.foregroundVines == nil {
-				u.foregroundVines = newSectionImage(generationHeight)
+				u.foregroundVines = newVegetationImage(u.data.foregroundVinesBounds)
 			}
 			if !w.uploadMeshes(u.foregroundVines, u.data.foregroundVines) {
 				return
 			}
 		}
 	default:
-		w.sections[u.data.id] = &worldSection{terrain: u.img, vines: u.vines, mushrooms: u.mushrooms, foreground: u.foreground, foregroundVines: u.foregroundVines, geometry: u.data.geometry}
-		w.revision++
+		section := w.sections[u.data.id]
+		section.vines, section.foregroundVines, section.mushrooms = u.vines, u.foregroundVines, u.mushrooms
+		section.vinesBounds, section.foregroundVinesBounds, section.mushroomsBounds = u.data.vinesBounds, u.data.foregroundVinesBounds, u.data.mushroomsBounds
+		section.vegetationPending = false
 		w.upload = nil
 		return
 	}
@@ -377,7 +383,13 @@ func (w *world) ensure(y float64, height float64, velocity float64) bool {
 	ids, required := prefetch(y, height, velocity)
 	ready := true
 	for i, id := range ids {
-		if id < 0 || w.sections[id] != nil {
+		if id < 0 {
+			continue
+		}
+		if section := w.sections[id]; section != nil {
+			if section.vegetationPending && i < required {
+				ready = false
+			}
 			continue
 		}
 		if w.upload != nil && w.upload.data.id == id {
@@ -401,19 +413,12 @@ func (w *world) prune(y float64, height float64, velocity float64) {
 		keep[id] = true
 	}
 	for id, section := range w.sections {
+		if w.upload != nil && w.upload.data.id == id {
+			continue
+		}
 		current := id >= max(0, low-2) && id <= high+3
 		if !current && !keep[id] {
-			section.terrain.Deallocate()
-			section.vines.Deallocate()
-			if section.foregroundVines != nil {
-				section.foregroundVines.Deallocate()
-			}
-			if section.foreground != nil {
-				section.foreground.Deallocate()
-			}
-			if section.mushrooms != nil {
-				section.mushrooms.Deallocate()
-			}
+			section.deallocate()
 			delete(w.sections, id)
 			w.revision++
 		}
@@ -435,18 +440,12 @@ func (w *world) draw(dst *ebiten.Image, y float64, height float64) {
 	// A vine is drawn once in world coordinates, even while crossing a seam.
 	for id := max(0, low-1); id <= high+1; id++ {
 		if section := w.sections[id]; section != nil {
-			op := &ebiten.DrawImageOptions{}
-			op.GeoM.Translate(0, (sectionWindowTop(id)-y)*rasterPixelsPerUnit)
-			op.GeoM.Scale(scale, scale)
-			dst.DrawImage(section.vines, op)
+			drawVegetation(dst, section.vines, section.vinesBounds, sectionWindowTop(id), y, scale)
 		}
 	}
 	for id := max(0, low-1); id <= high+1; id++ {
-		if section := w.sections[id]; section != nil && section.mushrooms != nil {
-			op := &ebiten.DrawImageOptions{}
-			op.GeoM.Translate(0, (sectionWindowTop(id)-y)*rasterPixelsPerUnit)
-			op.GeoM.Scale(scale, scale)
-			dst.DrawImage(section.mushrooms, op)
+		if section := w.sections[id]; section != nil {
+			drawVegetation(dst, section.mushrooms, section.mushroomsBounds, sectionWindowTop(id), y, scale)
 		}
 	}
 	for id := low; id <= high; id++ {
@@ -457,14 +456,32 @@ func (w *world) draw(dst *ebiten.Image, y float64, height float64) {
 			dst.DrawImage(section.foreground, op)
 		}
 	}
-	// Keep complete foreground stems in their owner's padded window, just
-	// like background vines, so scrolling across a section cannot cut them.
+	// Keep complete foreground stems in their owner's padded window.
 	for id := max(0, low-1); id <= high+1; id++ {
-		if section := w.sections[id]; section != nil && section.foregroundVines != nil {
-			op := &ebiten.DrawImageOptions{}
-			op.GeoM.Translate(0, (sectionWindowTop(id)-y)*rasterPixelsPerUnit)
-			op.GeoM.Scale(scale, scale)
-			dst.DrawImage(section.foregroundVines, op)
+		if section := w.sections[id]; section != nil {
+			drawVegetation(dst, section.foregroundVines, section.foregroundVinesBounds, sectionWindowTop(id), y, scale)
+		}
+	}
+}
+
+func drawVegetation(dst, layer *ebiten.Image, bounds image.Rectangle, top, y, scale float64) {
+	if layer == nil {
+		return
+	}
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Translate(float64(bounds.Min.X), (top-y)*rasterPixelsPerUnit+float64(bounds.Min.Y))
+	op.GeoM.Scale(scale, scale)
+	dst.DrawImage(layer, op)
+}
+
+func newVegetationImage(bounds image.Rectangle) *ebiten.Image {
+	return ebiten.NewImageWithOptions(image.Rect(0, 0, bounds.Dx(), bounds.Dy()), &ebiten.NewImageOptions{Unmanaged: true})
+}
+
+func (s *worldSection) deallocate() {
+	for _, img := range []*ebiten.Image{s.terrain, s.foreground, s.vines, s.foregroundVines, s.mushrooms} {
+		if img != nil {
+			img.Deallocate()
 		}
 	}
 }

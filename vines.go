@@ -57,6 +57,7 @@ const (
 // A small CPU field composites both grids in drawing order. Its clearance
 // measures distance from light faces and black voids, including vine width.
 type VineTerrain struct {
+	workspace *vineWorkspace
 	// Surface growth stays entirely on the raised rock instead of tucking
 	// beneath it or making shallow excursions across the background.
 	onForeground bool
@@ -72,93 +73,7 @@ type VineTerrain struct {
 }
 
 func newVineTerrain(background, foreground RockGrid) *VineTerrain {
-	tones := make([]float64, vineFieldWidth*vineFieldHeight)
-	foregroundDistance := make([]float64, len(tones))
-	foregroundInside := make([]float64, len(tones))
-	for i := range foregroundDistance {
-		foregroundDistance[i] = math.Inf(1)
-	}
-	for gridIndex, grid := range []RockGrid{background, foreground} {
-		for _, cell := range grid {
-			if len(cell.Polygon) < 3 {
-				continue
-			}
-			minY, maxY := float64(generationMaxY), float64(generationMinY)
-			for _, p := range cell.Polygon {
-				minY, maxY = math.Min(minY, p.Y), math.Max(maxY, p.Y)
-			}
-			alpha := float64(cell.Color.A) / 255
-			tone := .30*float64(cell.Color.R) + .59*float64(cell.Color.G) + .11*float64(cell.Color.B)
-			// Curved guide cuts can make concave faces with multiple spans.
-			var crossings []float64
-			for y := max(0, int((minY-generationMinY)/vineFieldStep)); y < min(vineFieldHeight, int((maxY-generationMinY)/vineFieldStep)+1); y++ {
-				py := generationMinY + (float64(y)+.5)*vineFieldStep
-				crossings = crossings[:0]
-				for i, a := range cell.Polygon {
-					b := cell.Polygon[(i+1)%len(cell.Polygon)]
-					if (a.Y <= py && b.Y > py) || (b.Y <= py && a.Y > py) {
-						x := a.X + (b.X-a.X)*(py-a.Y)/(b.Y-a.Y)
-						crossings = append(crossings, x)
-					}
-				}
-				sort.Float64s(crossings)
-				for span := 0; span+1 < len(crossings); span += 2 {
-					left, right := crossings[span], crossings[span+1]
-					for x := max(0, int(math.Ceil(left/vineFieldStep-.5))); x < min(vineFieldWidth, int(math.Ceil(right/vineFieldStep-.5))); x++ {
-						i := y*vineFieldWidth + x
-						tones[i] = lerp(tones[i], tone, alpha)
-						if gridIndex == 1 {
-							foregroundDistance[i] = 0
-							foregroundInside[i] = math.Inf(1)
-						}
-					}
-				}
-			}
-		}
-	}
-	field := &VineTerrain{clearance: make([]float64, len(tones)), unsupported: make([]float64, len(tones)), borders: newVineBorders(background), foreground: foregroundDistance, foregroundInside: foregroundInside}
-	field.edges = newVineEdgeGraph(background)
-	for y := 0; y < vineFieldHeight; y++ {
-		for x := 0; x < vineFieldWidth; x++ {
-			i := y*vineFieldWidth + x
-			if tones[i] > vineVoidTone && tones[i] < vineLightTone {
-				field.clearance[i] = float64(min(x+1, y+1, vineFieldWidth-x, vineFieldHeight-y)) * vineFieldStep
-			} else {
-				field.unsupported[i] = math.Inf(1)
-			}
-		}
-	}
-	// Chamfer distance, with a conservative correction when sampled below.
-	chamfer := [][]float64{field.clearance, field.unsupported, field.foreground, field.foregroundInside}
-	parallelFor(len(chamfer), func(n int) {
-		distances := chamfer[n]
-		for _, dir := range []int{1, -1} {
-			for yy := 0; yy < vineFieldHeight; yy++ {
-				y := yy
-				if dir < 0 {
-					y = vineFieldHeight - 1 - yy
-				}
-				for xx := 0; xx < vineFieldWidth; xx++ {
-					x := xx
-					if dir < 0 {
-						x = vineFieldWidth - 1 - xx
-					}
-					i := y*vineFieldWidth + x
-					for _, delta := range [][2]int{{-dir, 0}, {0, -dir}, {-dir, -dir}, {dir, -dir}} {
-						nx, ny := x+delta[0], y+delta[1]
-						if nx >= 0 && nx < vineFieldWidth && ny >= 0 && ny < vineFieldHeight {
-							d := vineFieldStep
-							if delta[0] != 0 && delta[1] != 0 {
-								d *= math.Sqrt2
-							}
-							distances[i] = math.Min(distances[i], distances[ny*vineFieldWidth+nx]+d)
-						}
-					}
-				}
-			}
-		}
-	})
-	return field
+	return newVineTerrainMode(background, foreground, false)
 }
 
 // Growth can cross a narrow gap, but the entire ribbon must remain near dark
@@ -177,9 +92,9 @@ func (f *VineTerrain) growthSpace(p V) float64 {
 	if f.foreground[i] == 0 {
 		foregroundSpace = vineForegroundTouch - f.foregroundInside[i]
 	}
-	space = math.Min(space, foregroundSpace)
-	edge := math.Min(math.Min(p.X, generationWidth-p.X), math.Min(p.Y-generationMinY, generationMaxY-p.Y))
-	return math.Max(0, math.Min(space, edge))
+	space = min(space, foregroundSpace)
+	edge := min(min(p.X, generationWidth-p.X), min(p.Y-generationMinY, generationMaxY-p.Y))
+	return max(0, min(space, edge))
 }
 
 func (f *VineTerrain) space(p V) float64 {
@@ -187,10 +102,13 @@ func (f *VineTerrain) space(p V) float64 {
 	if x < 0 || y < 0 || x >= vineFieldWidth || y >= vineFieldHeight {
 		return 0
 	}
-	return math.Max(0, f.clearance[y*vineFieldWidth+x]*.92-.003)
+	return max(0, f.clearance[y*vineFieldWidth+x]*.92-.003)
 }
 
 func (f *VineTerrain) foregroundDepthAt(p V) (float64, bool) {
+	if f.onForeground {
+		return 0, false
+	}
 	x, y := int(math.Floor(p.X/vineFieldStep)), int(math.Floor((p.Y-generationMinY)/vineFieldStep))
 	if x < 0 || y < 0 || x >= vineFieldWidth || y >= vineFieldHeight {
 		return 0, false
@@ -246,7 +164,7 @@ func growVine(field *VineTerrain, root, heading V, radius, reach, phase, curl fl
 		}
 		// Thick sections bend more gently, including when steering around
 		// rock edges. Thin tips retain their tighter curls.
-		flexibility := 1 / (1 + 80*math.Max(0, r-vineThinRadius))
+		flexibility := 1 / (1 + 80*max(0, r-vineThinRadius))
 		bestScore := math.Inf(-1)
 		var next, direction V
 		var nextExcursion float64
@@ -268,7 +186,7 @@ func growVine(field *VineTerrain, root, heading V, radius, reach, phase, curl fl
 			}
 			near := field.growthSpace(q.Add(d.Mul(.010)))
 			far := field.growthSpace(q.Add(d.Mul(.023)))
-			score := -float64(j*j)*.018 - 2.5*math.Pow(math.Max(0, r+.009-near)/.012, 2) - math.Pow(math.Max(0, r+.009-far)/.018, 2)
+			score := -float64(j*j)*.018 - 2.5*math.Pow(max(0, r+.009-near)/.012, 2) - math.Pow(max(0, r+.009-far)/.018, 2)
 			score -= .35 * trip / vineMaxExcursion
 			// Look along the background seams before turning. A short horizon
 			// rounds cell corners while keeping the stem close to their edges.
@@ -314,7 +232,7 @@ func growVine(field *VineTerrain, root, heading V, radius, reach, phase, curl fl
 	}
 	for i := range v.Points {
 		remaining := length - float64(i)*step
-		v.Points[i].Radius = math.Min(v.Points[i].Radius, vineTipRadius(radius, remaining))
+		v.Points[i].Radius = min(v.Points[i].Radius, vineTipRadius(radius, remaining))
 	}
 	return v
 }
@@ -326,12 +244,12 @@ func (v *Vine) limitThickness() {
 	length, _ := v.extent()
 	radius := 0.0
 	for _, p := range v.Points {
-		radius = math.Max(radius, p.Radius)
+		radius = max(radius, p.Radius)
 	}
 	if radius <= vineThinRadius {
 		return
 	}
-	allowed := lerp(vineThinRadius, math.Min(radius, vineMaxRadius), smoothstep(vineThickLength, vineFullWidthLength, length))
+	allowed := lerp(vineThinRadius, min(radius, vineMaxRadius), smoothstep(vineThickLength, vineFullWidthLength, length))
 	for i := range v.Points {
 		v.Points[i].Radius *= allowed / radius
 	}
@@ -340,7 +258,7 @@ func (v *Vine) limitThickness() {
 // A thick stem needs a long taper even when terrain cuts its growth short.
 // Cap the width rather than multiplying it so joining halves preserves it.
 func vineTipRadius(radius, distance float64) float64 {
-	return radius * smoothstep(0, math.Max(.080, radius*18), distance)
+	return radius * smoothstep(0, max(.080, radius*18), distance)
 }
 
 // Measure both arc length and spatial extent: a tightly coiled vine in a
@@ -351,8 +269,8 @@ func (v Vine) extent() (length, span float64) {
 	}
 	lo, hi := v.Points[0].P, v.Points[0].P
 	for i, p := range v.Points {
-		lo.X, lo.Y = math.Min(lo.X, p.P.X), math.Min(lo.Y, p.P.Y)
-		hi.X, hi.Y = math.Max(hi.X, p.P.X), math.Max(hi.Y, p.P.Y)
+		lo.X, lo.Y = min(lo.X, p.P.X), min(lo.Y, p.P.Y)
+		hi.X, hi.Y = max(hi.X, p.P.X), max(hi.Y, p.P.Y)
 		if i > 0 {
 			length += p.P.Sub(v.Points[i-1].P).Len()
 		}
@@ -389,11 +307,11 @@ func generateVinesInBand(field *VineTerrain, rng *rand.Rand, bottom, top float64
 			distance := .260
 			for _, vine := range vines {
 				for i := 0; i < len(vine.Points); i += 6 {
-					distance = math.Min(distance, p.Sub(vine.Points[i].P).Len())
+					distance = min(distance, p.Sub(vine.Points[i].P).Len())
 				}
 			}
 			if distance > .065 {
-				candidates = append(candidates, candidate{p, math.Min(space, .040) - distance*.12 - 2*field.borderDistance(p)})
+				candidates = append(candidates, candidate{p, min(space, .040) - distance*.12 - 2*field.borderDistance(p)})
 			}
 		}
 		sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].score > candidates[j].score })
@@ -506,12 +424,12 @@ func joinVineHalves(a, b Vine) (Vine, int) {
 	}
 	joint := len(v.Points)
 	v.Points = append(v.Points, a.Points...)
-	v.Points[joint].Radius = math.Max(a.Points[0].Radius, b.Points[0].Radius)
+	v.Points[joint].Radius = max(a.Points[0].Radius, b.Points[0].Radius)
 	// Both ends are actual tips, including when one half never grew.
 	length, _ := v.extent()
 	radius := 0.0
 	for _, p := range v.Points {
-		radius = math.Max(radius, p.Radius)
+		radius = max(radius, p.Radius)
 	}
 	along := 0.0
 	for i := range v.Points {
@@ -521,7 +439,7 @@ func joinVineHalves(a, b Vine) (Vine, int) {
 		if length == 0 {
 			v.Points[i].Radius = 0
 		} else {
-			v.Points[i].Radius = math.Min(v.Points[i].Radius, vineTipRadius(radius, math.Min(along, length-along)))
+			v.Points[i].Radius = min(v.Points[i].Radius, vineTipRadius(radius, min(along, length-along)))
 		}
 	}
 	return v, joint
