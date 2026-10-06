@@ -124,10 +124,30 @@ func (g *Scene) Update(viewport Viewport) bool {
 	if g.closed || !viewport.valid() {
 		return false
 	}
+	g.world.viewport = viewport
+	if u := g.world.upload; u != nil && !meshVisible(u.data, viewport) {
+		g.world.deferUpload()
+	}
 	g.world.receive(g)
 	ready := g.world.ensure(viewport.Y, viewport.Height, viewport.Velocity)
 	g.world.prune(viewport.Y, viewport.Height, viewport.Velocity)
 	return ready
+}
+
+// SetRenderWidth sets the number of cached pixels across one scene unit.
+// Pass the native screen width before Update. Resizing retains generation,
+// queries, and runtime cuts, and rerasterizes only sections contributing to the
+// viewport. Offscreen sections keep their images until they become visible.
+// Nonpositive widths and calls after Close are ignored. The default is 1000.
+func (g *Scene) SetRenderWidth(pixels int) {
+	if g.closed || pixels <= 0 || pixels == g.world.renderWidth() {
+		return
+	}
+	g.world.pixels = pixels
+	g.world.deferUpload()
+	if g.highlight != nil {
+		g.highlight.clear()
+	}
 }
 
 // Draw draws available terrain and vegetation into dst, scaling uniformly so
@@ -149,11 +169,13 @@ func (g *Scene) Reset(seed int64) {
 	if g.closed {
 		return
 	}
+	pixels := g.world.renderWidth()
 	g.world.close()
 	if g.highlight != nil {
 		g.highlight.clear()
 	}
 	g.world = newWorld(seed, g.study, g.view, g.collisionTolerance, g.loadSection)
+	g.world.pixels = pixels
 }
 
 // Close stops background work and releases all GPU resources. It is safe to

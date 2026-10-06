@@ -90,6 +90,13 @@ func (g *Scene) redrawCarvedVegetation(section *worldSection, id int64) {
 	}
 	mesh := sectionMesh{id: id, geometry: section.geometry}
 	g.prepareCarvedVegetation(&mesh)
+	if section.mesh != nil {
+		section.mesh.geometry = section.geometry
+		section.mesh.vines, section.mesh.foregroundVines, section.mesh.mushrooms = mesh.vines, mesh.foregroundVines, mesh.mushrooms
+		section.mesh.vinesBounds, section.mesh.foregroundVinesBounds, section.mesh.mushroomsBounds = mesh.vinesBounds, mesh.foregroundVinesBounds, mesh.mushroomsBounds
+	}
+	pixels := section.renderWidth()
+	mesh = scaleSectionMesh(mesh, pixels)
 	if g.world.white == nil {
 		g.world.white = ebiten.NewImage(1, 1)
 		g.world.white.Fill(color.White)
@@ -114,18 +121,18 @@ func (g *Scene) redrawCarvedVegetation(section *worldSection, id int64) {
 	section.mushrooms = draw([]triangleMesh{mesh.mushrooms}, mesh.mushroomsBounds)
 	section.vinesBounds, section.foregroundVinesBounds, section.mushroomsBounds = mesh.vinesBounds, mesh.foregroundVinesBounds, mesh.mushroomsBounds
 	top := sectionWindowTop(id)
-	section.vines = g.softenVines(section.vines, section.vinesBounds, top)
+	section.vines = g.softenVinesAt(section.vines, section.vinesBounds, top, pixels)
 	for _, layer := range []struct {
 		image  *ebiten.Image
 		bounds image.Rectangle
 	}{
 		{section.vines, section.vinesBounds}, {section.foregroundVines, section.foregroundVinesBounds},
 	} {
-		eraseVineCuts(layer.image, layer.bounds, top, section.geometry.vegetation.cuts)
+		eraseVineCutsAt(layer.image, layer.bounds, top, section.geometry.vegetation.cuts, pixels)
 	}
 }
 
-func (g *Scene) softenVines(img *ebiten.Image, bounds image.Rectangle, top float64) *ebiten.Image {
+func (g *Scene) softenVinesAt(img *ebiten.Image, bounds image.Rectangle, top float64, pixels int) *ebiten.Image {
 	if img == nil || g.vineMaterial == nil {
 		return img
 	}
@@ -133,7 +140,8 @@ func (g *Scene) softenVines(img *ebiten.Image, bounds image.Rectangle, top float
 	softened.DrawRectShader(bounds.Dx(), bounds.Dy(), g.vineMaterial, &ebiten.DrawRectShaderOptions{
 		Images: [4]*ebiten.Image{img},
 		Uniforms: map[string]any{
-			"Offset":  []float32{float32(bounds.Min.X), float32(top*rasterPixelsPerUnit) + float32(bounds.Min.Y)},
+			"Offset":  []float32{float32(bounds.Min.X), float32(top*float64(pixels)) + float32(bounds.Min.Y)},
+			"Scale":   float32(rasterPixelsPerUnit) / float32(pixels),
 			"Texture": float32(g.texture / 8),
 		},
 	})
@@ -327,14 +335,14 @@ func (cut rockCut) vines(source []Vine, top float64) ([]Vine, bool) {
 
 // Erase the full ribbon and its shadow after rasterization/blur. Centerline
 // clipping alone would leave wide vine edges protruding into the opening.
-func eraseVineCuts(dst *ebiten.Image, bounds image.Rectangle, windowTop float64, cuts []rockCut) {
+func eraseVineCutsAt(dst *ebiten.Image, bounds image.Rectangle, windowTop float64, cuts []rockCut, pixels int) {
 	if dst == nil || bounds.Empty() {
 		return
 	}
 	for _, cut := range cuts {
 		// Clip before converting to float32 pixels, including very large cuts.
-		lo := V{float64(bounds.Min.X) / rasterPixelsPerUnit, windowTop + float64(bounds.Min.Y)/rasterPixelsPerUnit}
-		hi := V{float64(bounds.Max.X) / rasterPixelsPerUnit, windowTop + float64(bounds.Max.Y)/rasterPixelsPerUnit}
+		lo := V{float64(bounds.Min.X) / float64(pixels), windowTop + float64(bounds.Min.Y)/float64(pixels)}
+		hi := V{float64(bounds.Max.X) / float64(pixels), windowTop + float64(bounds.Max.Y)/float64(pixels)}
 		poly := clipHalfPlane(cut.poly, V{-1, 0}, -lo.X)
 		poly = clipHalfPlane(poly, V{1, 0}, hi.X)
 		poly = clipHalfPlane(poly, V{0, -1}, -lo.Y)
@@ -344,7 +352,7 @@ func eraseVineCuts(dst *ebiten.Image, bounds image.Rectangle, windowTop float64,
 		}
 		var path vector.Path
 		for i, p := range poly {
-			x, y := float32(p.X*rasterPixelsPerUnit-float64(bounds.Min.X)), float32((p.Y-windowTop)*rasterPixelsPerUnit-float64(bounds.Min.Y))
+			x, y := float32(p.X*float64(pixels)-float64(bounds.Min.X)), float32((p.Y-windowTop)*float64(pixels)-float64(bounds.Min.Y))
 			if i == 0 {
 				path.MoveTo(x, y)
 			} else {

@@ -50,8 +50,11 @@ Rendering scales scene units uniformly to the destination image's width. Use a
 `Layout` with the same aspect ratio as the viewport: for example, a 1000 × 800
 image for a viewport height of 0.8, or a 500 × 500 image for a single unit square.
 Generation, spatial fields, and collision calculations use scene units throughout.
-Only mesh preparation and rendering convert coordinates to pixels; cached
-textures use 1000 pixels per scene unit independently of generation.
+Only mesh preparation and rendering convert coordinates to pixels. Set
+`scene.SetRenderWidth(nativeWidth)` before `Update` to rasterize cached textures
+at the native screen width; the default is 1000 pixels per scene unit. Resizing
+reuses prepared meshes, queries, and runtime cuts. Sections contributing to the
+viewport refresh first; offscreen images refresh when they become visible.
 
 `scene.DrawHover(screen, viewport, x, y)` adds an optional highlight after drawing;
 pass cursor coordinates in viewport-local scene units and call it only when the
@@ -320,7 +323,7 @@ A warm outline previews the cut while held; terrain changes only on release.
 The drill is 0.02 scene units wide. The status text reports affected, split, and
 destroyed formations, marking partial reports when terrain is unloaded.
 
-The window is resizable. Scrolling continues while missing sections are prepared in the background, with “Growing upward…” displayed until they are ready. Rocks share world coordinates across sections, and vines keep their full geometry across boundaries.
+The viewer renders at the window's native pixel resolution, including on HiDPI displays. Resizing rerasterizes visible sections using cached geometry and preserves runtime cuts and camera position. Offscreen sections refresh when they become visible. Scrolling continues while missing sections are prepared in the background, with “Growing upward…” displayed until they are ready. Rocks share world coordinates across sections, and vines keep their full geometry across boundaries.
 
 Hover over a foreground rock for a soft warm highlight and glow over its entire connected block of cells, including across cached section boundaries. Point within 0.006 scene units of a guide to highlight only that guide line instead. Hover effects are enabled by default; use `-hover=false` to disable them (or `-hover=true` to enable them). PNG exports never include hover effects.
 

@@ -48,9 +48,10 @@ func (c *carveGesture) advance(cursor, world infinicave.V, pressed, released, ca
 	return false
 }
 
-func viewerWorldPoint(cursor infinicave.V, cameraY float64) infinicave.V {
-	return cursor.Mul(float64(infinicave.Width) / renderWidth).
-		Add(infinicave.V{Y: math.Round(cameraY*renderWidth) / renderWidth})
+func viewerWorldPoint(cursor infinicave.V, cameraY float64, screenWidth int) infinicave.V {
+	// Match the scene's native raster origin; cursor scaling follows Layout.
+	return cursor.Mul(float64(infinicave.Width) / float64(screenWidth)).
+		Add(infinicave.V{Y: math.Round(cameraY*float64(screenWidth)) / float64(screenWidth)})
 }
 
 func (g *Game) updateCarving() {
@@ -61,7 +62,7 @@ func (g *Game) updateCarving() {
 	cursor := infinicave.V{X: x, Y: y}
 	cancel := inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) || !ebiten.IsFocused()
 	wasActive := g.carving.active
-	commit := g.carving.advance(cursor, viewerWorldPoint(cursor, g.camera.Y),
+	commit := g.carving.advance(cursor, viewerWorldPoint(cursor, g.camera.Y, g.screenWidth),
 		inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft),
 		inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft), cancel, 1/float64(ebiten.TPS()))
 	if cancel && wasActive {
@@ -110,7 +111,7 @@ func (g *Game) drawCarving(screen *ebiten.Image) {
 		return
 	}
 	scale := float64(screen.Bounds().Dx()) / infinicave.Width
-	cameraY := math.Round(g.camera.Y*renderWidth) / renderWidth
+	cameraY := math.Round(g.camera.Y*scale) / scale
 	pixel := func(p infinicave.V) (float32, float32) {
 		return float32(p.X * scale), float32((p.Y - cameraY) * scale)
 	}

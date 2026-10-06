@@ -16,16 +16,19 @@ const (
 )
 
 type Game struct {
-	camera      Camera
-	scene       *infinicave.Scene
-	loading     bool
-	seed        int64
-	output      string
-	hover       bool
-	exported    bool
-	exportErr   error
-	carving     carveGesture
-	carveStatus string
+	camera       Camera
+	scene        *infinicave.Scene
+	loading      bool
+	seed         int64
+	output       string
+	hover        bool
+	exported     bool
+	exportErr    error
+	carving      carveGesture
+	carveStatus  string
+	screenWidth  int
+	screenHeight int
+	regenerate   bool
 }
 
 func (g *Game) viewport() infinicave.Viewport {
@@ -41,10 +44,15 @@ func (g *Game) Update() error {
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyR) {
 		g.seed++
+		g.regenerate = true
+	}
+	if g.regenerate {
 		g.scene.Reset(g.seed)
 		g.carving = carveGesture{}
 		g.carveStatus = ""
+		g.regenerate = false
 	}
+	g.scene.SetRenderWidth(g.screenWidth)
 	g.updateCamera()
 	g.camera.step()
 	g.loading = !g.scene.Update(g.viewport())

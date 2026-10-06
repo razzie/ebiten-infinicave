@@ -131,7 +131,7 @@ func (w *world) hoverAt(cursor V, cameraY float64, height float64) hoverTarget {
 		return hoverTarget{}
 	}
 	// Match world's rounded rendering origin, including during camera glides.
-	p := cursor.Add(V{Y: rasterAlignedY(cameraY)})
+	p := cursor.Add(V{Y: renderAlignedY(cameraY, w.renderWidth())})
 	if p.Y >= 0 {
 		return hoverTarget{}
 	}
@@ -274,17 +274,18 @@ func (r *hoverRenderer) selectTarget(target hoverTarget, w *world, low, high int
 		lo = V{math.Min(lo.X, a.X), math.Min(lo.Y, a.Y)}
 		hi = V{math.Max(hi.X, b.X), math.Max(hi.Y, b.Y)}
 	}
-	r.origin = V{math.Floor((lo.X-hoverPadding)*rasterPixelsPerUnit+1e-9) / rasterPixelsPerUnit,
-		math.Floor((lo.Y-hoverPadding)*rasterPixelsPerUnit+1e-9) / rasterPixelsPerUnit}
-	width := max(1, int(math.Ceil((hi.X+hoverPadding-r.origin.X)*rasterPixelsPerUnit-1e-9)))
-	height := max(1, int(math.Ceil((hi.Y+hoverPadding-r.origin.Y)*rasterPixelsPerUnit-1e-9)))
+	pixels := float64(w.renderWidth())
+	r.origin = V{math.Floor((lo.X-hoverPadding)*pixels+1e-9) / pixels,
+		math.Floor((lo.Y-hoverPadding)*pixels+1e-9) / pixels}
+	width := max(1, int(math.Ceil((hi.X+hoverPadding-r.origin.X)*pixels-1e-9)))
+	height := max(1, int(math.Ceil((hi.Y+hoverPadding-r.origin.Y)*pixels-1e-9)))
 	mask := ebiten.NewImage(width, height)
 	defer mask.Deallocate()
 	var path vector.Path
 	for _, poly := range polygons {
-		path.MoveTo(float32((poly[0].X-r.origin.X)*rasterPixelsPerUnit), float32((poly[0].Y-r.origin.Y)*rasterPixelsPerUnit))
+		path.MoveTo(float32((poly[0].X-r.origin.X)*pixels), float32((poly[0].Y-r.origin.Y)*pixels))
 		for _, p := range poly[1:] {
-			path.LineTo(float32((p.X-r.origin.X)*rasterPixelsPerUnit), float32((p.Y-r.origin.Y)*rasterPixelsPerUnit))
+			path.LineTo(float32((p.X-r.origin.X)*pixels), float32((p.Y-r.origin.Y)*pixels))
 		}
 		if !target.guide {
 			path.Close()
@@ -326,12 +327,14 @@ func (g *Scene) DrawHover(screen *ebiten.Image, viewport Viewport, x, y float64)
 		return
 	}
 	target := g.world.hoverAt(V{x, y}, viewport.Y, viewport.Height)
-	low, high := visibleSections(rasterAlignedY(viewport.Y), viewport.Height)
+	pixels := float64(g.world.renderWidth())
+	cameraY := renderAlignedY(viewport.Y, g.world.renderWidth())
+	low, high := visibleSections(cameraY, viewport.Height)
 	g.highlight.selectTarget(target, g.world, low, high)
 	if g.highlight.image != nil {
 		op := &ebiten.DrawImageOptions{}
-		op.GeoM.Translate(g.highlight.origin.X*rasterPixelsPerUnit, (g.highlight.origin.Y-rasterAlignedY(viewport.Y))*rasterPixelsPerUnit)
-		scale := float64(screen.Bounds().Dx()) / rasterPixelsPerUnit
+		op.GeoM.Translate(g.highlight.origin.X*pixels, (g.highlight.origin.Y-cameraY)*pixels)
+		scale := float64(screen.Bounds().Dx()) / pixels
 		op.GeoM.Scale(scale, scale)
 		screen.DrawImage(g.highlight.image, op)
 	}

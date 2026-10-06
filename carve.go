@@ -323,24 +323,25 @@ func (g *Scene) redrawCarvedSection(section *worldSection) {
 		return
 	}
 	mesh := prepareGridWithTopology(nil, g.view, carvedTopology(section.geometry.grid, section.geometry.cuts, section.geometry.top))
+	if section.mesh != nil {
+		section.mesh.foreground = mesh
+		section.mesh.geometry = section.geometry
+	}
 	g.drawCarvedForeground(section.foreground, mesh, section.geometry.top)
 }
 
 func (g *Scene) drawCarvedForeground(dst *ebiten.Image, mesh gridMesh, top float64) {
-	padded := newSectionImage(generationHeight)
-	defer padded.Deallocate()
-	g.drawGridFaces(padded, mesh.faces, top-SectionHeight)
+	pixels := dst.Bounds().Dx()
+	mesh = scaleGridMesh(mesh, pixels)
+	dst.Clear()
+	g.drawGridFaces(dst, mesh.faces, top-SectionHeight)
 	if g.world.white == nil {
 		g.world.white = ebiten.NewImage(1, 1)
 		g.world.white.Fill(color.White)
 	}
 	for _, outline := range mesh.outlines {
-		outline.draw(padded, g.world.white)
+		outline.draw(dst, g.world.white)
 	}
-	dst.Clear()
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Translate(0, -SectionHeight*rasterPixelsPerUnit)
-	dst.DrawImage(padded, op)
 }
 
 func (g *Scene) applyStoredCuts(mesh *sectionMesh) {
@@ -373,7 +374,17 @@ func (g *Scene) carveUpload(cut rockCut) {
 	if !changed && !plantsChanged {
 		return
 	}
+	defer func() {
+		pixels := u.pixels
+		if pixels == 0 {
+			pixels = g.world.renderWidth()
+		}
+		u.raster = scaleSectionMesh(u.data, pixels)
+	}()
 	u.data.geometry = geometry
+	if changed {
+		u.data.foreground = prepareGridWithTopology(nil, g.view, carvedTopology(geometry.grid, geometry.cuts, geometry.top))
+	}
 	if plantsChanged {
 		g.prepareCarvedVegetation(&u.data)
 		for _, img := range []*ebiten.Image{u.vines, u.foregroundVines, u.mushrooms} {
@@ -395,7 +406,6 @@ func (g *Scene) carveUpload(cut rockCut) {
 	if !changed {
 		return
 	}
-	u.data.foreground = prepareGridWithTopology(nil, g.view, carvedTopology(geometry.grid, geometry.cuts, geometry.top))
 	if u.stage >= 2 {
 		if u.foreground != nil {
 			u.foreground.Deallocate()

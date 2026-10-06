@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"testing"
 
 	infinicave "github.com/razzie/ebiten-infinicave"
@@ -54,8 +55,10 @@ func TestSegmentGestureLatchesMovementAndCancellation(t *testing.T) {
 }
 
 func TestViewerWorldPointMatchesRoundedDrawOrigin(t *testing.T) {
-	p := viewerWorldPoint(infinicave.V{X: 250, Y: 125}, -.8004)
-	if p.X != .25 || p.Y != -.675 {
-		t.Fatalf("world cursor %v", p)
+	for _, width := range []int{500, 1000, 1500} {
+		p := viewerWorldPoint(infinicave.V{X: float64(width) * .25, Y: float64(width) * .125}, -.8004, width)
+		if p.X != .25 || math.Abs(p.Y-(.125+math.Round(-.8004*float64(width))/float64(width))) > 1e-12 {
+			t.Fatalf("world cursor at width %d: %v", width, p)
+		}
 	}
 }

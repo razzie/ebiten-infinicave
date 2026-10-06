@@ -55,18 +55,33 @@ func (c *Camera) step() {
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
-	height := max(1, int(math.Round(float64(renderWidth)*float64(outsideHeight)/float64(max(1, outsideWidth)))))
+	width, height := max(1, outsideWidth), max(1, outsideHeight)
 	if g.output != "" {
-		height = exportHeight
+		width, height = renderWidth, exportHeight
 	}
-	sceneHeight := float64(height) / renderWidth * infinicave.Width
+	if g.screenWidth != width || g.screenHeight != height {
+		g.carving = carveGesture{}
+		g.screenWidth, g.screenHeight = width, height
+	}
+	sceneHeight := float64(height) / float64(width) * infinicave.Width
 	if g.camera.Height == 0 {
 		g.camera.Y, g.camera.Target = -sceneHeight, -sceneHeight
 	}
 	g.camera.Height = sceneHeight
 	g.camera.Y = math.Min(g.camera.Y, -sceneHeight)
 	g.camera.Target = math.Min(g.camera.Target, -sceneHeight)
-	return renderWidth, height
+	return width, height
+}
+
+// Ebitengine supplies window dimensions in device-independent pixels. Include
+// the monitor scale so the drawing surface also stays native on HiDPI displays.
+func (g *Game) LayoutF(outsideWidth, outsideHeight float64) (float64, float64) {
+	return g.layoutNative(outsideWidth, outsideHeight, ebiten.Monitor().DeviceScaleFactor())
+}
+
+func (g *Game) layoutNative(width, height, scale float64) (float64, float64) {
+	w, h := g.Layout(int(math.Ceil(width*scale)), int(math.Ceil(height*scale)))
+	return float64(w), float64(h)
 }
 
 func (g *Game) updateCamera() {

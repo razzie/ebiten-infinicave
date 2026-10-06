@@ -36,6 +36,8 @@ type worldSection struct {
 	geometry                                            *terrainGeometry
 	vinesBounds, foregroundVinesBounds, mushroomsBounds image.Rectangle
 	vegetationPending                                   bool
+	mesh                                                *sectionMesh
+	pixels                                              int
 }
 
 type world struct {
@@ -50,11 +52,16 @@ type world struct {
 	revision uint64 // invalidates hover overlays when cached sections change
 	queries  *worldQueryIndex
 	cuts     []rockCut // world-space edits survive section eviction
+	pixels   int
+	pending  map[int64]sectionMesh
+	viewport Viewport
 }
 
 // sectionUpload spreads one section's GPU work over several frames.
 type sectionUpload struct {
 	data            sectionMesh
+	raster          sectionMesh
+	pixels          int
 	img             *ebiten.Image
 	foreground      *ebiten.Image
 	vines           *ebiten.Image
@@ -226,6 +233,7 @@ func (w *world) close() {
 		w.upload.mushrooms.Deallocate()
 	}
 	w.upload = nil
+	w.pending = nil
 	if w.white != nil {
 		w.white.Deallocate()
 		w.white = nil
@@ -238,8 +246,8 @@ func (w *world) close() {
 
 // Keep cached render targets out of the atlas: reallocation must not change
 // their raster origin and introduce subpixel differences on revisiting.
-func newSectionImage(height int) *ebiten.Image {
-	return ebiten.NewImageWithOptions(image.Rect(0, 0, rasterPixelsPerUnit, height*rasterPixelsPerUnit), &ebiten.NewImageOptions{Unmanaged: true})
+func newSectionImageAt(height, pixels int) *ebiten.Image {
+	return ebiten.NewImageWithOptions(image.Rect(0, 0, pixels, height*pixels), &ebiten.NewImageOptions{Unmanaged: true})
 }
 
 // Limit draw submissions per tick as well as separating the large layer
@@ -271,13 +279,24 @@ func (w *world) receive(g *Scene) {
 		select {
 		case data := <-w.results:
 			w.working = false
-			g.applyStoredCuts(&data)
-			w.upload = &sectionUpload{data: data}
+			if !meshVisible(data, w.viewport) {
+				w.savePending(data)
+				return
+			}
+			w.startUpload(data)
 		default:
 		}
 		return
 	}
 	u := w.upload
+	if u.pixels == 0 { // Manually constructed uploads use the default scale.
+		u.pixels = w.renderWidth()
+	}
+	if u.stage == 0 {
+		g.applyStoredCuts(&u.data)
+		u.raster = scaleSectionMesh(u.data, u.pixels)
+	}
+	data := &u.raster
 	top := sectionWindowTop(u.data.id)
 	if w.white == nil {
 		w.white = ebiten.NewImage(1, 1)
@@ -285,70 +304,70 @@ func (w *world) receive(g *Scene) {
 	}
 	switch u.stage {
 	case 0:
-		u.img = newSectionImage(generationHeight)
+		u.img = newSectionImageAt(sectionHeight, u.pixels)
 		u.img.Fill(color.Black)
-		g.drawGridFaces(u.img, u.data.background.faces, top)
+		g.drawGridFaces(u.img, data.background.faces, top)
 	case 1:
-		if !w.uploadMeshes(u.img, u.data.background.outlines) {
+		if !w.uploadMeshes(u.img, data.background.outlines) {
 			return
 		}
 	case 2:
-		u.foreground = newSectionImage(generationHeight)
-		g.drawGridFaces(u.foreground, u.data.foreground.faces, top)
+		u.foreground = newSectionImageAt(sectionHeight, u.pixels)
+		g.drawGridFaces(u.foreground, data.foreground.faces, top)
 	case 3:
-		if !w.uploadMeshes(u.foreground, u.data.foreground.outlines) {
+		if !w.uploadMeshes(u.foreground, data.foreground.outlines) {
 			return
 		}
 	case 4:
-		terrain := newSectionImage(sectionHeight)
-		op := &ebiten.DrawImageOptions{}
-		op.GeoM.Translate(0, -sectionHeight*rasterPixelsPerUnit)
-		terrain.DrawImage(u.img, op)
-		u.img.Deallocate()
-		u.img = terrain
-		foreground := newSectionImage(sectionHeight)
-		foreground.DrawImage(u.foreground, op)
-		u.foreground.Deallocate()
-		u.foreground = foreground
+		geometryChanged := true
+		if previous := w.sections[u.data.id]; previous != nil {
+			geometryChanged = previous.geometry != u.data.geometry
+			previous.deallocate()
+		}
+		source := u.data
 		w.sections[u.data.id] = &worldSection{terrain: u.img, foreground: u.foreground,
-			geometry: u.data.geometry, vegetationPending: true}
+			geometry: u.data.geometry, vegetationPending: true, mesh: &source, pixels: u.pixels}
 		u.img, u.foreground = nil, nil // ownership moved to the cache
-		w.revision++
+		if geometryChanged {
+			w.revision++
+		}
 	case 5:
-		if u.data.vinesBounds.Empty() {
+		if data.vinesBounds.Empty() {
 			break
 		}
 		if u.vines == nil {
-			u.vines = newVegetationImage(u.data.vinesBounds)
+			u.vines = newVegetationImage(data.vinesBounds)
 		}
-		if !w.uploadMeshes(u.vines, u.data.vines) {
+		if !w.uploadMeshes(u.vines, data.vines) {
 			return
 		}
 	case 6:
-		u.vines = g.softenVines(u.vines, u.data.vinesBounds, top)
+		u.vines = g.softenVinesAt(u.vines, data.vinesBounds, top, u.pixels)
 		if u.data.geometry != nil {
-			eraseVineCuts(u.vines, u.data.vinesBounds, top, u.data.geometry.vegetation.cuts)
+			eraseVineCutsAt(u.vines, data.vinesBounds, top, u.data.geometry.vegetation.cuts, u.pixels)
 		}
-		if !u.data.mushroomsBounds.Empty() {
-			u.mushrooms = newVegetationImage(u.data.mushroomsBounds)
-			u.data.mushrooms.draw(u.mushrooms, w.white)
+		if !data.mushroomsBounds.Empty() {
+			u.mushrooms = newVegetationImage(data.mushroomsBounds)
+			data.mushrooms.draw(u.mushrooms, w.white)
 		}
 	case 7:
-		if !u.data.foregroundVinesBounds.Empty() {
+		if !data.foregroundVinesBounds.Empty() {
 			if u.foregroundVines == nil {
-				u.foregroundVines = newVegetationImage(u.data.foregroundVinesBounds)
+				u.foregroundVines = newVegetationImage(data.foregroundVinesBounds)
 			}
-			if !w.uploadMeshes(u.foregroundVines, u.data.foregroundVines) {
+			if !w.uploadMeshes(u.foregroundVines, data.foregroundVines) {
 				return
 			}
 		}
 		if u.data.geometry != nil {
-			eraseVineCuts(u.foregroundVines, u.data.foregroundVinesBounds, top, u.data.geometry.vegetation.cuts)
+			eraseVineCutsAt(u.foregroundVines, data.foregroundVinesBounds, top, u.data.geometry.vegetation.cuts, u.pixels)
 		}
 	default:
 		section := w.sections[u.data.id]
 		section.vines, section.foregroundVines, section.mushrooms = u.vines, u.foregroundVines, u.mushrooms
-		section.vinesBounds, section.foregroundVinesBounds, section.mushroomsBounds = u.data.vinesBounds, u.data.foregroundVinesBounds, u.data.mushroomsBounds
+		section.vinesBounds, section.foregroundVinesBounds, section.mushroomsBounds = data.vinesBounds, data.foregroundVinesBounds, data.mushroomsBounds
+		source := u.data
+		section.mesh = &source
 		section.vegetationPending = false
 		w.upload = nil
 		return
@@ -403,7 +422,29 @@ func (w *world) ensure(y float64, height float64, velocity float64) bool {
 		if id < 0 {
 			continue
 		}
+		viewport := Viewport{Y: y, Height: height, Velocity: velocity}
+		if data, ok := w.pending[id]; ok {
+			if !meshVisible(data, viewport) {
+				continue
+			}
+			if w.upload == nil {
+				w.startUpload(data)
+			}
+			if i < required {
+				ready = false
+			}
+			continue
+		}
 		if section := w.sections[id]; section != nil {
+			if section.mesh != nil && section.renderWidth() != w.renderWidth() && meshVisible(*section.mesh, viewport) {
+				if w.upload == nil {
+					w.startUpload(*section.mesh)
+				}
+				if i < required {
+					ready = false
+				}
+				continue
+			}
 			if section.vegetationPending && i < required {
 				ready = false
 			}
@@ -444,16 +485,22 @@ func (w *world) prune(y float64, height float64, velocity float64) {
 	if w.revision != revision && w.queries != nil {
 		w.queries.expire(w)
 	}
+	for id := range w.pending {
+		if !keep[id] && (id < max(0, low-2) || id > high+3) {
+			delete(w.pending, id)
+		}
+	}
 }
 
 func (w *world) draw(dst *ebiten.Image, y float64, height float64) {
-	scale := float64(dst.Bounds().Dx()) / rasterPixelsPerUnit
-	y = rasterAlignedY(y)
+	y = renderAlignedY(y, w.renderWidth())
 	low, high := visibleSections(y, height)
 	for id := low; id <= high; id++ {
 		if section := w.sections[id]; section != nil {
 			op := &ebiten.DrawImageOptions{}
-			op.GeoM.Translate(0, (sectionTop(id)-y)*rasterPixelsPerUnit)
+			pixels := section.renderWidth()
+			scale := float64(dst.Bounds().Dx()) / float64(pixels)
+			op.GeoM.Translate(0, (sectionTop(id)-y)*float64(pixels))
 			op.GeoM.Scale(scale, scale)
 			dst.DrawImage(section.terrain, op)
 		}
@@ -461,18 +508,20 @@ func (w *world) draw(dst *ebiten.Image, y float64, height float64) {
 	// A vine is drawn once in world coordinates, even while crossing a seam.
 	for id := max(0, low-1); id <= high+1; id++ {
 		if section := w.sections[id]; section != nil {
-			drawVegetation(dst, section.vines, section.vinesBounds, sectionWindowTop(id), y, scale)
+			drawVegetation(dst, section.vines, section.vinesBounds, sectionWindowTop(id), y, section.renderWidth())
 		}
 	}
 	for id := max(0, low-1); id <= high+1; id++ {
 		if section := w.sections[id]; section != nil {
-			drawVegetation(dst, section.mushrooms, section.mushroomsBounds, sectionWindowTop(id), y, scale)
+			drawVegetation(dst, section.mushrooms, section.mushroomsBounds, sectionWindowTop(id), y, section.renderWidth())
 		}
 	}
 	for id := low; id <= high; id++ {
 		if section := w.sections[id]; section != nil {
 			op := &ebiten.DrawImageOptions{}
-			op.GeoM.Translate(0, (sectionTop(id)-y)*rasterPixelsPerUnit)
+			pixels := section.renderWidth()
+			scale := float64(dst.Bounds().Dx()) / float64(pixels)
+			op.GeoM.Translate(0, (sectionTop(id)-y)*float64(pixels))
 			op.GeoM.Scale(scale, scale)
 			dst.DrawImage(section.foreground, op)
 		}
@@ -480,17 +529,18 @@ func (w *world) draw(dst *ebiten.Image, y float64, height float64) {
 	// Keep complete foreground stems in their owner's padded window.
 	for id := max(0, low-1); id <= high+1; id++ {
 		if section := w.sections[id]; section != nil {
-			drawVegetation(dst, section.foregroundVines, section.foregroundVinesBounds, sectionWindowTop(id), y, scale)
+			drawVegetation(dst, section.foregroundVines, section.foregroundVinesBounds, sectionWindowTop(id), y, section.renderWidth())
 		}
 	}
 }
 
-func drawVegetation(dst, layer *ebiten.Image, bounds image.Rectangle, top, y, scale float64) {
+func drawVegetation(dst, layer *ebiten.Image, bounds image.Rectangle, top, y float64, pixels int) {
 	if layer == nil {
 		return
 	}
 	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Translate(float64(bounds.Min.X), (top-y)*rasterPixelsPerUnit+float64(bounds.Min.Y))
+	op.GeoM.Translate(float64(bounds.Min.X), (top-y)*float64(pixels)+float64(bounds.Min.Y))
+	scale := float64(dst.Bounds().Dx()) / float64(pixels)
 	op.GeoM.Scale(scale, scale)
 	dst.DrawImage(layer, op)
 }
