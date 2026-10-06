@@ -129,10 +129,26 @@ func TestWorldWorkerPreparesAllLayers(t *testing.T) {
 	w := newWorld(42, StudyNone, ViewShaded, 0, nil)
 	defer w.close()
 	w.request(0)
+	var early *terrainGeometry
+	select {
+	case terrain := <-w.terrain:
+		early = terrain.geometry
+		if terrain.id != 0 || early == nil || len(early.collision.Polygons) == 0 {
+			t.Fatal("worker omitted early collision geometry")
+		}
+		if len(early.vegetation.vines)+len(early.vegetation.foregroundVines)+len(early.vegetation.mushrooms) != 0 {
+			t.Fatal("worker published collision after adding vegetation")
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("background collision preparation stalled")
+	}
 	select {
 	case mesh := <-w.results:
 		if mesh.geometry == nil || len(mesh.geometry.collision.Polygons) == 0 {
 			t.Fatal("worker omitted collision geometry")
+		}
+		if early == mesh.geometry || !reflect.DeepEqual(early.collision, mesh.geometry.collision) || len(early.vegetation.vines) != 0 {
+			t.Fatal("worker mutated or replaced early collision boundaries")
 		}
 		if mesh.id != 0 || len(mesh.background.faces.indices) == 0 || len(mesh.foreground.faces.indices) == 0 || len(mesh.vines) == 0 || len(mesh.foregroundVines) == 0 || len(mesh.mushrooms.indices) == 0 {
 			t.Fatal("worker returned incomplete section geometry")

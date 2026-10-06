@@ -30,6 +30,15 @@ type Config struct {
 	// LoadSection supplies guides and holes for each section, overriding Study's
 	// guide shapes. Nil uses the default random generator (or the selected study).
 	LoadSection SectionLoader
+	// OnCollisionReady receives foreground collision polygons without waiting
+	// for vegetation generation or render meshes.
+	// Scene calls it during Update on the game goroutine, including for prefetched
+	// sections. The geometry owns its slices and includes authored holes, stored
+	// runtime cuts, and CollisionTolerance. Nil disables notifications.
+	// Evicted sections notify again when regenerated; Reset retains the callback.
+	// Runtime edits do not notify; use CarveResult.SectionIDs to refresh collisions.
+	// GenerateSectionWithConfig calls it synchronously on the calling goroutine.
+	OnCollisionReady func(CollisionGeometry)
 }
 
 // DefaultConfig returns the viewer's appearance with a deterministic seed of 0.
@@ -83,6 +92,7 @@ type Scene struct {
 	view               View
 	collisionTolerance float64
 	loadSection        SectionLoader
+	onCollisionReady   func(CollisionGeometry)
 	closed             bool
 }
 
@@ -92,7 +102,7 @@ func NewScene(config Config) (*Scene, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
-	g := &Scene{texture: config.Texture, study: config.Study, view: config.View, collisionTolerance: config.CollisionTolerance, loadSection: config.LoadSection}
+	g := &Scene{texture: config.Texture, study: config.Study, view: config.View, collisionTolerance: config.CollisionTolerance, loadSection: config.LoadSection, onCollisionReady: config.OnCollisionReady}
 	if g.view != ViewShaded {
 		g.texture = 0
 	}
@@ -117,11 +127,17 @@ func NewScene(config Config) (*Scene, error) {
 
 // Update uploads prepared meshes, requests missing sections, and evicts distant
 // sections. Call once per game tick. It never waits for generation and returns
-// true when all layers needed by viewport are ready. Complete terrain and
-// collision become available while vegetation is still uploading. An invalid viewport or a
-// closed Scene returns false without doing work.
+// true when all layers needed by viewport are ready. Collision becomes available
+// before vegetation generation and mesh preparation; complete terrain uploads
+// before vegetation. OnCollisionReady runs here as soon as generated polygons
+// arrive. An invalid viewport or a closed Scene returns false without doing work.
 func (g *Scene) Update(viewport Viewport) bool {
 	if g.closed || !viewport.valid() {
+		return false
+	}
+	w := g.world
+	w.receiveCollision(g)
+	if g.closed || g.world != w { // The callback may close or reset the scene.
 		return false
 	}
 	g.world.viewport = viewport
@@ -163,7 +179,7 @@ func (g *Scene) Draw(dst *ebiten.Image, viewport Viewport) {
 }
 
 // Reset replaces the world with a new seed, keeping rendering settings and
-// the section content loader.
+// the section content loader and collision callback.
 // The next Update begins loading again. Reset does nothing after Close.
 func (g *Scene) Reset(seed int64) {
 	if g.closed {

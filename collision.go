@@ -37,8 +37,9 @@ func (g CollisionGeometry) Contains(p V) bool {
 	return winding != 0
 }
 
-// CollisionGeometry returns a copy of a fully uploaded cached section's
-// collision boundaries. Missing, evicted, and closed sections return false.
+// CollisionGeometry returns a copy of a cached section's collision boundaries.
+// Geometry becomes available before vegetation generation and render uploads.
+// Missing, evicted, and closed sections return false.
 // IDs are 0 at the floor, then -1, -2, ... upward; positive IDs return false.
 // Call after Update; retain the returned copy as long as your game needs it.
 func (g *Scene) CollisionGeometry(id int64) (CollisionGeometry, bool) {
@@ -46,15 +47,40 @@ func (g *Scene) CollisionGeometry(id int64) (CollisionGeometry, bool) {
 		return CollisionGeometry{}, false
 	}
 	section := g.world.sections[-id]
-	if section == nil || section.geometry == nil {
-		return CollisionGeometry{}, false
+	if section != nil && section.geometry != nil {
+		return copyCollisionGeometry(section.geometry.collision), true
 	}
-	geometry := section.geometry.collision
-	geometry.Polygons = make([][]V, len(section.geometry.collision.Polygons))
-	for i, poly := range section.geometry.collision.Polygons {
-		geometry.Polygons[i] = append([]V(nil), poly...)
+	if geometry := g.world.collision[-id]; geometry != nil {
+		return copyCollisionGeometry(geometry.collision), true
 	}
-	return geometry, true
+	return CollisionGeometry{}, false
+}
+
+func copyCollisionGeometry(geometry CollisionGeometry) CollisionGeometry {
+	if geometry.Polygons != nil {
+		geometry.Polygons = copyQueryPolygons(geometry.Polygons)
+	}
+	return geometry
+}
+
+// Drain early terrain independently of mesh reception and GPU upload budgets.
+// The generation worker never invokes application code on its goroutine.
+func (w *world) receiveCollision(g *Scene) {
+	select {
+	case terrain := <-w.terrain:
+		geometry := terrain.geometry
+		for _, cut := range w.cuts {
+			geometry, _, _ = cut.geometry(terrain.id, geometry, g.collisionTolerance)
+		}
+		if w.collision == nil {
+			w.collision = make(map[int64]*terrainGeometry)
+		}
+		w.collision[terrain.id] = geometry
+		if g.onCollisionReady != nil {
+			g.onCollisionReady(copyCollisionGeometry(geometry.collision))
+		}
+	default:
+	}
 }
 
 func collisionVertexKey(p V) [2]int64 {

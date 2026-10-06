@@ -127,6 +127,16 @@ func (g *Scene) carve(cut rockCut) (CarveResult, error) {
 			}
 		}
 	}
+	// Collision may be ready while its section is still generating decoration
+	// or uploading. Keep that early cache in sync with edits as well.
+	for id, geometry := range w.collision {
+		updated, _, changed := cut.geometry(id, geometry, g.collisionTolerance)
+		w.collision[id] = updated
+		if changed && w.sections[id] == nil {
+			result.SectionIDs = append(result.SectionIDs, -id)
+		}
+	}
+	sort.Slice(result.SectionIDs, func(i, j int) bool { return result.SectionIDs[i] > result.SectionIDs[j] })
 	w.cuts = append(w.cuts, cut)
 	g.carveUpload(cut)
 	w.revision++

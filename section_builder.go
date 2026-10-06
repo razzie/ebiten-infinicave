@@ -63,7 +63,13 @@ func newSectionBuilder(seed int64, study Study, loadSection SectionLoader) *sect
 }
 
 func (b *sectionBuilder) build(id int64) sectionData {
-	return buildSectionCached(b.seed, id, b.study, b.loadSection, b.guides, &b.fields)
+	return b.buildWithTerrain(id, nil)
+}
+
+// onTerrain runs before decoration, once foreground topology includes all
+// authored holes. Published terrain is read-only for the rest of the build.
+func (b *sectionBuilder) buildWithTerrain(id int64, onTerrain func(sectionData)) sectionData {
+	return buildSectionCached(b.seed, id, b.study, b.loadSection, b.guides, &b.fields, onTerrain)
 }
 
 // Three independent samples per world site need no stateful RNG or seed table.

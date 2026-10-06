@@ -61,7 +61,7 @@ pass cursor coordinates in viewport-local scene units and call it only when the
 cursor is active. Convert cursor pixels to scene units with
 `float64(infinicave.Width) / float64(screen.Bounds().Dx())`.
 `scene.Reset(seed)` discards cached sections and starts a new
-world with the same rendering settings and section content loader. Rendering does not include UI or exports.
+world with the same rendering settings, section content loader, and collision callback. Rendering does not include UI or exports.
 Call every `Scene` method on the Ebitengine game goroutine. `Close` is idempotent
 and releases shaders and cached images; an in-progress CPU generation finishes
 before its worker exits.
@@ -131,6 +131,27 @@ concurrent calls, including during `Reset`.
 
 Foreground geometry is always prepared and retained, including in diagnostic
 views. Calling `DrawHover` is optional and has no effect on collision availability.
+
+Set `Config.OnCollisionReady` before creating a scene to set up physics as soon
+as a section's foreground polygons are available:
+
+```go
+config.OnCollisionReady = func(geometry infinicave.CollisionGeometry) {
+    // Create or replace your game's collision shapes for geometry.ID.
+    // geometry.Polygons are union boundaries in world-space scene units.
+}
+```
+
+`Scene.Update` invokes this optional callback on the game goroutine, before
+vegetation generation, mesh preparation, or GPU uploads have to finish. It also
+notifies for prefetched sections and empty geometry. Polygons include authored
+holes, stored runtime cuts, and `CollisionTolerance`; the callback owns its copy.
+`scene.CollisionGeometry(id)` is available at this point too. Eviction and
+regeneration notify again; resizing does not. `Reset` keeps the callback, so
+clear your game's old collision shapes when resetting. Runtime carving uses
+`CarveResult.SectionIDs` to identify collision shapes to refresh.
+`GenerateSectionWithConfig` invokes the callback synchronously on its caller's
+goroutine, before generating vegetation.
 
 World queries run independently of the camera and rendering. After `Update`,
 cast a finite ray in world coordinates and scene units:
@@ -339,6 +360,6 @@ go run ./cmd/infinicave -seed 42 -study curl -view normals -output normals.png
 go run ./cmd/infinicave -seed 42 -study curl -view shadows -output shadows.png
 ```
 
-Relief, shadows, rock triangulation, outlines, and vine and mushroom meshes are prepared in the background once per cached section. Background rock, foreground rock, both vine layers, and mushrooms are polygonized concurrently, using up to `GOMAXPROCS - 1` workers (at least one) to leave CPU capacity for rendering. The game loop uploads meshes with limits on submission time, triangle indices, and draw calls per tick. Complete terrain and collision become available first; vegetation appears when all its layers finish. Vegetation meshes are batched in draw order, and their textures are cropped to occupied bounds while retaining world-aligned grain. Vine steering uses reusable fields and linear distance sweeps; guide proposals are cached in a bounded window and rock adjacency uses spatial buckets. These caches do not affect geometry: the same seed, section, and guide inputs reproduce the same result regardless of load order or eviction. The renderer uses a shallow 2.5D surface: illumination is constant within each polygon, with depth shadows averaged over the face to preserve the faceted appearance.
+Relief, shadows, rock triangulation, outlines, and vine and mushroom meshes are prepared in the background once per cached section. Background rock, foreground rock, both vine layers, and mushrooms are polygonized concurrently, using up to `GOMAXPROCS - 1` workers (at least one) to leave CPU capacity for rendering. The game loop uploads meshes with limits on submission time, triangle indices, and draw calls per tick. Collision polygons are published before vegetation generation and mesh preparation; complete terrain uploads first, and vegetation appears when all its layers finish. Vegetation meshes are batched in draw order, and their textures are cropped to occupied bounds while retaining world-aligned grain. Vine steering uses reusable fields and linear distance sweeps; guide proposals are cached in a bounded window and rock adjacency uses spatial buckets. These caches do not affect geometry: the same seed, section, and guide inputs reproduce the same result regardless of load order or eviction. The renderer uses a shallow 2.5D surface: illumination is constant within each polygon, with depth shadows averaged over the face to preserve the faceted appearance.
 
 Run checks with `go test ./...` and `go vet ./...`. Ebitengine initializes the display for tests, so these also need a graphical session.

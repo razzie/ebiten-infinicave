@@ -44,17 +44,25 @@ type world struct {
 	sections map[int64]*worldSection
 	jobs     chan int64
 	results  chan sectionMesh
-	done     chan struct{}
-	closing  sync.Once
-	working  bool
-	upload   *sectionUpload
-	white    *ebiten.Image
-	revision uint64 // invalidates hover overlays when cached sections change
-	queries  *worldQueryIndex
-	cuts     []rockCut // world-space edits survive section eviction
-	pixels   int
-	pending  map[int64]sectionMesh
-	viewport Viewport
+	terrain  chan sectionTerrain
+	// Early collision topology is retained until terrain images publish.
+	collision map[int64]*terrainGeometry
+	done      chan struct{}
+	closing   sync.Once
+	working   bool
+	upload    *sectionUpload
+	white     *ebiten.Image
+	revision  uint64 // invalidates hover overlays when cached sections change
+	queries   *worldQueryIndex
+	cuts      []rockCut // world-space edits survive section eviction
+	pixels    int
+	pending   map[int64]sectionMesh
+	viewport  Viewport
+}
+
+type sectionTerrain struct {
+	id       int64
+	geometry *terrainGeometry
 }
 
 // sectionUpload spreads one section's GPU work over several frames.
@@ -125,7 +133,7 @@ func buildSectionMode(seed, id int64, study Study, loadSection SectionLoader) se
 	return newSectionBuilder(seed, study, loadSection).build(id)
 }
 
-func buildSectionCached(seed, id int64, study Study, loadSection SectionLoader, guideCache *guideCache, fields *vineWorkspace) sectionData {
+func buildSectionCached(seed, id int64, study Study, loadSection SectionLoader, guideCache *guideCache, fields *vineWorkspace, onTerrain func(sectionData)) sectionData {
 	top := sectionTop(id)
 	backgroundNoise := NewPerlin(rand.New(rand.NewSource(seed ^ 0x62617365)))
 	backgroundNoise.OffsetY = top
@@ -159,7 +167,34 @@ func buildSectionCached(seed, id int64, study Study, loadSection SectionLoader, 
 	})
 	shadeRockGrids(background, foreground, backgroundNoise)
 	topology := newRockTopology(foreground)
-	mushrooms := mushroomsForGuides(guides, topology.grid)
+	vegetationGrid := topology.grid
+	// Retain the terrain after each cut so vegetation keeps the same sequential
+	// damage semantics while collision can be published before it is generated.
+	type cutStage struct {
+		cut  rockCut
+		grid RockGrid
+	}
+	var cuts []cutStage
+	for _, hole := range holes {
+		cut, err := hole.translatedY(top).rockCut()
+		if err != nil {
+			continue
+		}
+		grid, _, changed := cut.grid(topology.grid, top)
+		if changed {
+			topologyCuts := append(append([]rockCut(nil), topology.cuts...), cut)
+			topology = carvedTopology(grid, topologyCuts, top)
+		}
+		cuts = append(cuts, cutStage{cut, topology.grid})
+	}
+	data := sectionData{id: id, background: background, foreground: foreground, guides: guides, holes: holes, foregroundTopology: topology}
+	if len(topology.cuts) > 0 {
+		data.foreground = topology.grid
+	}
+	if onTerrain != nil {
+		onTerrain(data)
+	}
+	mushrooms := mushroomsForGuides(guides, vegetationGrid)
 	var vines, foregroundVines []Vine
 	if study == StudyNone {
 		field := newVineTerrainWithWorkspace(background, foreground, false, fields)
@@ -168,26 +203,16 @@ func buildSectionCached(seed, id int64, study Study, loadSection SectionLoader, 
 		foregroundVines = generateForegroundVinesWithWorkspace(foreground, guides, rand.New(rand.NewSource(sectionSeed(seed^0x73757266616365, id))), fields)
 	}
 	plants := vegetationGeometry{vines: vines, foregroundVines: foregroundVines, mushrooms: mushrooms}
-	for _, hole := range holes {
-		cut, err := hole.translatedY(top).rockCut()
-		if err != nil {
-			continue
-		}
-		grid, _, changed := cut.grid(topology.grid, top)
-		if changed {
-			cuts := append(append([]rockCut(nil), topology.cuts...), cut)
-			topology = carvedTopology(grid, cuts, top)
-		}
-		plants, _ = cut.vegetation(plants, topology.grid, top)
+	for _, stage := range cuts {
+		plants, _ = stage.cut.vegetation(plants, stage.grid, top)
 	}
-	if len(topology.cuts) > 0 {
-		foreground = topology.grid
-	}
-	return sectionData{id: id, background: background, foreground: foreground, vines: plants.vines, foregroundVines: plants.foregroundVines, mushrooms: plants.mushrooms, guides: guides, holes: holes, vegetationCuts: plants.cuts, foregroundTopology: topology}
+	data.vines, data.foregroundVines, data.mushrooms = plants.vines, plants.foregroundVines, plants.mushrooms
+	data.vegetationCuts = plants.cuts
+	return data
 }
 
 func newWorld(seed int64, study Study, view View, tolerance float64, loadSection SectionLoader) *world {
-	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1), results: make(chan sectionMesh, 1), done: make(chan struct{})}
+	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1), results: make(chan sectionMesh, 1), terrain: make(chan sectionTerrain, 1), done: make(chan struct{})}
 	go func() {
 		builder := newSectionBuilder(seed, study, loadSection)
 		for {
@@ -195,14 +220,25 @@ func newWorld(seed int64, study Study, view View, tolerance float64, loadSection
 			case <-w.done:
 				return
 			case id := <-w.jobs:
-				data := builder.build(id)
+				var geometry *terrainGeometry
+				data := builder.buildWithTerrain(id, func(data sectionData) {
+					geometry = prepareTerrainGeometry(data, tolerance)
+					select {
+					case <-w.done:
+					case w.terrain <- sectionTerrain{id: id, geometry: geometry}:
+					}
+				})
 				select {
 				case <-w.done:
 					return
 				default:
 				}
 				mesh := prepareSection(data, view)
-				mesh.geometry = prepareTerrainGeometry(data, tolerance)
+				// The early geometry is already owned by the game loop. Add vegetation
+				// to a separate value without mutating its published topology.
+				complete := *geometry
+				complete.vegetation = sectionVegetation(data)
+				mesh.geometry = &complete
 				finishSectionMesh(&mesh)
 				select {
 				case <-w.done:
@@ -234,6 +270,7 @@ func (w *world) close() {
 	}
 	w.upload = nil
 	w.pending = nil
+	w.collision = nil
 	if w.white != nil {
 		w.white.Deallocate()
 		w.white = nil
@@ -327,6 +364,7 @@ func (w *world) receive(g *Scene) {
 		source := u.data
 		w.sections[u.data.id] = &worldSection{terrain: u.img, foreground: u.foreground,
 			geometry: u.data.geometry, vegetationPending: true, mesh: &source, pixels: u.pixels}
+		delete(w.collision, u.data.id)
 		u.img, u.foreground = nil, nil // ownership moved to the cache
 		if geometryChanged {
 			w.revision++
@@ -488,6 +526,11 @@ func (w *world) prune(y float64, height float64, velocity float64) {
 	for id := range w.pending {
 		if !keep[id] && (id < max(0, low-2) || id > high+3) {
 			delete(w.pending, id)
+		}
+	}
+	for id := range w.collision {
+		if !keep[id] && (id < max(0, low-2) || id > high+3) {
+			delete(w.collision, id)
 		}
 	}
 }
