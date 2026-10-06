@@ -43,7 +43,7 @@ func TestSectionGeometryIndependentOfWorkersCacheAndBufferReuse(t *testing.T) {
 	}
 	for _, loader := range []SectionLoader{nil, load} {
 		runtime.GOMAXPROCS(1)
-		builder := newSectionBuilder(42, StudyNone, loader)
+		builder := newSectionBuilder(42, loader)
 		original := builder.build(0)
 		builder.build(1)
 		// Evict guide data without generating distant terrain.
@@ -52,7 +52,7 @@ func TestSectionGeometryIndependentOfWorkersCacheAndBufferReuse(t *testing.T) {
 		if regenerated := builder.build(0); !reflect.DeepEqual(original, regenerated) {
 			t.Fatal("same seed, section, and guides changed geometry after cache/buffer reuse")
 		}
-		if fresh := buildSectionMode(42, 0, StudyNone, loader); !reflect.DeepEqual(original, fresh) {
+		if fresh := newSectionBuilder(42, loader).build(0); !reflect.DeepEqual(original, fresh) {
 			t.Fatal("streaming and synchronous generation disagree")
 		}
 	}
@@ -154,7 +154,7 @@ func TestVegetationCropPreservesWorldPositionsAndPadding(t *testing.T) {
 }
 
 func BenchmarkStreamSections(b *testing.B) {
-	builder := newSectionBuilder(42, StudyNone, nil)
+	builder := newSectionBuilder(42, nil)
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		data := builder.build(int64(i % 3))
@@ -165,7 +165,7 @@ func BenchmarkStreamSections(b *testing.B) {
 }
 
 func BenchmarkBuildStreamSection(b *testing.B) {
-	builder := newSectionBuilder(42, StudyNone, nil)
+	builder := newSectionBuilder(42, nil)
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		builder.build(int64(i % 3))

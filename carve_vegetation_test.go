@@ -245,7 +245,7 @@ func TestAuthoredAndRuntimeHolesProduceTheSamePlants(t *testing.T) {
 		}
 		return SectionContent{}
 	}
-	base := buildSectionMode(42, 0, StudyNone, load)
+	base := newSectionBuilder(42, load).build(0)
 	if len(base.mushrooms) == 0 || len(base.vines) == 0 || len(base.foregroundVines) == 0 {
 		t.Fatal("test needs generated mushrooms and both vine layers")
 	}
@@ -262,7 +262,7 @@ func TestAuthoredAndRuntimeHolesProduceTheSamePlants(t *testing.T) {
 		}
 	}
 	want := scene.world.sections[0].geometry.vegetation
-	authored := buildSectionMode(42, 0, StudyNone, load)
+	authored := newSectionBuilder(42, load).build(0)
 	if got := sectionVegetation(authored); !reflect.DeepEqual(got, want) {
 		t.Fatal("authored holes regrew or reshuffled vegetation instead of applying the same damage")
 	}

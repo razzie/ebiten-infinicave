@@ -165,7 +165,7 @@ func checkSectionUnits(t *testing.T, section infinicave.Section) {
 func TestPublicSceneConfigurationAndLifecycle(t *testing.T) {
 	for _, config := range []infinicave.Config{
 		{Texture: math.NaN()}, {Texture: math.Inf(1)}, {Texture: -1},
-		{Texture: 17}, {Study: infinicave.Study(-1)}, {Study: infinicave.Study(999)},
+		{Texture: 17},
 		{View: infinicave.View(-1)}, {View: infinicave.View(999)},
 		{CollisionTolerance: -1}, {CollisionTolerance: math.NaN()}, {CollisionTolerance: math.Inf(1)},
 	} {
@@ -177,7 +177,7 @@ func TestPublicSceneConfigurationAndLifecycle(t *testing.T) {
 			t.Fatalf("generator accepted invalid configuration: %+v", config)
 		}
 	}
-	for _, config := range []infinicave.Config{{}, infinicave.DefaultConfig(), {Study: infinicave.StudyCurl, View: infinicave.ViewNormals, Texture: 8}} {
+	for _, config := range []infinicave.Config{{}, infinicave.DefaultConfig(), {View: infinicave.ViewNormals, Texture: 8}} {
 		scene, err := infinicave.NewScene(config)
 		if err != nil {
 			t.Fatal(err)

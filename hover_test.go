@@ -175,7 +175,7 @@ func TestHoverShaderAndOverlayCache(t *testing.T) {
 }
 
 func TestDiagnosticWorkerRetainsTerrainGeometry(t *testing.T) {
-	w := newWorld(42, StudyLedge, ViewClay, 0, nil)
+	w := newWorld(42, ViewClay, 0, testLedgeSection)
 	defer w.close()
 	w.request(0)
 	select {

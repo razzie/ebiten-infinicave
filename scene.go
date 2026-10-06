@@ -22,16 +22,14 @@ type Config struct {
 	// Fog enables moving mist between the background and foreground layers.
 	// Diagnostic views disable fog regardless of this setting.
 	Fog bool
-	// Study selects a full cave (StudyNone) or an isolated rock shape.
-	Study Study
 	// View selects the material. Diagnostic views disable texture, fog, and vegetation.
 	View View
 	// CollisionTolerance is the polygon simplification tolerance in scene units.
 	// Zero preserves exact collision geometry. Larger values reduce vertices and
 	// collision cost at the expense of accuracy. Rendering remains detailed.
 	CollisionTolerance float64
-	// LoadSection supplies guides and holes for each section, overriding Study's
-	// guide shapes. Nil uses the default random generator (or the selected study).
+	// LoadSection supplies authored guides and holes for each section.
+	// Nil uses the default random generator.
 	LoadSection SectionLoader
 	// OnCollisionReady receives foreground collision polygons without waiting
 	// for vegetation generation or render meshes.
@@ -52,9 +50,6 @@ func DefaultConfig() Config {
 func (c Config) validate() error {
 	if math.IsNaN(c.Texture) || math.IsInf(c.Texture, 0) || c.Texture < 0 || c.Texture > 16 {
 		return fmt.Errorf("infinicave: texture must be between 0 and 16")
-	}
-	if c.Study < StudyNone || c.Study > StudyCurl {
-		return fmt.Errorf("infinicave: invalid study %v", c.Study)
 	}
 	if c.View < ViewShaded || c.View > ViewShadows {
 		return fmt.Errorf("infinicave: invalid terrain view %v", c.View)
@@ -92,7 +87,6 @@ type Scene struct {
 	fog                *fogRenderer
 	highlight          *hoverRenderer
 	texture            float64
-	study              Study
 	view               View
 	collisionTolerance float64
 	loadSection        SectionLoader
@@ -106,7 +100,7 @@ func NewScene(config Config) (*Scene, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
-	g := &Scene{texture: config.Texture, study: config.Study, view: config.View, collisionTolerance: config.CollisionTolerance, loadSection: config.LoadSection, onCollisionReady: config.OnCollisionReady}
+	g := &Scene{texture: config.Texture, view: config.View, collisionTolerance: config.CollisionTolerance, loadSection: config.LoadSection, onCollisionReady: config.OnCollisionReady}
 	if g.view != ViewShaded {
 		g.texture = 0
 	}
@@ -132,7 +126,7 @@ func NewScene(config Config) (*Scene, error) {
 			return nil, fmt.Errorf("infinicave: compile fog shader: %w", err)
 		}
 	}
-	g.world = newWorld(config.Seed, g.study, g.view, g.collisionTolerance, g.loadSection)
+	g.world = newWorld(config.Seed, g.view, g.collisionTolerance, g.loadSection)
 	return g, nil
 }
 
@@ -204,7 +198,7 @@ func (g *Scene) Reset(seed int64) {
 	if g.highlight != nil {
 		g.highlight.clear()
 	}
-	g.world = newWorld(seed, g.study, g.view, g.collisionTolerance, g.loadSection)
+	g.world = newWorld(seed, g.view, g.collisionTolerance, g.loadSection)
 	g.world.pixels = pixels
 }
 

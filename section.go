@@ -34,7 +34,7 @@ func GenerateSection(seed, id int64) (Section, error) {
 	return GenerateSectionWithConfig(Config{Seed: seed}, id)
 }
 
-// GenerateSectionWithConfig generates a section using the same seed, study,
+// GenerateSectionWithConfig generates a section using the same seed,
 // collision tolerance, and section content loader as a Scene. Texture and View
 // only affect rendering. A custom loader must return the same content for
 // repeated IDs to preserve geometry across neighboring sections and cache eviction.
@@ -50,7 +50,7 @@ func GenerateSectionWithConfig(config Config, id int64) (Section, error) {
 	// Streaming uses nonnegative indices internally; public IDs follow world Y.
 	index := -id
 	var collision CollisionGeometry
-	data := newSectionBuilder(config.Seed, config.Study, config.LoadSection).buildWithTerrain(index, func(data sectionData) {
+	data := newSectionBuilder(config.Seed, config.LoadSection).buildWithTerrain(index, func(data sectionData) {
 		collision = prepareTerrainGeometry(data, config.CollisionTolerance).collision
 		if config.OnCollisionReady != nil {
 			config.OnCollisionReady(copyCollisionGeometry(collision))

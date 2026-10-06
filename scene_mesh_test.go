@@ -126,7 +126,7 @@ func TestPrepareSectionMatchesSerialLayers(t *testing.T) {
 }
 
 func TestWorldWorkerPreparesAllLayers(t *testing.T) {
-	w := newWorld(42, StudyNone, ViewShaded, 0, nil)
+	w := newWorld(42, ViewShaded, 0, nil)
 	defer w.close()
 	w.request(0)
 	var early *terrainGeometry

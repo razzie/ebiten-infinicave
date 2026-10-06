@@ -126,14 +126,10 @@ func worldSeeds(seed int64, top float64, noise *Perlin) []V {
 }
 
 func buildSection(seed, id int64) sectionData {
-	return buildSectionMode(seed, id, StudyNone, nil)
+	return newSectionBuilder(seed, nil).build(id)
 }
 
-func buildSectionMode(seed, id int64, study Study, loadSection SectionLoader) sectionData {
-	return newSectionBuilder(seed, study, loadSection).build(id)
-}
-
-func buildSectionCached(seed, id int64, study Study, loadSection SectionLoader, guideCache *guideCache, fields *vineWorkspace, onTerrain func(sectionData)) sectionData {
+func buildSectionCached(seed, id int64, loadSection SectionLoader, guideCache *guideCache, fields *vineWorkspace, onTerrain func(sectionData)) sectionData {
 	top := sectionTop(id)
 	backgroundNoise := NewPerlin(rand.New(rand.NewSource(seed ^ 0x62617365)))
 	backgroundNoise.OffsetY = top
@@ -144,17 +140,12 @@ func buildSectionCached(seed, id int64, study Study, loadSection SectionLoader, 
 	if loadSection != nil {
 		content := loadedWorldContent(seed, id, loadSection)
 		guides, holes = content.Guides, content.Holes
-	} else if study != StudyNone {
-		guides = studyGuides(id, study)
 	} else {
 		guides = guideCache.window(id)
 	}
 	backgroundSeeds := worldSeeds(seed^0x62617365, top, backgroundNoise)
 	seeds := artisticRockSeeds(worldSeeds(seed, top, noise), guides, seed, top)
-	var branches *BranchField
-	if study == StudyNone {
-		branches = newBranchField(generateBranches(guides, noise, rand.New(rand.NewSource(seed))))
-	}
+	branches := newBranchField(generateBranches(guides, noise, rand.New(rand.NewSource(seed))))
 	background := newRockGrid(backgroundSeeds, func(V) color.NRGBA { return color.NRGBA{A: 255} })
 	foreground := guideRockFaces(seeds, guides)
 	shapeRockGrid(background, nil, backgroundNoise)
@@ -195,13 +186,10 @@ func buildSectionCached(seed, id int64, study Study, loadSection SectionLoader, 
 		onTerrain(data)
 	}
 	mushrooms := mushroomsForGuides(guides, vegetationGrid)
-	var vines, foregroundVines []Vine
-	if study == StudyNone {
-		field := newVineTerrainWithWorkspace(background, foreground, false, fields)
-		vines = generateVinesInBand(field, rand.New(rand.NewSource(sectionSeed(seed^0x76696e6573, id))), 0, SectionHeight, 5)
-		field.release()
-		foregroundVines = generateForegroundVinesWithWorkspace(foreground, guides, rand.New(rand.NewSource(sectionSeed(seed^0x73757266616365, id))), fields)
-	}
+	field := newVineTerrainWithWorkspace(background, foreground, false, fields)
+	vines := generateVinesInBand(field, rand.New(rand.NewSource(sectionSeed(seed^0x76696e6573, id))), 0, SectionHeight, 5)
+	field.release()
+	foregroundVines := generateForegroundVinesWithWorkspace(foreground, guides, rand.New(rand.NewSource(sectionSeed(seed^0x73757266616365, id))), fields)
 	plants := vegetationGeometry{vines: vines, foregroundVines: foregroundVines, mushrooms: mushrooms}
 	for _, stage := range cuts {
 		plants, _ = stage.cut.vegetation(plants, stage.grid, top)
@@ -211,10 +199,10 @@ func buildSectionCached(seed, id int64, study Study, loadSection SectionLoader, 
 	return data
 }
 
-func newWorld(seed int64, study Study, view View, tolerance float64, loadSection SectionLoader) *world {
+func newWorld(seed int64, view View, tolerance float64, loadSection SectionLoader) *world {
 	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1), results: make(chan sectionMesh, 1), terrain: make(chan sectionTerrain, 1), done: make(chan struct{})}
 	go func() {
-		builder := newSectionBuilder(seed, study, loadSection)
+		builder := newSectionBuilder(seed, loadSection)
 		for {
 			select {
 			case <-w.done:

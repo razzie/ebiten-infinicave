@@ -125,7 +125,7 @@ func TestSceneCollisionGeometryOwnershipAndAvailability(t *testing.T) {
 }
 
 func TestGeneratedCollisionMatchesRockFaces(t *testing.T) {
-	data := buildSectionMode(42, 0, StudyCurl, nil)
+	data := newSectionBuilder(42, testCurlSection).build(0)
 	h := prepareTerrainGeometry(data, 0)
 	grid := insetForegroundGrid(data.foreground)
 	for y := .00125; y < 1; y += 0.013 {

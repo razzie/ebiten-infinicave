@@ -51,7 +51,7 @@ func TestSectionLoaderHolesCarveGeneratedGeometry(t *testing.T) {
 		}
 		return SectionContent{}
 	}
-	base := buildSectionMode(42, 0, StudyNone, load)
+	base := newSectionBuilder(42, load).build(0)
 	var center V
 	area := 0.0
 	for _, cell := range base.foregroundTopology.grid {
@@ -63,7 +63,7 @@ func TestSectionLoaderHolesCarveGeneratedGeometry(t *testing.T) {
 		t.Fatal("test needs a solid blast center")
 	}
 	content.Holes = []Hole{{Shape: HoleCircle, Center: center, Radius: .02}}
-	carved := buildSectionMode(42, 0, StudyNone, load)
+	carved := newSectionBuilder(42, load).build(0)
 	geometry := prepareTerrainGeometry(carved, 0)
 	if geometry.collision.Contains(center.Add(V{Y: -1})) || len(geometry.cuts) != 1 || len(carved.holes) != 1 {
 		t.Fatal("authored hole did not reach collision and render geometry")
@@ -73,7 +73,7 @@ func TestSectionLoaderHolesCarveGeneratedGeometry(t *testing.T) {
 			t.Fatal("exported foreground grid filled authored hole")
 		}
 	}
-	if again := buildSectionMode(42, 0, StudyNone, load); !reflect.DeepEqual(carved, again) {
+	if again := newSectionBuilder(42, load).build(0); !reflect.DeepEqual(carved, again) {
 		t.Fatal("authored holes changed across regeneration")
 	}
 	mesh := prepareSection(carved, ViewClay)

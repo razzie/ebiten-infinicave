@@ -67,12 +67,11 @@ and releases shaders and cached images; an in-progress CPU generation finishes
 before its worker exits.
 
 `DefaultConfig` uses texture strength 8, moving fog, shaded rendering, seed 0, and exact
-collision geometry. A zero `Config` is also valid and disables texture and fog. `Study`
-and `View` are typed enums:
+collision geometry. A zero `Config` is also valid and disables texture and fog. `View`
+is a typed enum:
 
 ```go
 config.Fog = false // disable the moving mist
-config.Study = infinicave.StudyNone // or StudyLedge, StudyCurl
 config.View = infinicave.ViewShaded // or ViewClay, ViewHeight, ViewNormals, ViewShadows
 config.CollisionTolerance = 0.002 // approximation tolerance in scene units
 ```
@@ -82,7 +81,7 @@ Fog drifts over the background rock and vines, behind mushrooms and foreground
 rock and vines. It follows world coordinates across section seams, scrolling,
 and resizing, and advances once per `Scene.Update` so repeated draws share the
 same animation state. Set `Config.Fog` to toggle it when creating a scene.
-`ParseStudy` and `ParseView` convert strings such as `"curl"` and `"normals"` for
+`ParseView` converts strings such as `"normals"` for
 command-line tools; library code can use the constants directly.
 
 Set `Config.LoadSection` to supply authored guides and holes per section:
@@ -126,9 +125,9 @@ to 2; describe longer cuts using several section-local holes. Invalid holes and
 invalid guides (nonfinite points or fewer than two distinct consecutive points)
 are ignored. `Section.Holes` includes the valid holes in its padded window.
 
-A nil `LoadSection` uses random generation or the selected study. A callback
+A nil `LoadSection` uses random generation. A callback
 returning empty content produces no guides or foreground rock for that section.
-The callback overrides study guide shapes. Neighboring sections are also loaded
+Neighboring sections are also loaded
 for seamless padding; IDs may be requested repeatedly and in any order. Return
 consistent content per ID. Scene calls the loader on its background worker;
 synchronous generation calls it directly. Protect shared mutable state against
@@ -310,7 +309,7 @@ the start of that padding in world coordinates. Its owned world band is `[sectio
 vegetation may extend outside that band. Collision contours also include padding;
 use only the owned band when combining adjacent sections. The exposed grids
 describe visual faces, and `section.Collision` contains the collision boundaries.
-Use `GenerateSectionWithConfig(config, id)` to share a scene's study, collision
+Use `GenerateSectionWithConfig(config, id)` to share a scene's seed, collision
 tolerance, and section content loader with synchronous generation. This
 package depends on Ebitengine, so desktop initialization still needs a graphical
 environment even when only generating geometry.
@@ -355,14 +354,13 @@ Hover over a foreground rock for a soft warm highlight and glow over its entire 
 
 `go run ./cmd/infinicave -seed 42 -output scene.png` exports the bottom 1000 × 2400 pixels and exits. `-texture 0` disables the surface texture. `-fog=false` disables the moving fog. `-collision-tolerance 0.002` simplifies collision polygons with a 0.002-unit tolerance.
 
-For shape studies without vines, use `-study ledge` or `-study curl`. The `-view` options are `shaded` (default), `clay`, `height`, `normals`, and `shadows`. Diagnostic views disable texture and hide vines; clay uses neutral gray material with the same lighting and exposed edges.
+The `-view` options are `shaded` (default), `clay`, `height`, `normals`, and `shadows`. Diagnostic views disable texture, fog, and vegetation; clay uses neutral gray material with the same lighting and exposed edges.
 
 ```sh
-go run ./cmd/infinicave -seed 42 -study ledge -view clay -output ledge.png
-go run ./cmd/infinicave -seed 42 -study curl -view clay -output curl.png
-go run ./cmd/infinicave -seed 42 -study curl -view height -output height.png
-go run ./cmd/infinicave -seed 42 -study curl -view normals -output normals.png
-go run ./cmd/infinicave -seed 42 -study curl -view shadows -output shadows.png
+go run ./cmd/infinicave -seed 42 -view clay -output clay.png
+go run ./cmd/infinicave -seed 42 -view height -output height.png
+go run ./cmd/infinicave -seed 42 -view normals -output normals.png
+go run ./cmd/infinicave -seed 42 -view shadows -output shadows.png
 ```
 
 Relief, shadows, rock triangulation, outlines, and vine and mushroom meshes are prepared in the background once per cached section. Background rock, foreground rock, both vine layers, and mushrooms are polygonized concurrently, using up to `GOMAXPROCS - 1` workers (at least one) to leave CPU capacity for rendering. The game loop uploads meshes with limits on submission time, triangle indices, and draw calls per tick. Collision polygons are published before vegetation generation and mesh preparation; complete terrain uploads first, and vegetation appears when all its layers finish. Vegetation meshes are batched in draw order, and their textures are cropped to occupied bounds while retaining world-aligned grain. Vine steering uses reusable fields and linear distance sweeps; guide proposals are cached in a bounded window and rock adjacency uses spatial buckets. These caches do not affect geometry: the same seed, section, and guide inputs reproduce the same result regardless of load order or eviction. The renderer uses a shallow 2.5D surface: illumination is constant within each polygon, with depth shadows averaged over the face to preserve the faceted appearance.

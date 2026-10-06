@@ -19,7 +19,7 @@ func TestCollisionReadyBeforeDecorationIncludesAuthoredHoles(t *testing.T) {
 		}
 	}
 	var early *terrainGeometry
-	data := newSectionBuilder(42, StudyNone, load).buildWithTerrain(0, func(data sectionData) {
+	data := newSectionBuilder(42, load).buildWithTerrain(0, func(data sectionData) {
 		if len(data.vines)+len(data.foregroundVines)+len(data.mushrooms) != 0 {
 			t.Fatal("collision waited for decoration")
 		}
@@ -96,7 +96,7 @@ func TestSynchronousCollisionReadyOwnershipAndEmptySections(t *testing.T) {
 	for _, empty := range []bool{false, true} {
 		called := 0
 		var notified CollisionGeometry
-		config := Config{Seed: 42, Study: StudyCurl, CollisionTolerance: .002}
+		config := Config{Seed: 42, LoadSection: testCurlSection, CollisionTolerance: .002}
 		if empty {
 			config.LoadSection = func(int64) SectionContent { return SectionContent{} }
 		}

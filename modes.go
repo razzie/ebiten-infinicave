@@ -2,42 +2,6 @@ package infinicave
 
 import "fmt"
 
-// Study selects a full cave or an isolated rock shape.
-type Study int
-
-const (
-	StudyNone  Study = iota // Full procedural cave.
-	StudyLedge              // Isolated ledge, without vines.
-	StudyCurl               // Isolated curl, without vines.
-)
-
-func (s Study) String() string {
-	switch s {
-	case StudyNone:
-		return ""
-	case StudyLedge:
-		return "ledge"
-	case StudyCurl:
-		return "curl"
-	default:
-		return fmt.Sprintf("Study(%d)", int(s))
-	}
-}
-
-// ParseStudy converts a viewer flag to a Study. Empty means a full cave.
-func ParseStudy(value string) (Study, error) {
-	switch value {
-	case "":
-		return StudyNone, nil
-	case "ledge":
-		return StudyLedge, nil
-	case "curl":
-		return StudyCurl, nil
-	default:
-		return StudyNone, fmt.Errorf("infinicave: unknown study %q", value)
-	}
-}
-
 // View selects the rendered material or a diagnostic view.
 type View int
 

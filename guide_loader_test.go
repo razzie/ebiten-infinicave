@@ -81,7 +81,7 @@ func TestLoadedGuidesAllowEmptySectionsAndSkipInvalidPolylines(t *testing.T) {
 			t.Fatal("empty or invalid polylines unexpectedly generated guides")
 		}
 	}
-	data := buildSectionMode(42, 0, StudyCurl, func(int64) SectionContent { return SectionContent{} })
+	data := newSectionBuilder(42, func(int64) SectionContent { return SectionContent{} }).build(0)
 	if len(data.guides) != 0 || len(data.foreground) != 0 || len(data.background) == 0 {
 		t.Fatal("empty loader did not override procedural foreground generation")
 	}
@@ -89,7 +89,7 @@ func TestLoadedGuidesAllowEmptySectionsAndSkipInvalidPolylines(t *testing.T) {
 
 func TestSceneUsesSectionLoaderAfterReset(t *testing.T) {
 	scene, err := NewScene(Config{
-		Seed: 42, Study: StudyCurl, View: ViewClay,
+		Seed: 42, View: ViewClay,
 		LoadSection: func(id int64) SectionContent {
 			if id != -1 {
 				return SectionContent{}
