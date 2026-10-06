@@ -25,6 +25,8 @@ type sectionData struct {
 	foregroundVines        []Vine
 	mushrooms              []MushroomGroup
 	guides                 []Guide
+	holes                  []Hole
+	vegetationCuts         []rockCut
 	foregroundTopology     *rockTopology
 }
 
@@ -47,6 +49,7 @@ type world struct {
 	white    *ebiten.Image
 	revision uint64 // invalidates hover overlays when cached sections change
 	queries  *worldQueryIndex
+	cuts     []rockCut // world-space edits survive section eviction
 }
 
 // sectionUpload spreads one section's GPU work over several frames.
@@ -111,19 +114,21 @@ func buildSection(seed, id int64) sectionData {
 	return buildSectionMode(seed, id, StudyNone, nil)
 }
 
-func buildSectionMode(seed, id int64, study Study, loadGuides GuideLoader) sectionData {
-	return newSectionBuilder(seed, study, loadGuides).build(id)
+func buildSectionMode(seed, id int64, study Study, loadSection SectionLoader) sectionData {
+	return newSectionBuilder(seed, study, loadSection).build(id)
 }
 
-func buildSectionCached(seed, id int64, study Study, loadGuides GuideLoader, guideCache *guideCache, fields *vineWorkspace) sectionData {
+func buildSectionCached(seed, id int64, study Study, loadSection SectionLoader, guideCache *guideCache, fields *vineWorkspace) sectionData {
 	top := sectionTop(id)
 	backgroundNoise := NewPerlin(rand.New(rand.NewSource(seed ^ 0x62617365)))
 	backgroundNoise.OffsetY = top
 	noise := NewPerlin(rand.New(rand.NewSource(seed)))
 	noise.OffsetY = top
 	var guides []Guide
-	if loadGuides != nil {
-		guides = loadedWorldGuides(seed, id, loadGuides)
+	var holes []Hole
+	if loadSection != nil {
+		content := loadedWorldContent(seed, id, loadSection)
+		guides, holes = content.Guides, content.Holes
 	} else if study != StudyNone {
 		guides = studyGuides(id, study)
 	} else {
@@ -155,13 +160,29 @@ func buildSectionCached(seed, id int64, study Study, loadGuides GuideLoader, gui
 		field.release()
 		foregroundVines = generateForegroundVinesWithWorkspace(foreground, guides, rand.New(rand.NewSource(sectionSeed(seed^0x73757266616365, id))), fields)
 	}
-	return sectionData{id: id, background: background, foreground: foreground, vines: vines, foregroundVines: foregroundVines, mushrooms: mushrooms, guides: guides, foregroundTopology: topology}
+	plants := vegetationGeometry{vines: vines, foregroundVines: foregroundVines, mushrooms: mushrooms}
+	for _, hole := range holes {
+		cut, err := hole.translatedY(top).rockCut()
+		if err != nil {
+			continue
+		}
+		grid, _, changed := cut.grid(topology.grid, top)
+		if changed {
+			cuts := append(append([]rockCut(nil), topology.cuts...), cut)
+			topology = carvedTopology(grid, cuts, top)
+		}
+		plants, _ = cut.vegetation(plants, topology.grid, top)
+	}
+	if len(topology.cuts) > 0 {
+		foreground = topology.grid
+	}
+	return sectionData{id: id, background: background, foreground: foreground, vines: plants.vines, foregroundVines: plants.foregroundVines, mushrooms: plants.mushrooms, guides: guides, holes: holes, vegetationCuts: plants.cuts, foregroundTopology: topology}
 }
 
-func newWorld(seed int64, study Study, view View, tolerance float64, loadGuides GuideLoader) *world {
+func newWorld(seed int64, study Study, view View, tolerance float64, loadSection SectionLoader) *world {
 	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1), results: make(chan sectionMesh, 1), done: make(chan struct{})}
 	go func() {
-		builder := newSectionBuilder(seed, study, loadGuides)
+		builder := newSectionBuilder(seed, study, loadSection)
 		for {
 			select {
 			case <-w.done:
@@ -250,6 +271,7 @@ func (w *world) receive(g *Scene) {
 		select {
 		case data := <-w.results:
 			w.working = false
+			g.applyStoredCuts(&data)
 			w.upload = &sectionUpload{data: data}
 		default:
 		}
@@ -303,18 +325,9 @@ func (w *world) receive(g *Scene) {
 			return
 		}
 	case 6:
-		if u.vines != nil && g.vineMaterial != nil {
-			bounds := u.data.vinesBounds
-			softened := newVegetationImage(bounds)
-			softened.DrawRectShader(bounds.Dx(), bounds.Dy(), g.vineMaterial, &ebiten.DrawRectShaderOptions{
-				Images: [4]*ebiten.Image{u.vines},
-				Uniforms: map[string]any{
-					"Offset":  []float32{float32(bounds.Min.X), float32(top*rasterPixelsPerUnit) + float32(bounds.Min.Y)},
-					"Texture": float32(g.texture / 8),
-				},
-			})
-			u.vines.Deallocate()
-			u.vines = softened
+		u.vines = g.softenVines(u.vines, u.data.vinesBounds, top)
+		if u.data.geometry != nil {
+			eraseVineCuts(u.vines, u.data.vinesBounds, top, u.data.geometry.vegetation.cuts)
 		}
 		if !u.data.mushroomsBounds.Empty() {
 			u.mushrooms = newVegetationImage(u.data.mushroomsBounds)
@@ -328,6 +341,9 @@ func (w *world) receive(g *Scene) {
 			if !w.uploadMeshes(u.foregroundVines, u.data.foregroundVines) {
 				return
 			}
+		}
+		if u.data.geometry != nil {
+			eraseVineCuts(u.foregroundVines, u.data.foregroundVinesBounds, top, u.data.geometry.vegetation.cuts)
 		}
 	default:
 		section := w.sections[u.data.id]

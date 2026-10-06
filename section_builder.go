@@ -51,19 +51,19 @@ func (c *guideCache) window(id int64) []Guide {
 }
 
 type sectionBuilder struct {
-	seed       int64
-	study      Study
-	loadGuides GuideLoader
-	guides     *guideCache
-	fields     vineWorkspace
+	seed        int64
+	study       Study
+	loadSection SectionLoader
+	guides      *guideCache
+	fields      vineWorkspace
 }
 
-func newSectionBuilder(seed int64, study Study, loadGuides GuideLoader) *sectionBuilder {
-	return &sectionBuilder{seed: seed, study: study, loadGuides: loadGuides, guides: newGuideCache(seed)}
+func newSectionBuilder(seed int64, study Study, loadSection SectionLoader) *sectionBuilder {
+	return &sectionBuilder{seed: seed, study: study, loadSection: loadSection, guides: newGuideCache(seed)}
 }
 
 func (b *sectionBuilder) build(id int64) sectionData {
-	return buildSectionCached(b.seed, id, b.study, b.loadGuides, b.guides, &b.fields)
+	return buildSectionCached(b.seed, id, b.study, b.loadSection, b.guides, &b.fields)
 }
 
 // Three independent samples per world site need no stateful RNG or seed table.

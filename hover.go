@@ -28,11 +28,14 @@ type terrainFace struct {
 // boundaries from their union. Geometry belongs to its section, regardless
 // of whether the application draws hover highlights.
 type terrainGeometry struct {
-	faces     []terrainFace
-	guides    []Guide
-	blocks    [][]int
-	top       float64
-	collision CollisionGeometry
+	grid       RockGrid // final inset faces, retained for terrain edits
+	cuts       []rockCut
+	vegetation vegetationGeometry
+	faces      []terrainFace
+	guides     []Guide
+	blocks     [][]int
+	top        float64
+	collision  CollisionGeometry
 }
 
 func polygonBounds(poly []V) (lo, hi V) {
@@ -45,12 +48,13 @@ func polygonBounds(poly []V) (lo, hi V) {
 }
 
 func prepareTerrainGeometry(data sectionData, tolerance float64) *terrainGeometry {
-	h := &terrainGeometry{guides: data.guides, top: sectionTop(data.id)}
+	h := &terrainGeometry{guides: data.guides, top: sectionTop(data.id), vegetation: sectionVegetation(data)}
 	var grid RockGrid
 	source := data.foregroundTopology
 	if source == nil {
 		source = newRockTopology(data.foreground)
 	}
+	h.cuts = source.cuts
 	for _, cell := range source.grid {
 		if !cell.Raised || cell.Color.A == 0 {
 			continue
@@ -67,6 +71,7 @@ func prepareTerrainGeometry(data sectionData, tolerance float64) *terrainGeometr
 	if len(grid) != len(source.grid) {
 		neighbors = rockNeighbors(grid)
 	}
+	h.grid = grid
 	for i := range h.faces {
 		if h.faces[i].block >= 0 {
 			continue

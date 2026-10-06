@@ -58,7 +58,7 @@ pass cursor coordinates in viewport-local scene units and call it only when the
 cursor is active. Convert cursor pixels to scene units with
 `float64(infinicave.Width) / float64(screen.Bounds().Dx())`.
 `scene.Reset(seed)` discards cached sections and starts a new
-world with the same rendering settings and guide loader. Rendering does not include UI or exports.
+world with the same rendering settings and section content loader. Rendering does not include UI or exports.
 Call every `Scene` method on the Ebitengine game goroutine. `Close` is idempotent
 and releases shaders and cached images; an in-progress CPU generation finishes
 before its worker exits.
@@ -77,40 +77,54 @@ config.CollisionTolerance = 0.002 // approximation tolerance in scene units
 `ParseStudy` and `ParseView` convert strings such as `"curl"` and `"normals"` for
 command-line tools; library code can use the constants directly.
 
-Set `Config.LoadGuides` to load your own guide polylines per section:
+Set `Config.LoadSection` to supply authored guides and holes per section:
 
 ```go
-config.LoadGuides = func(id int64) []infinicave.Guide {
-    switch id {
-    case 0:
-        return []infinicave.Guide{{
-            Pts: []infinicave.V{{X: 0.2, Y: 0.4}, {X: 0.7, Y: 0.5}},
-        }}
-    case -1:
-        return []infinicave.Guide{{
-            Pts: []infinicave.V{{X: 0.3, Y: 0.3}, {X: 0.8, Y: 0.4}},
-        }}
+config.LoadSection = func(id int64) infinicave.SectionContent {
+    if id != 0 {
+        return infinicave.SectionContent{}
     }
-    return nil // this section has no guides
+    return infinicave.SectionContent{
+        Guides: []infinicave.Guide{{
+            Pts: []infinicave.V{{X: 0.2, Y: 0.4}, {X: 0.7, Y: 0.5}},
+        }},
+        Holes: []infinicave.Hole{
+            {Shape: infinicave.HoleCircle,
+                Center: infinicave.V{X: 0.4, Y: 0.47}, Radius: 0.04},
+            {Shape: infinicave.HoleSegment,
+                Start: infinicave.V{X: 0.5, Y: 0.3},
+                End: infinicave.V{X: 0.6, Y: 0.6}, Width: 0.02},
+        },
+    }
 }
 ```
 
-Assign the callback before calling `NewScene`, or pass the config to
-`GenerateSectionWithConfig`. Points use section-local scene units in the owned
-unit square. They form a polyline; generation copies the points and computes arc
-lengths and bounds, so only `Pts` is required. `BrightSign` defaults to 1; use -1
-to reverse the lit side. `Seed` defaults to a stable seed derived from the world
-seed, section ID, and guide index. Supplied guides keep their shapes and placement;
-custom layouts are responsible for their own spacing.
+`SectionLoader` now returns `SectionContent{Guides, Holes}`, replacing the old
+`GuideLoader` / `Config.LoadGuides` callback. The content structure can grow to
+include more authored objects. Assign the callback before `NewScene`, or use it
+with `GenerateSectionWithConfig`.
 
-A nil `LoadGuides` keeps the default random generator or selected study. A
-callback returning nil or an empty slice produces no guides for that section.
-The callback overrides study guide shapes. Invalid polylines with nonfinite
-points or fewer than two distinct consecutive points are ignored. Neighboring
-sections are also loaded for seamless generation, and IDs may be requested
-repeatedly in any order. Return consistent results per ID. Scene calls the loader
-on its background worker; synchronous generation calls it directly. Protect any
-shared mutable state against concurrent calls, including during `Reset`.
+All points use section-local scene units in the owned unit square. Generation
+copies the callback's slices. Guide arc lengths and bounds are recomputed;
+only `Pts` is required. `BrightSign` defaults to 1; use -1 to reverse the lit
+side. Zero guide seeds receive stable seeds derived from the world seed,
+section ID, and guide index. Supplied guides keep their shapes and placement;
+custom layouts are responsible for spacing.
+
+Holes carve the shaped foreground and damage its generated vegetation. Circles use `Center`
+and `Radius`; segments use `Start`, `End`, and full `Width`, with flat ends.
+Authored holes can cross seams, but their bounds must stay within local Y = -1
+to 2; describe longer cuts using several section-local holes. Invalid holes and
+invalid guides (nonfinite points or fewer than two distinct consecutive points)
+are ignored. `Section.Holes` includes the valid holes in its padded window.
+
+A nil `LoadSection` uses random generation or the selected study. A callback
+returning empty content produces no guides or foreground rock for that section.
+The callback overrides study guide shapes. Neighboring sections are also loaded
+for seamless padding; IDs may be requested repeatedly and in any order. Return
+consistent content per ID. Scene calls the loader on its background worker;
+synchronous generation calls it directly. Protect shared mutable state against
+concurrent calls, including during `Reset`.
 
 Foreground geometry is always prepared and retained, including in diagnostic
 views. Calling `DrawHover` is optional and has no effect on collision availability.
@@ -177,6 +191,46 @@ Fetched guide polylines are complete. No individual face or shading details are
 exposed by these APIs, and their coordinates and IDs do not depend on pixel
 resolution.
 
+Carve foreground rock at runtime with world coordinates:
+
+```go
+blast, err := scene.CarveCircle(infinicave.V{X: 0.4, Y: -0.53}, 0.06)
+drill, err := scene.CarveSegment(
+    infinicave.V{X: 0.5, Y: -0.7},
+    infinicave.V{X: 0.6, Y: -0.4}, 0.02,
+)
+// scene.Carve(Hole{...}) accepts the same descriptors as SectionContent,
+// with world coordinates rather than section-local coordinates.
+_ = blast
+_ = drill
+_ = err
+```
+
+`CarveResult.Changes` maps each affected `Before` formation ID to its `Remaining`
+IDs: zero means destroyed, one means reshaped, and two or more means split.
+Affected IDs and their aliases expire; fetch the new parts with `scene.Formation`.
+Unaffected rock and guide IDs remain valid. `SectionIDs` lists edited collision
+sections; refetch their geometry if your physics engine caches it. Both the
+result and each change have `Complete` flags. When a cut or formation extends
+into unloaded terrain, the split report is provisional; the cut still applies
+when that terrain loads. Cuts survive eviction and reload and are cleared by
+`Reset`. Previously returned geometry copies remain independent snapshots.
+
+Circle cuts use a 96-sided inscribed polygon, with maximum radial deviation of
+about 0.054% of the radius; segment cuts are rectangles with flat ends. Inputs
+must be finite and sizes positive. Cut boundaries drive collision, exact queries,
+hover, and rendering together. Shaded and clay views add dark recessed walls and
+uneven warm mineral rims to suggest chipped rock and depth. Background rock
+remains in place. Mushrooms are removed individually when
+their buried roots lose contact with rock. Both vine layers are cut through the
+hole, retaining the pieces on either side and remapping surviving branches.
+Vine shading stays with its original family; ribbons and contact shadows are
+clipped to the opening after blur. Authored holes and runtime cuts use the same
+vegetation damage, so reloads cannot restore removed mushrooms or regrow vines.
+Carving runs synchronously on the game goroutine, including rebuilding affected
+foreground and vegetation images; large cuts can take
+longer than a normal frame.
+
 `CollisionTolerance` must be finite and nonnegative. Zero preserves exact rock
 boundaries; larger values simplify collision polygons to reduce vertex counts
 and collision cost while the rendered terrain stays detailed. For example, 0.002
@@ -228,7 +282,7 @@ vegetation may extend outside that band. Collision contours also include padding
 use only the owned band when combining adjacent sections. The exposed grids
 describe visual faces, and `section.Collision` contains the collision boundaries.
 Use `GenerateSectionWithConfig(config, id)` to share a scene's study, collision
-tolerance, and guide loader with synchronous generation. This
+tolerance, and section content loader with synchronous generation. This
 package depends on Ebitengine, so desktop initialization still needs a graphical
 environment even when only generating geometry.
 
@@ -257,7 +311,14 @@ Run with `go run ./cmd/infinicave` (Go 1.27 and a graphical desktop). Use `-seed
 - Up / Down or W / S: scroll continuously.
 - Page Up / Page Down: move by most of a viewport.
 - Home / End: return to the starting bottom edge.
-- R: generate a new world while keeping the current position.
+- Left mouse: press and hold to grow a blast; move the cursor to select a drill
+  rectangle from the initial world point to the current cursor. Release to carve.
+- Right mouse: cancel the current action, including while left remains held.
+- R: generate a new world while keeping the current position; clears runtime cuts.
+
+A warm outline previews the cut while held; terrain changes only on release.
+The drill is 0.02 scene units wide. The status text reports affected, split, and
+destroyed formations, marking partial reports when terrain is unloaded.
 
 The window is resizable. Scrolling continues while missing sections are prepared in the background, with “Growing upward…” displayed until they are ready. Rocks share world coordinates across sections, and vines keep their full geometry across boundaries.
 

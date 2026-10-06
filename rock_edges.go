@@ -19,6 +19,8 @@ type rockTopology struct {
 	grid      RockGrid
 	neighbors [][]int
 	boundary  []rockEdge
+	cuts      []rockCut
+	top       float64
 }
 
 func newRockTopology(grid RockGrid) *rockTopology {

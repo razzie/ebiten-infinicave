@@ -136,6 +136,9 @@ type Vine struct {
 	EdgeAligned bool
 	// Foreground stems use a richer material and are drawn over the rock.
 	Foreground bool
+	// Keep the original material when carving creates independent fragments.
+	styleFamily int
+	styleSet    bool
 }
 
 func rotateV(v V, angle float64) V {

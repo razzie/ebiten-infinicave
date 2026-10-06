@@ -19,6 +19,7 @@ type Section struct {
 	Vines, ForegroundVines []Vine
 	Mushrooms              []MushroomGroup
 	Guides                 []Guide
+	Holes                  []Hole
 	// Collision contains foreground rock boundaries in world coordinates.
 	Collision CollisionGeometry
 }
@@ -34,9 +35,9 @@ func GenerateSection(seed, id int64) (Section, error) {
 }
 
 // GenerateSectionWithConfig generates a section using the same seed, study,
-// collision tolerance, and guide loader as a Scene. Texture and View only affect
-// rendering. A custom loader must return the same guides for repeated IDs to
-// preserve geometry across neighboring sections and cache eviction.
+// collision tolerance, and section content loader as a Scene. Texture and View
+// only affect rendering. A custom loader must return the same content for
+// repeated IDs to preserve geometry across neighboring sections and cache eviction.
 func GenerateSectionWithConfig(config Config, id int64) (Section, error) {
 	if err := config.validate(); err != nil {
 		return Section{}, err
@@ -46,13 +47,13 @@ func GenerateSectionWithConfig(config Config, id int64) (Section, error) {
 	}
 	// Streaming uses nonnegative indices internally; public IDs follow world Y.
 	index := -id
-	data := buildSectionMode(config.Seed, index, config.Study, config.LoadGuides)
+	data := buildSectionMode(config.Seed, index, config.Study, config.LoadSection)
 	geometry := prepareTerrainGeometry(data, config.CollisionTolerance)
 	section := Section{
 		ID: id, Top: sectionTop(index), WindowTop: sectionWindowTop(index),
 		Background: data.background, Foreground: data.foreground,
 		Vines: data.vines, ForegroundVines: data.foregroundVines,
-		Mushrooms: data.mushrooms, Guides: data.guides,
+		Mushrooms: data.mushrooms, Guides: data.guides, Holes: data.holes,
 		Collision: geometry.collision,
 	}
 	return section, nil

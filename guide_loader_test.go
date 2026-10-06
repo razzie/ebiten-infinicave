@@ -21,11 +21,11 @@ func TestLoadedGuidesKeepWorldPositionsAndCallerOwnership(t *testing.T) {
 		t.Fatal("internal loader changed scene-unit coordinates")
 	}
 	var requested []int64
-	load := func(id int64) []Guide {
+	load := func(id int64) SectionContent {
 		requested = append(requested, id)
-		return source
+		return SectionContent{Guides: source}
 	}
-	a, b := loadedWorldGuides(42, 0, load), loadedWorldGuides(42, 1, load)
+	a, b := loadedWorldContent(42, 0, load).Guides, loadedWorldContent(42, 1, load).Guides
 	for _, id := range requested {
 		if id > 0 {
 			t.Fatalf("loader requested a section below the floor: %d", id)
@@ -76,25 +76,25 @@ func TestLoadedGuidesAllowEmptySectionsAndSkipInvalidPolylines(t *testing.T) {
 		{{Pts: []V{{.2, .4}, {math.NaN(), .5}}}},
 		{{Pts: []V{{.2, .4}, {.5, math.Inf(1)}}}},
 	} {
-		loaded := loadedWorldGuides(42, 0, func(int64) []Guide { return guides })
+		loaded := loadedWorldContent(42, 0, func(int64) SectionContent { return SectionContent{Guides: guides} }).Guides
 		if len(loaded) != 0 {
 			t.Fatal("empty or invalid polylines unexpectedly generated guides")
 		}
 	}
-	data := buildSectionMode(42, 0, StudyCurl, func(int64) []Guide { return nil })
+	data := buildSectionMode(42, 0, StudyCurl, func(int64) SectionContent { return SectionContent{} })
 	if len(data.guides) != 0 || len(data.foreground) != 0 || len(data.background) == 0 {
 		t.Fatal("empty loader did not override procedural foreground generation")
 	}
 }
 
-func TestSceneUsesGuideLoaderAfterReset(t *testing.T) {
+func TestSceneUsesSectionLoaderAfterReset(t *testing.T) {
 	scene, err := NewScene(Config{
 		Seed: 42, Study: StudyCurl, View: ViewClay,
-		LoadGuides: func(id int64) []Guide {
+		LoadSection: func(id int64) SectionContent {
 			if id != -1 {
-				return nil
+				return SectionContent{}
 			}
-			return []Guide{{Pts: []V{{.2, .4}, {.7, .5}}, Seed: 1234}}
+			return SectionContent{Guides: []Guide{{Pts: []V{{.2, .4}, {.7, .5}}, Seed: 1234}}}
 		},
 	})
 	if err != nil {

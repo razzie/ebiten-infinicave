@@ -145,6 +145,9 @@ func prepareGridWithTopology(grid RockGrid, view View, topology *rockTopology) g
 	}
 
 	vertices, indices = appendRockBevels(vertices, indices, grid, boundary, view)
+	if topology != nil && len(topology.cuts) > 0 && (view == ViewShaded || view == ViewClay) {
+		vertices, indices = appendCarveRims(vertices, indices, topology, view)
+	}
 	mesh := gridMesh{faces: triangleMesh{vertices: vertices, indices: indices}}
 	if len(indices) == 0 {
 		return mesh

@@ -21,7 +21,7 @@ func prepareVines(vines []Vine) []triangleMesh {
 			n := after.Sub(before).Norm().Perp()
 			for j, band := range vineBands {
 				p := point.P.Add(n.Mul(band * point.Radius))
-				clr := weatherVineColor(vineJoinColor(vines, index, p, palette[j]), p, vineFamily(vines, index))
+				clr := weatherVineColor(vineJoinColor(vines, index, p, palette[j]), p, vineStyleFamily(vines, index))
 				a := float32(clr.A) / 255
 				vertices = append(vertices, ebiten.Vertex{DstX: float32(p.X * rasterPixelsPerUnit), DstY: float32((p.Y - generationMinY) * rasterPixelsPerUnit), SrcX: .5, SrcY: .5, ColorR: float32(clr.R) / 255 * a, ColorG: float32(clr.G) / 255 * a, ColorB: float32(clr.B) / 255 * a, ColorA: a})
 				if i > 0 && j > 0 {
@@ -66,7 +66,7 @@ func vinePalette(vines []Vine, index int) [len(vineColors)]color.NRGBA {
 		{[3]int{0, 0, 0}, 1, 0, .43},
 	}
 	var palette [len(vineColors)]color.NRGBA
-	family := vineFamily(vines, index)
+	family := vineStyleFamily(vines, index)
 	style := styles[family%len(styles)]
 	for i, base := range vineColors {
 		gray := .30*float64(base.R) + .59*float64(base.G) + .11*float64(base.B)
@@ -91,6 +91,13 @@ func vineFamily(vines []Vine, index int) int {
 		family = vines[family].Parent
 	}
 	return family
+}
+
+func vineStyleFamily(vines []Vine, index int) int {
+	if vines[index].styleSet {
+		return vines[index].styleFamily
+	}
+	return vineFamily(vines, index)
 }
 
 func weatherVineColor(clr color.NRGBA, p V, family int) color.NRGBA {

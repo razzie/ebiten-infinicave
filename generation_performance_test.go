@@ -35,13 +35,13 @@ func TestGuideCacheIsBoundedIndependentAndOwnsItsOutput(t *testing.T) {
 func TestSectionGeometryIndependentOfWorkersCacheAndBufferReuse(t *testing.T) {
 	previous := runtime.GOMAXPROCS(0)
 	defer runtime.GOMAXPROCS(previous)
-	load := func(id int64) []Guide {
+	load := func(id int64) SectionContent {
 		if id != 0 {
-			return nil
+			return SectionContent{}
 		}
-		return []Guide{{Pts: []V{{.15, .4}, {.5, .35}, {.85, .45}}, Seed: 1234}}
+		return SectionContent{Guides: []Guide{{Pts: []V{{.15, .4}, {.5, .35}, {.85, .45}}, Seed: 1234}}}
 	}
-	for _, loader := range []GuideLoader{nil, load} {
+	for _, loader := range []SectionLoader{nil, load} {
 		runtime.GOMAXPROCS(1)
 		builder := newSectionBuilder(42, StudyNone, loader)
 		original := builder.build(0)

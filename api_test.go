@@ -57,16 +57,16 @@ func TestPublicSectionGeneration(t *testing.T) {
 	t.Logf("collision vertices at tolerance 0 / .002: %d / %d", exactCount, approximateCount)
 }
 
-func TestPublicSectionGuideLoaderAndNegativeID(t *testing.T) {
+func TestPublicSectionSectionLoaderAndNegativeID(t *testing.T) {
 	var requested []int64
 	section, err := infinicave.GenerateSectionWithConfig(infinicave.Config{
 		Seed: 42,
-		LoadGuides: func(id int64) []infinicave.Guide {
+		LoadSection: func(id int64) infinicave.SectionContent {
 			requested = append(requested, id)
 			if id != -1 {
-				return nil
+				return infinicave.SectionContent{}
 			}
-			return []infinicave.Guide{{Pts: []infinicave.V{{X: .2, Y: .4}, {X: .7, Y: .5}}}}
+			return infinicave.SectionContent{Guides: []infinicave.Guide{{Pts: []infinicave.V{{X: .2, Y: .4}, {X: .7, Y: .5}}}}}
 		},
 	}, -1)
 	if err != nil {

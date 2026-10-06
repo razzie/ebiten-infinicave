@@ -35,6 +35,8 @@ type QueryOptions struct {
 // all cached portions of the formation. They do not depend on render resolution.
 // When newly loaded geometry joins formations, previous IDs remain fetchable
 // as aliases while the joined formation stays cached.
+// Carving replaces affected formation IDs; CarveResult maps them to their
+// remaining parts. Unaffected formation and guide IDs stay valid.
 type FormationID struct{ world, object uint64 }
 
 // GuideID is an opaque, comparable reference to a guide polyline. It belongs to
