@@ -64,23 +64,32 @@ Call every `Scene` method on the Ebitengine game goroutine. `Close` is idempoten
 and releases shaders and cached images; an in-progress CPU generation finishes
 before its worker exits.
 
-`DefaultConfig` uses texture strength 8, moving fog, shaded rendering, seed 0, and exact
-collision geometry. A zero `Config` is also valid and disables texture and fog. `View`
+`DefaultConfig` uses texture strength 8, moving fog, animated bats, shaded rendering,
+seed 0, and exact collision geometry. A zero `Config` is also valid and disables
+texture, fog, and bats. `View`
 is a typed enum:
 
 ```go
 config.Fog = false // disable the moving mist
+config.Bats = false // disable the occasional flying bats
 config.View = infinicave.ViewShaded // or ViewClay, ViewHeight, ViewNormals, ViewShadows
 config.CollisionTolerance = 0.002 // approximation tolerance in scene units
 ```
 
-`Texture` accepts 0–16. Diagnostic views disable texture and fog and hide vegetation.
+`Texture` accepts 0–16. Diagnostic views disable texture, fog, and bats and hide vegetation.
 Fog drifts over the background rock and vines, behind mushrooms and foreground
 rock and vines. It follows world coordinates across section seams, scrolling,
 and resizing, and advances once per `Scene.Update` so repeated draws share the
 same animation state. Set `Config.Fog` to toggle it when creating a scene.
 `ParseView` converts strings such as `"normals"` for
 command-line tools; library code can use the constants directly.
+
+`Config.Bats` enables small bats that occasionally enter either side of the
+viewport and fly across on curved paths, with swoops, varying speed, and banking
+as their wings flap. `Scene.Update` advances their animation once per tick;
+repeated `Scene.Draw` calls share the same animation state. Their paths stay in
+world coordinates as you scroll or resize. `Scene.Reset` clears existing bats
+and starts a fresh, seed-reproducible arrival sequence.
 
 Set `Config.LoadSection` to supply authored guides and holes per section:
 
@@ -364,6 +373,9 @@ Run with `go run ./cmd/infinicave` (Go 1.27 and a graphical desktop). Use `-seed
 A warm outline previews the cut while held; terrain changes only on release.
 The drill is 0.02 scene units wide. The status text reports affected, split, and
 destroyed formations, marking partial reports when terrain is unloaded.
+
+The viewer enables the library's bats by default; use `-bats=false` to disable
+them. The viewer disables bats for PNG exports.
 
 The viewer renders at the window's native pixel resolution, including on HiDPI displays. Resizing rerasterizes visible sections using cached geometry and preserves runtime cuts and camera position. Offscreen sections refresh when they become visible. Scrolling continues while missing sections are prepared in the background, with “Growing upward…” displayed until they are ready. Rocks share world coordinates across sections, and vines keep their full geometry across boundaries.
 

@@ -21,6 +21,7 @@ func run() error {
 	output := flag.String("output", "", "save the bottom 2400 pixels as a PNG and exit")
 	texture := flag.Float64("texture", 8, "surface texture strength (0 disables it, range 0-16)")
 	fog := flag.Bool("fog", true, "moving fog between background and foreground layers")
+	bats := flag.Bool("bats", true, "occasional bats flying across the cave (interactive viewer only)")
 	view := flag.String("view", "shaded", "terrain view: shaded, clay, height, normals, shadows")
 	hover := flag.Bool("hover", false, "highlight foreground rocks and guide lines under the mouse")
 	tolerance := flag.Float64("collision-tolerance", 0, "collision polygon simplification tolerance in scene units (one section is 1 by 1)")
@@ -28,6 +29,7 @@ func run() error {
 	config := infinicave.DefaultConfig()
 	config.Seed, config.Texture = *seed, *texture
 	config.Fog = *fog
+	config.Bats = *bats && *output == ""
 	parsedView, err := infinicave.ParseView(*view)
 	if err != nil {
 		return err

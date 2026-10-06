@@ -14,7 +14,7 @@ const Width = 1
 const SectionHeight = 1
 
 // Config controls generation and rendering. Start with DefaultConfig to use
-// the viewer's appearance. A zero Config is valid and disables texture and fog.
+// the viewer's appearance. A zero Config is valid and disables texture, fog, and bats.
 type Config struct {
 	Seed int64
 	// Texture is surface grain strength, from 0 (disabled) to 16.
@@ -22,6 +22,9 @@ type Config struct {
 	// Fog enables moving mist between the background and foreground layers.
 	// Diagnostic views disable fog regardless of this setting.
 	Fog bool
+	// Bats enables occasional animated bats flying across the viewport.
+	// Bats use world coordinates and are hidden outside ViewShaded.
+	Bats bool
 	// View selects the material. Diagnostic views disable texture, fog, and vegetation.
 	View View
 	// CollisionTolerance is the polygon simplification tolerance in scene units.
@@ -44,7 +47,7 @@ type Config struct {
 
 // DefaultConfig returns the viewer's appearance with a deterministic seed of 0.
 func DefaultConfig() Config {
-	return Config{Texture: 8, Fog: true, View: ViewShaded}
+	return Config{Texture: 8, Fog: true, Bats: true, View: ViewShaded}
 }
 
 func (c Config) validate() error {
@@ -85,6 +88,7 @@ type Scene struct {
 	material             *ebiten.Shader
 	vineMaterial         *ebiten.Shader
 	fog                  *fogRenderer
+	bats                 *batFlock
 	geometryRevisionBase uint64 // revisions accumulated across world resets
 	texture              float64
 	view                 View
@@ -122,12 +126,16 @@ func NewScene(config Config) (*Scene, error) {
 		}
 	}
 	g.world = newWorld(config.Seed, g.view, g.collisionTolerance, g.loadSection)
+	if config.Bats && g.view == ViewShaded {
+		g.bats = newBatFlock(config.Seed)
+	}
 	return g, nil
 }
 
 // Update uploads prepared meshes, requests missing sections, and evicts distant
-// sections. Call once per game tick. It never waits for generation and returns
-// true when all layers needed by viewport are ready. Collision becomes available
+// sections, and advances enabled ambient animations. Call once per game tick.
+// It never waits for generation and returns true when all layers needed by
+// viewport are ready. Collision becomes available
 // before vegetation generation and mesh preparation; complete terrain uploads
 // before vegetation. OnCollisionReady runs here as soon as generated polygons
 // arrive. An invalid viewport or a closed Scene returns false without doing work.
@@ -142,6 +150,9 @@ func (g *Scene) Update(viewport Viewport) bool {
 	}
 	if g.fog != nil {
 		g.fog.update()
+	}
+	if g.bats != nil {
+		g.bats.update(viewport)
 	}
 	g.world.viewport = viewport
 	if u := g.world.upload; u != nil && !meshVisible(u.data, viewport) {
@@ -184,20 +195,24 @@ func (g *Scene) SetRenderWidth(pixels int) {
 	g.world.deferUpload()
 }
 
-// Draw draws available terrain, fog, and vegetation into dst, scaling uniformly so
-// Width scene units fill its width. Use a destination with aspect ratio
+// Draw draws available terrain, fog, vegetation, and enabled bats into dst,
+// scaling uniformly so Width scene units fill its width. Use an aspect ratio of
 // Width:viewport.Height and the same viewport as Update.
-// Missing sections and areas outside the cave are left untouched. Draw does
+// Missing terrain is left untouched; bats may fly across unloaded areas. Draw does
 // not add hover, loading text, or UI, and does nothing for an invalid viewport
 // or a closed Scene.
 func (g *Scene) Draw(dst *ebiten.Image, viewport Viewport) {
 	if !g.closed && viewport.valid() {
 		g.world.draw(dst, viewport.Y, viewport.Height, g.fog)
+		if g.bats != nil {
+			g.bats.draw(dst, viewport)
+		}
 	}
 }
 
 // Reset replaces the world with a new seed, keeping rendering settings and
-// the section content loader and collision callback.
+// the section content loader and collision callback. Enabled bats restart
+// their arrival sequence with the new seed.
 // The next Update begins loading again. Reset does nothing after Close.
 func (g *Scene) Reset(seed int64) {
 	if g.closed {
@@ -208,6 +223,9 @@ func (g *Scene) Reset(seed int64) {
 	g.world.close()
 	g.world = newWorld(seed, g.view, g.collisionTolerance, g.loadSection)
 	g.world.pixels = pixels
+	if g.bats != nil {
+		g.bats = newBatFlock(seed)
+	}
 }
 
 // Close stops background work and releases all GPU resources. It is safe to
@@ -219,6 +237,7 @@ func (g *Scene) Close() {
 	}
 	g.geometryRevisionBase = g.GeometryRevision() + 1
 	g.closed = true
+	g.bats = nil
 	if g.world != nil {
 		g.world.close()
 	}
