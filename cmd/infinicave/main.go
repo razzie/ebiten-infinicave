@@ -19,6 +19,7 @@ func run() error {
 	seed := flag.Int64("seed", rand.Int63(), "random seed (random by default)")
 	output := flag.String("output", "", "save the bottom 2400 pixels as a PNG and exit")
 	texture := flag.Float64("texture", 8, "surface texture strength (0 disables it, range 0-16)")
+	fog := flag.Bool("fog", true, "moving fog between background and foreground layers")
 	study := flag.String("study", "", "isolated rock study: ledge or curl (no vines)")
 	view := flag.String("view", "shaded", "terrain view: shaded, clay, height, normals, shadows")
 	hover := flag.Bool("hover", false, "highlight foreground rocks and guide lines under the mouse")
@@ -26,6 +27,7 @@ func run() error {
 	flag.Parse()
 	config := infinicave.DefaultConfig()
 	config.Seed, config.Texture = *seed, *texture
+	config.Fog = *fog
 	var err error
 	config.Study, err = infinicave.ParseStudy(*study)
 	if err != nil {

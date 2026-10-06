@@ -1,0 +1,37 @@
+//kage:unit pixels
+package main
+
+var Pixels float
+var Top float
+var Time float
+
+func noise(p vec2) float {
+	q := fract(vec3(p.x, p.y, p.x) * .1031)
+	q += dot(q, q.yzx+vec3(33.33))
+	return fract((q.x + q.y) * q.z)
+}
+
+func smoothNoise(p vec2) float {
+	cell := floor(p)
+	f := fract(p)
+	f = f * f * (3.0 - 2.0*f)
+	a := mix(noise(cell), noise(cell+vec2(1, 0)), f.x)
+	b := mix(noise(cell+vec2(0, 1)), noise(cell+vec2(1, 1)), f.x)
+	return mix(a, b, f.y)
+}
+
+func Fragment(dst vec4, src vec2, color vec4) vec4 {
+	p := src / Pixels + vec2(0, Top)
+	// Broad drifting clouds carry narrower wisps moving at a different speed.
+	// Warping breaks up the noise grid without tying the pattern to the screen.
+	flow := p + vec2(-.018, .009)*Time
+	warp := vec2(smoothNoise(flow*2.1), smoothNoise(flow*2.1+vec2(17, 31))) - vec2(.5)
+	cloud := (flow + warp*.18) * vec2(3.2, 2.4)
+	density := smoothNoise(cloud)*.58
+	density += smoothNoise(cloud*2.03+vec2(11, 7))*.28
+	density += smoothNoise(cloud*4.07+vec2(23, 19))*.14
+	wisps := smoothNoise((p+warp*.1+vec2(.011, .004)*Time)*vec2(5, 13))
+	alpha := smoothstep(.25, .8, density)*.18 + smoothstep(.5, .85, wisps)*.045
+	// Premultiplied alpha preserves the dark background beneath the mist.
+	return vec4(vec3(.32, .36, .37)*alpha, alpha)
+}

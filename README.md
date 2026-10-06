@@ -66,17 +66,22 @@ Call every `Scene` method on the Ebitengine game goroutine. `Close` is idempoten
 and releases shaders and cached images; an in-progress CPU generation finishes
 before its worker exits.
 
-`DefaultConfig` uses texture strength 8, shaded rendering, seed 0, and exact
-collision geometry. A zero `Config` is also valid and disables texture. `Study`
+`DefaultConfig` uses texture strength 8, moving fog, shaded rendering, seed 0, and exact
+collision geometry. A zero `Config` is also valid and disables texture and fog. `Study`
 and `View` are typed enums:
 
 ```go
+config.Fog = false // disable the moving mist
 config.Study = infinicave.StudyNone // or StudyLedge, StudyCurl
 config.View = infinicave.ViewShaded // or ViewClay, ViewHeight, ViewNormals, ViewShadows
 config.CollisionTolerance = 0.002 // approximation tolerance in scene units
 ```
 
-`Texture` accepts 0–16. Diagnostic views disable texture and hide vegetation.
+`Texture` accepts 0–16. Diagnostic views disable texture and fog and hide vegetation.
+Fog drifts over the background rock and vines, behind mushrooms and foreground
+rock and vines. It follows world coordinates across section seams, scrolling,
+and resizing, and advances once per `Scene.Update` so repeated draws share the
+same animation state. Set `Config.Fog` to toggle it when creating a scene.
 `ParseStudy` and `ParseView` convert strings such as `"curl"` and `"normals"` for
 command-line tools; library code can use the constants directly.
 
@@ -348,7 +353,7 @@ The viewer renders at the window's native pixel resolution, including on HiDPI d
 
 Hover over a foreground rock for a soft warm highlight and glow over its entire connected block of cells, including across cached section boundaries. Point within 0.006 scene units of a guide to highlight only that guide line instead. Hover effects are enabled by default; use `-hover=false` to disable them (or `-hover=true` to enable them). PNG exports never include hover effects.
 
-`go run ./cmd/infinicave -seed 42 -output scene.png` exports the bottom 1000 × 2400 pixels and exits. `-texture 0` disables the surface texture. `-collision-tolerance 0.002` simplifies collision polygons with a 0.002-unit tolerance.
+`go run ./cmd/infinicave -seed 42 -output scene.png` exports the bottom 1000 × 2400 pixels and exits. `-texture 0` disables the surface texture. `-fog=false` disables the moving fog. `-collision-tolerance 0.002` simplifies collision polygons with a 0.002-unit tolerance.
 
 For shape studies without vines, use `-study ledge` or `-study curl`. The `-view` options are `shaded` (default), `clay`, `height`, `normals`, and `shadows`. Diagnostic views disable texture and hide vines; clay uses neutral gray material with the same lighting and exposed edges.
 

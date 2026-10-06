@@ -14,14 +14,17 @@ const Width = 1
 const SectionHeight = 1
 
 // Config controls generation and rendering. Start with DefaultConfig to use
-// the viewer's appearance. A zero Config is valid and disables texture.
+// the viewer's appearance. A zero Config is valid and disables texture and fog.
 type Config struct {
 	Seed int64
 	// Texture is surface grain strength, from 0 (disabled) to 16.
 	Texture float64
+	// Fog enables moving mist between the background and foreground layers.
+	// Diagnostic views disable fog regardless of this setting.
+	Fog bool
 	// Study selects a full cave (StudyNone) or an isolated rock shape.
 	Study Study
-	// View selects the material. Diagnostic views disable texture and vegetation.
+	// View selects the material. Diagnostic views disable texture, fog, and vegetation.
 	View View
 	// CollisionTolerance is the polygon simplification tolerance in scene units.
 	// Zero preserves exact collision geometry. Larger values reduce vertices and
@@ -43,7 +46,7 @@ type Config struct {
 
 // DefaultConfig returns the viewer's appearance with a deterministic seed of 0.
 func DefaultConfig() Config {
-	return Config{Texture: 8, View: ViewShaded}
+	return Config{Texture: 8, Fog: true, View: ViewShaded}
 }
 
 func (c Config) validate() error {
@@ -86,6 +89,7 @@ type Scene struct {
 	world              *world
 	material           *ebiten.Shader
 	vineMaterial       *ebiten.Shader
+	fog                *fogRenderer
 	highlight          *hoverRenderer
 	texture            float64
 	study              Study
@@ -121,6 +125,13 @@ func NewScene(config Config) (*Scene, error) {
 		g.Close()
 		return nil, fmt.Errorf("infinicave: compile hover shader: %w", err)
 	}
+	if config.Fog && g.view == ViewShaded {
+		g.fog, err = newFogRenderer()
+		if err != nil {
+			g.Close()
+			return nil, fmt.Errorf("infinicave: compile fog shader: %w", err)
+		}
+	}
 	g.world = newWorld(config.Seed, g.study, g.view, g.collisionTolerance, g.loadSection)
 	return g, nil
 }
@@ -139,6 +150,9 @@ func (g *Scene) Update(viewport Viewport) bool {
 	w.receiveCollision(g)
 	if g.closed || g.world != w { // The callback may close or reset the scene.
 		return false
+	}
+	if g.fog != nil {
+		g.fog.update()
 	}
 	g.world.viewport = viewport
 	if u := g.world.upload; u != nil && !meshVisible(u.data, viewport) {
@@ -166,7 +180,7 @@ func (g *Scene) SetRenderWidth(pixels int) {
 	}
 }
 
-// Draw draws available terrain and vegetation into dst, scaling uniformly so
+// Draw draws available terrain, fog, and vegetation into dst, scaling uniformly so
 // Width scene units fill its width. Use a destination with aspect ratio
 // Width:viewport.Height and the same viewport as Update.
 // Missing sections and areas outside the cave are left untouched. Draw does
@@ -174,7 +188,7 @@ func (g *Scene) SetRenderWidth(pixels int) {
 // or a closed Scene.
 func (g *Scene) Draw(dst *ebiten.Image, viewport Viewport) {
 	if !g.closed && viewport.valid() {
-		g.world.draw(dst, viewport.Y, viewport.Height)
+		g.world.draw(dst, viewport.Y, viewport.Height, g.fog)
 	}
 }
 
@@ -207,6 +221,9 @@ func (g *Scene) Close() {
 	}
 	if g.highlight != nil {
 		g.highlight.close()
+	}
+	if g.fog != nil {
+		g.fog.shader.Deallocate()
 	}
 	if g.vineMaterial != nil {
 		g.vineMaterial.Deallocate()

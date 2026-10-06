@@ -535,7 +535,7 @@ func (w *world) prune(y float64, height float64, velocity float64) {
 	}
 }
 
-func (w *world) draw(dst *ebiten.Image, y float64, height float64) {
+func (w *world) draw(dst *ebiten.Image, y float64, height float64, fog *fogRenderer) {
 	y = renderAlignedY(y, w.renderWidth())
 	low, high := visibleSections(y, height)
 	for id := low; id <= high; id++ {
@@ -552,6 +552,13 @@ func (w *world) draw(dst *ebiten.Image, y float64, height float64) {
 	for id := max(0, low-1); id <= high+1; id++ {
 		if section := w.sections[id]; section != nil {
 			drawVegetation(dst, section.vines, section.vinesBounds, sectionWindowTop(id), y, section.renderWidth())
+		}
+	}
+	if fog != nil {
+		for id := low; id <= high; id++ {
+			if section := w.sections[id]; section != nil && section.terrain != nil {
+				fog.drawSection(dst, sectionTop(id), y)
+			}
 		}
 	}
 	for id := max(0, low-1); id <= high+1; id++ {
