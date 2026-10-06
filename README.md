@@ -39,6 +39,8 @@ The cave is `infinicave.Width` (1 scene unit) wide. Each section is a square,
 with its owned local area running from `(0, 0)` to `(1, 1)`;
 `infinicave.SectionHeight` is also 1. World Y is negative above the floor at zero,
 so the initial viewport Y is `-viewport.Height` and scrolling upward decreases it.
+Section IDs follow that direction: `0` at the bottom, then `-1`, `-2`, and so on
+upward. Section `id` owns the world band from Y = `id-1` to Y = `id`.
 `Viewport.Height` is a floating-point height in scene units, and
 `Viewport.Velocity` is camera movement in scene units per tick for directional
 prefetching. Y must be finite and no greater than `-viewport.Height`; height must
@@ -55,7 +57,7 @@ pass cursor coordinates in viewport-local scene units and call it only when the
 cursor is active. Convert cursor pixels to scene units with
 `float64(infinicave.Width) / float64(screen.Bounds().Dx())`.
 `scene.Reset(seed)` discards cached sections and starts a new
-world with the same rendering settings. Rendering does not include UI or exports.
+world with the same rendering settings and guide loader. Rendering does not include UI or exports.
 Call every `Scene` method on the Ebitengine game goroutine. `Close` is idempotent
 and releases shaders and cached images; an in-progress CPU generation finishes
 before its worker exits.
@@ -73,6 +75,41 @@ config.CollisionTolerance = 0.002 // approximation tolerance in scene units
 `Texture` accepts 0–16. Diagnostic views disable texture and hide vegetation.
 `ParseStudy` and `ParseView` convert strings such as `"curl"` and `"normals"` for
 command-line tools; library code can use the constants directly.
+
+Set `Config.LoadGuides` to load your own guide polylines per section:
+
+```go
+config.LoadGuides = func(id int64) []infinicave.Guide {
+    switch id {
+    case 0:
+        return []infinicave.Guide{{
+            Pts: []infinicave.V{{X: 0.2, Y: 0.4}, {X: 0.7, Y: 0.5}},
+        }}
+    case -1:
+        return []infinicave.Guide{{
+            Pts: []infinicave.V{{X: 0.3, Y: 0.3}, {X: 0.8, Y: 0.4}},
+        }}
+    }
+    return nil // this section has no guides
+}
+```
+
+Assign the callback before calling `NewScene`, or pass the config to
+`GenerateSectionWithConfig`. Points use section-local scene units in the owned
+unit square. They form a polyline; generation copies the points and computes arc
+lengths and bounds, so only `Pts` is required. `BrightSign` defaults to 1; use -1
+to reverse the lit side. `Seed` defaults to a stable seed derived from the world
+seed, section ID, and guide index. Supplied guides keep their shapes and placement;
+custom layouts are responsible for their own spacing.
+
+A nil `LoadGuides` keeps the default random generator or selected study. A
+callback returning nil or an empty slice produces no guides for that section.
+The callback overrides study guide shapes. Invalid polylines with nonfinite
+points or fewer than two distinct consecutive points are ignored. Neighboring
+sections are also loaded for seamless generation, and IDs may be requested
+repeatedly in any order. Return consistent results per ID. Scene calls the loader
+on its background worker; synchronous generation calls it directly. Protect any
+shared mutable state against concurrent calls, including during `Reset`.
 
 Foreground geometry is always prepared and retained, including in diagnostic
 views. Calling `DrawHover` is optional and has no effect on collision availability.
@@ -117,7 +154,7 @@ if err != nil {
 
 `GenerateSection` is synchronous and allocates no GPU resources. Run it in a
 background goroutine in an interactive application. IDs start at 0 at the bottom
-and increase upward; negative IDs return an error. Each section owns its geometry
+and decrease upward; positive IDs return an error. Each section owns its geometry
 and includes one section of padding above and below for seamless generation.
 All exposed positions, lengths, radii, and rock heights use scene units; normals
 and directions remain unit vectors. The owned local square is `[0, 1] × [0, 1]`,
@@ -126,8 +163,8 @@ the start of that padding in world coordinates. Its owned world band is `[sectio
 vegetation may extend outside that band. Collision contours also include padding;
 use only the owned band when combining adjacent sections. The exposed grids
 describe visual faces, and `section.Collision` contains the collision boundaries.
-Use `GenerateSectionWithConfig(config, id)` to share a scene's study and collision
-tolerance with synchronous generation. This
+Use `GenerateSectionWithConfig(config, id)` to share a scene's study, collision
+tolerance, and guide loader with synchronous generation. This
 package depends on Ebitengine, so desktop initialization still needs a graphical
 environment even when only generating geometry.
 
@@ -144,7 +181,7 @@ Sparse foreground vines grow directly across the raised rock faces, with at most
 
 Tiny offshoots attach to the larger vines and trace the actual background cell edges through their junctions. Every other completed offshoot is retained for a lighter density. These slender branches taper over short lengths, inherit their parent’s subdued material, and respect the foreground rock boundaries.
 
-Each section grows new random guide curves with varying lengths, directions, and bends. Placement favors underfilled areas while reserving a few open pockets. The finished jagged guides stay at least 0.155 scene units apart, including across section boundaries, and tight folds or self-crossings are rejected. Coverage aims for about two-thirds of the scene within 0.115 scene units of a guide, leaving gaps for platform-game layouts. Seeds reproduce the same scene, but different seeds and sections use fresh shapes rather than fixed curve templates.
+By default, each section grows new random guide curves with varying lengths, directions, and bends. Placement favors underfilled areas while reserving a few open pockets. The finished jagged guides stay at least 0.155 scene units apart, including across section boundaries, and tight folds or self-crossings are rejected. Coverage aims for about two-thirds of the scene within 0.115 scene units of a guide, leaving gaps for platform-game layouts. Seeds reproduce the same scene, but different seeds and sections use fresh shapes rather than fixed curve templates.
 
 Guides form slightly jagged rock borders by cutting the foreground Voronoi cells along broad, uneven facets. Tiny clipping fragments and long, thin foreground cells merge into neighbors on the same side of the guide, favoring compact combined faces. Site spacing compresses across exposed lips and expands into the flanks without adding aligned rows. Flanks use fewer, larger facets; the outer footprint is cut through the cells along a relief contour, rather than ending in a row of whole tiles.
 

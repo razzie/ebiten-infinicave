@@ -125,7 +125,7 @@ func TestPrepareSectionMatchesSerialLayers(t *testing.T) {
 }
 
 func TestWorldWorkerPreparesAllLayers(t *testing.T) {
-	w := newWorld(42, StudyNone, ViewShaded, 0)
+	w := newWorld(42, StudyNone, ViewShaded, 0, nil)
 	defer w.close()
 	w.request(0)
 	select {

@@ -12,6 +12,7 @@ import "fmt"
 // Each generated Section owns its slices; callers may modify them. Rock grids
 // describe visual faces; Collision contains boundaries for physics integration.
 type Section struct {
+	// ID is 0 at the floor, then -1, -2, ... upward. Top is ID-1.
 	ID                     int64
 	Top, WindowTop         float64
 	Background, Foreground RockGrid
@@ -23,9 +24,9 @@ type Section struct {
 }
 
 // GenerateSection synchronously generates a full cave section without
-// allocating GPU resources. ID 0 is the bottom section; larger IDs grow upward.
+// allocating GPU resources. ID 0 is the bottom section; IDs -1, -2, ... grow upward.
 // The same seed and ID reproduce the same geometry, independently of load order.
-// Negative IDs return an error. Generation is expensive; use a background
+// Positive IDs return an error. Generation is expensive; use a background
 // goroutine when calling from a game. This package still depends on Ebitengine,
 // whose initialization requires a graphical environment on desktop platforms.
 func GenerateSection(seed, id int64) (Section, error) {
@@ -33,18 +34,22 @@ func GenerateSection(seed, id int64) (Section, error) {
 }
 
 // GenerateSectionWithConfig generates a section using the same seed, study,
-// and collision tolerance as a Scene. Texture and View only affect rendering.
+// collision tolerance, and guide loader as a Scene. Texture and View only affect
+// rendering. A custom loader must return the same guides for repeated IDs to
+// preserve geometry across neighboring sections and cache eviction.
 func GenerateSectionWithConfig(config Config, id int64) (Section, error) {
 	if err := config.validate(); err != nil {
 		return Section{}, err
 	}
-	if id < 0 {
-		return Section{}, fmt.Errorf("infinicave: section ID must be nonnegative")
+	if id > 0 || id == -1<<63 {
+		return Section{}, fmt.Errorf("infinicave: section ID must be nonpositive and greater than the minimum int64")
 	}
-	data := buildSectionMode(config.Seed, id, config.Study)
+	// Streaming uses nonnegative indices internally; public IDs follow world Y.
+	index := -id
+	data := buildSectionMode(config.Seed, index, config.Study, config.LoadGuides)
 	geometry := prepareTerrainGeometry(data, config.CollisionTolerance*generationWidth)
 	section := Section{
-		ID: data.id, Top: sectionTop(id), WindowTop: sectionWindowTop(id),
+		ID: id, Top: sectionTop(index), WindowTop: sectionWindowTop(index),
 		Background: data.background, Foreground: data.foreground,
 		Vines: data.vines, ForegroundVines: data.foregroundVines,
 		Mushrooms: data.mushrooms, Guides: data.guides,

@@ -54,6 +54,7 @@ func (s *Section) normalize() {
 
 // Collision boundaries are world points; copy them before exposing cached data.
 func (g *CollisionGeometry) normalize() {
+	g.ID = -g.ID
 	g.Top /= generationWidth
 	polygons := make([][]V, len(g.Polygons))
 	for i, poly := range g.Polygons {

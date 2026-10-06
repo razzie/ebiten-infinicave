@@ -11,6 +11,7 @@ import "math"
 // [Top, Top+SectionHeight). Use only that band when combining adjacent sections.
 // Background rock, vines, mushrooms, and decorative bevels are not solid.
 type CollisionGeometry struct {
+	// ID is 0 at the floor, then -1, -2, ... upward.
 	ID       int64
 	Top      float64
 	Polygons [][]V
@@ -38,12 +39,13 @@ func (g CollisionGeometry) Contains(p V) bool {
 
 // CollisionGeometry returns a copy of a fully uploaded cached section's
 // collision boundaries. Missing, evicted, and closed sections return false.
+// IDs are 0 at the floor, then -1, -2, ... upward; positive IDs return false.
 // Call after Update; retain the returned copy as long as your game needs it.
 func (g *Scene) CollisionGeometry(id int64) (CollisionGeometry, bool) {
-	if g.closed {
+	if g.closed || id > 0 || id == -1<<63 {
 		return CollisionGeometry{}, false
 	}
-	section := g.world.sections[id]
+	section := g.world.sections[-id]
 	if section == nil || section.geometry == nil {
 		return CollisionGeometry{}, false
 	}

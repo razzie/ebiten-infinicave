@@ -9,8 +9,8 @@ import (
 )
 
 func TestPublicSectionGeneration(t *testing.T) {
-	if _, err := infinicave.GenerateSection(42, -1); err == nil {
-		t.Fatal("negative section ID accepted")
+	if _, err := infinicave.GenerateSection(42, 1); err == nil {
+		t.Fatal("positive section ID accepted")
 	}
 	a, err := infinicave.GenerateSection(42, 0)
 	if err != nil {
@@ -55,6 +55,41 @@ func TestPublicSectionGeneration(t *testing.T) {
 		t.Fatalf("tolerance did not reduce generated collision vertices: %d >= %d", approximateCount, exactCount)
 	}
 	t.Logf("collision vertices at tolerance 0 / .002: %d / %d", exactCount, approximateCount)
+}
+
+func TestPublicSectionGuideLoaderAndNegativeID(t *testing.T) {
+	var requested []int64
+	section, err := infinicave.GenerateSectionWithConfig(infinicave.Config{
+		Seed: 42,
+		LoadGuides: func(id int64) []infinicave.Guide {
+			requested = append(requested, id)
+			if id != -1 {
+				return nil
+			}
+			return []infinicave.Guide{{Pts: []infinicave.V{{X: .2, Y: .4}, {X: .7, Y: .5}}}}
+		},
+	}, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if section.ID != -1 || section.Top != -2 || section.WindowTop != -3 || section.Collision.ID != -1 {
+		t.Fatalf("incorrect negative ID metadata: section %d, top %v, window %v, collision %d", section.ID, section.Top, section.WindowTop, section.Collision.ID)
+	}
+	if !reflect.DeepEqual(requested, []int64{-3, -2, -1, 0}) {
+		t.Fatalf("unexpected loader IDs: %v", requested)
+	}
+	if len(section.Guides) != 1 || section.Guides[0].BrightSign != 1 || section.Guides[0].Seed == 0 {
+		t.Fatal("custom guide was omitted or procedural guides were added")
+	}
+	for i, want := range []infinicave.V{{X: .2, Y: .4}, {X: .7, Y: .5}} {
+		if section.Guides[0].Pts[i].Sub(want).Len() > 1e-12 {
+			t.Fatal("custom guide coordinates do not use section-local scene units")
+		}
+	}
+	if len(section.Foreground) == 0 || len(section.Collision.Polygons) == 0 {
+		t.Fatal("custom guides did not produce rock and collision geometry")
+	}
+	checkSectionUnits(t, section)
 }
 
 func checkSectionUnits(t *testing.T, section infinicave.Section) {

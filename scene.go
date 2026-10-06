@@ -27,6 +27,9 @@ type Config struct {
 	// Zero preserves exact collision geometry. Larger values reduce vertices and
 	// collision cost at the expense of accuracy. Rendering remains detailed.
 	CollisionTolerance float64
+	// LoadGuides supplies guide polylines for each section, overriding Study's
+	// guide shapes. Nil uses the default random generator (or the selected study).
+	LoadGuides GuideLoader
 }
 
 // DefaultConfig returns the viewer's appearance with a deterministic seed of 0.
@@ -84,6 +87,7 @@ type Scene struct {
 	study              Study
 	view               View
 	collisionTolerance float64
+	loadGuides         GuideLoader
 	closed             bool
 }
 
@@ -93,7 +97,7 @@ func NewScene(config Config) (*Scene, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
-	g := &Scene{texture: config.Texture, study: config.Study, view: config.View, collisionTolerance: config.CollisionTolerance * generationWidth}
+	g := &Scene{texture: config.Texture, study: config.Study, view: config.View, collisionTolerance: config.CollisionTolerance * generationWidth, loadGuides: config.LoadGuides}
 	if g.view != ViewShaded {
 		g.texture = 0
 	}
@@ -112,7 +116,7 @@ func NewScene(config Config) (*Scene, error) {
 		g.Close()
 		return nil, fmt.Errorf("infinicave: compile hover shader: %w", err)
 	}
-	g.world = newWorld(config.Seed, g.study, g.view, g.collisionTolerance)
+	g.world = newWorld(config.Seed, g.study, g.view, g.collisionTolerance, g.loadGuides)
 	return g, nil
 }
 
@@ -144,7 +148,8 @@ func (g *Scene) Draw(dst *ebiten.Image, viewport Viewport) {
 	}
 }
 
-// Reset replaces the world with a new seed, keeping rendering settings.
+// Reset replaces the world with a new seed, keeping rendering settings and
+// the guide loader.
 // The next Update begins loading again. Reset does nothing after Close.
 func (g *Scene) Reset(seed int64) {
 	if g.closed {
@@ -154,7 +159,7 @@ func (g *Scene) Reset(seed int64) {
 	if g.highlight != nil {
 		g.highlight.clear()
 	}
-	g.world = newWorld(seed, g.study, g.view, g.collisionTolerance)
+	g.world = newWorld(seed, g.study, g.view, g.collisionTolerance, g.loadGuides)
 }
 
 // Close stops background work and releases all GPU resources. It is safe to

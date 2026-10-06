@@ -107,7 +107,15 @@ func TestSceneCollisionGeometryOwnershipAndAvailability(t *testing.T) {
 	if !ok || !copy.Contains(V{.04, -.89}) {
 		t.Fatal("repeated collision access changed the cached geometry")
 	}
+	upper := prepareTerrainGeometry(sectionData{id: 1, foreground: RockGrid{hoverRect(30, 1100, 30, 30)}}, 0)
+	scene.world.sections[1] = &worldSection{geometry: upper}
+	if geometry, ok := scene.CollisionGeometry(-1); !ok || geometry.ID != -1 || geometry.Top != -2 || !geometry.Contains(V{.04, -1.89}) {
+		t.Fatal("negative section ID did not resolve the correct cached geometry")
+	}
 	if _, ok := scene.CollisionGeometry(1); ok {
+		t.Fatal("positive section ID accepted")
+	}
+	if _, ok := scene.CollisionGeometry(-2); ok {
 		t.Fatal("missing section reported ready")
 	}
 	scene.closed = true
@@ -117,7 +125,7 @@ func TestSceneCollisionGeometryOwnershipAndAvailability(t *testing.T) {
 }
 
 func TestGeneratedCollisionMatchesRockFaces(t *testing.T) {
-	data := buildSectionMode(42, 0, StudyCurl)
+	data := buildSectionMode(42, 0, StudyCurl, nil)
 	h := prepareTerrainGeometry(data, 0)
 	grid := insetForegroundGrid(data.foreground)
 	for y := 1001.25; y < 2000; y += 13 {

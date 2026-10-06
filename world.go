@@ -119,18 +119,22 @@ func worldSeeds(seed int64, top float64, noise *Perlin) []V {
 }
 
 func buildSection(seed, id int64) sectionData {
-	return buildSectionMode(seed, id, StudyNone)
+	return buildSectionMode(seed, id, StudyNone, nil)
 }
 
-func buildSectionMode(seed, id int64, study Study) sectionData {
+func buildSectionMode(seed, id int64, study Study, loadGuides GuideLoader) sectionData {
 	top := sectionWindowTop(id)
 	backgroundNoise := NewPerlin(rand.New(rand.NewSource(seed ^ 0x62617365)))
 	backgroundNoise.OffsetY = top
 	noise := NewPerlin(rand.New(rand.NewSource(seed)))
 	noise.OffsetY = top
-	guides := worldGuides(seed, id)
-	if study != StudyNone {
+	var guides []Guide
+	if loadGuides != nil {
+		guides = loadedWorldGuides(seed, id, loadGuides)
+	} else if study != StudyNone {
 		guides = studyGuides(id, study)
+	} else {
+		guides = worldGuides(seed, id)
 	}
 	backgroundSeeds := worldSeeds(seed^0x62617365, top, backgroundNoise)
 	seeds := artisticRockSeeds(worldSeeds(seed, top, noise), guides, seed, top)
@@ -158,7 +162,7 @@ func buildSectionMode(seed, id int64, study Study) sectionData {
 	return sectionData{id: id, background: background, foreground: foreground, vines: vines, foregroundVines: foregroundVines, mushrooms: mushrooms, guides: guides}
 }
 
-func newWorld(seed int64, study Study, view View, tolerance float64) *world {
+func newWorld(seed int64, study Study, view View, tolerance float64, loadGuides GuideLoader) *world {
 	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1), results: make(chan sectionMesh, 1), done: make(chan struct{})}
 	go func() {
 		for {
@@ -166,7 +170,7 @@ func newWorld(seed int64, study Study, view View, tolerance float64) *world {
 			case <-w.done:
 				return
 			case id := <-w.jobs:
-				data := buildSectionMode(seed, id, study)
+				data := buildSectionMode(seed, id, study, loadGuides)
 				select {
 				case <-w.done:
 					return
