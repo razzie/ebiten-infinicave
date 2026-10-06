@@ -114,6 +114,69 @@ shared mutable state against concurrent calls, including during `Reset`.
 
 Foreground geometry is always prepared and retained, including in diagnostic
 views. Calling `DrawHover` is optional and has no effect on collision availability.
+
+World queries run independently of the camera and rendering. After `Update`,
+cast a finite ray in world coordinates and scene units:
+
+```go
+result, err := scene.Query(infinicave.Ray{
+    Origin:      infinicave.V{X: 0.1, Y: -0.4},
+    Direction:   infinicave.V{X: 1, Y: 0},
+    MaxDistance: 0.8,
+}, infinicave.QueryOptions{
+    Targets:     infinicave.TargetRock | infinicave.TargetGuide,
+    GuideRadius: 0.006,
+})
+if err != nil {
+    return err
+}
+if !result.Complete {
+    // Terrain before a possible hit is not loaded; retry after loading it.
+} else if result.Found {
+    hit := result.Hit // Point, Normal, Distance, StartedInside, and object ID
+    switch hit.Kind {
+    case infinicave.TargetRock:
+        formation, available := scene.Formation(hit.FormationID)
+        _ = formation // union boundary Polygons, Min/Max, SectionIDs, Complete
+        _ = available
+    case infinicave.TargetGuide:
+        guide, available := scene.Guide(hit.GuideID)
+        _ = guide // world-space Points, cumulative arc lengths S, Min/Max
+        _ = available
+    }
+}
+```
+
+A zero `Direction` or zero `MaxDistance` performs a point query. Directions are
+normalized internally, so their magnitude does not change the cast length.
+Zero `Targets` selects rocks and guides. A zero guide radius intersects the
+polyline itself; a positive radius includes round end caps. The nearest target
+wins, with guides winning equal-distance ties. Rock queries use exact union
+boundaries, accounting for holes and removing internal cell and section edges;
+`CollisionTolerance` does not change query geometry. Starting in rock or within
+a guide's radius returns distance zero, `StartedInside=true`, and a zero normal.
+Point queries also return zero normals.
+
+`Complete` distinguishes a confirmed miss from unavailable terrain. Queries
+never generate sections and cannot confirm a hit beyond an unloaded gap. A hit
+before a gap is complete even if the rest of the requested ray is not loaded.
+The world occupies X from 0 to 1 and Y at or above the floor (Y <= 0); portions
+of a ray outside that strip are known empty. Guide-radius queries conservatively
+require loaded neighboring bands within the radius in Y.
+
+Formation and guide IDs are opaque, comparable references scoped to one world.
+They survive partial cache eviction and neighboring-section reloads while the
+object remains cached. Newly discovered formation connections keep earlier IDs
+fetchable as aliases; `Formation.ID` gives the current canonical ID. Full object
+eviction, `Reset`, and `Close` invalidate references. IDs are runtime references,
+not persistent save-file keys. Fetches return independent copies. Formation
+geometry contains only its currently loaded owned section bands, without
+duplicated padding; `Formation.Complete` reports whether it continues into
+unloaded terrain. Incomplete outlines have closing edges at the cache limits.
+Fetched guide polylines are complete. No individual face or shading details are
+exposed by these APIs, and their coordinates and IDs do not depend on pixel
+resolution.
+
 `CollisionTolerance` must be finite and nonnegative. Zero preserves exact rock
 boundaries; larger values simplify collision polygons to reduce vertex counts
 and collision cost while the rendered terrain stays detailed. For example, 0.002

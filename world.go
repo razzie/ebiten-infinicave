@@ -46,6 +46,7 @@ type world struct {
 	upload   *sectionUpload
 	white    *ebiten.Image
 	revision uint64 // invalidates hover overlays when cached sections change
+	queries  *worldQueryIndex
 }
 
 // sectionUpload spreads one section's GPU work over several frames.
@@ -406,6 +407,7 @@ func (w *world) ensure(y float64, height float64, velocity float64) bool {
 }
 
 func (w *world) prune(y float64, height float64, velocity float64) {
+	revision := w.revision
 	low, high := visibleSections(y, height)
 	ids, _ := prefetch(y, height, velocity)
 	keep := make(map[int64]bool, len(ids))
@@ -422,6 +424,9 @@ func (w *world) prune(y float64, height float64, velocity float64) {
 			delete(w.sections, id)
 			w.revision++
 		}
+	}
+	if w.revision != revision && w.queries != nil {
+		w.queries.expire(w)
 	}
 }
 
