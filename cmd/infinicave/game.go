@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"image/png"
 	"os"
 
@@ -69,10 +70,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		g.scene.DrawHover(screen, g.viewport(), x, y)
 	}
 	if g.loading {
-		ebitenutil.DebugPrint(screen, "Growing upward...")
+		ebitenutil.DebugPrintAt(screen, "Growing upward...", 8, 24)
 	}
 	if g.output == "" {
 		g.drawCarving(screen)
+		ebitenutil.DebugPrintAt(screen, fmt.Sprintf("FPS: %.1f", ebiten.ActualFPS()), 8, 8)
 	}
 	if g.output != "" && !g.exported && !g.loading {
 		g.exported = true
