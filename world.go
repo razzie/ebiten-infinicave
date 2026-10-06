@@ -525,8 +525,7 @@ func (w *world) prune(y float64, height float64, velocity float64) {
 	}
 }
 
-func (w *world) draw(dst *ebiten.Image, y float64, height float64, fog *fogRenderer) {
-	y = renderAlignedY(y, w.renderWidth())
+func (w *world) drawBackground(dst *ebiten.Image, y, height float64) {
 	low, high := visibleSections(y, height)
 	for id := low; id <= high; id++ {
 		if section := w.sections[id]; section != nil {
@@ -544,6 +543,16 @@ func (w *world) draw(dst *ebiten.Image, y float64, height float64, fog *fogRende
 			drawVegetation(dst, section.vines, section.vinesBounds, sectionWindowTop(id), y, section.renderWidth())
 		}
 	}
+}
+
+func (w *world) draw(dst *ebiten.Image, y, height float64, fog *fogRenderer, background *backgroundRenderer) {
+	y = renderAlignedY(y, w.renderWidth())
+	if background != nil {
+		background.draw(dst, w, y, height)
+	} else {
+		w.drawBackground(dst, y, height)
+	}
+	low, high := visibleSections(y, height)
 	if fog != nil {
 		for id := low; id <= high; id++ {
 			if section := w.sections[id]; section != nil && section.terrain != nil {
@@ -556,20 +565,27 @@ func (w *world) draw(dst *ebiten.Image, y float64, height float64, fog *fogRende
 			drawVegetation(dst, section.mushrooms, section.mushroomsBounds, sectionWindowTop(id), y, section.renderWidth())
 		}
 	}
-	for id := low; id <= high; id++ {
-		if section := w.sections[id]; section != nil {
-			op := &ebiten.DrawImageOptions{}
-			pixels := section.renderWidth()
-			scale := float64(dst.Bounds().Dx()) / float64(pixels)
-			op.GeoM.Translate(0, (sectionTop(id)-y)*float64(pixels))
-			op.GeoM.Scale(scale, scale)
-			dst.DrawImage(section.foreground, op)
-		}
-	}
+	w.drawForegroundRocks(dst, y, height, 0)
 	// Keep complete foreground stems in their owner's padded window.
 	for id := max(0, low-1); id <= high+1; id++ {
 		if section := w.sections[id]; section != nil {
 			drawVegetation(dst, section.foregroundVines, section.foregroundVinesBounds, sectionWindowTop(id), y, section.renderWidth())
+		}
+	}
+}
+
+// The same current images supply both visible rock and the shadow silhouette.
+// Runtime cuts redraw these images immediately, so no shadow cache goes stale.
+func (w *world) drawForegroundRocks(dst *ebiten.Image, y, height, offsetX float64) {
+	low, high := visibleSections(y, height)
+	for id := low; id <= high; id++ {
+		if section := w.sections[id]; section != nil && section.foreground != nil {
+			op := &ebiten.DrawImageOptions{}
+			pixels := section.renderWidth()
+			scale := float64(dst.Bounds().Dx()) / float64(pixels)
+			op.GeoM.Translate(offsetX*float64(pixels), (sectionTop(id)-y)*float64(pixels))
+			op.GeoM.Scale(scale, scale)
+			dst.DrawImage(section.foreground, op)
 		}
 	}
 }

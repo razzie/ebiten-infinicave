@@ -64,19 +64,33 @@ Call every `Scene` method on the Ebitengine game goroutine. `Close` is idempoten
 and releases shaders and cached images; an in-progress CPU generation finishes
 before its worker exits.
 
-`DefaultConfig` uses texture strength 8, moving fog, animated bats, shaded rendering,
+`DefaultConfig` uses texture strength 8, background blur 0.002, dynamic shadow
+opacity 0.65, shadow softness 0.008, shadow offset (0.018, 0.025), moving fog, animated bats, shaded rendering,
 seed 0, and exact collision geometry. A zero `Config` is also valid and disables
-texture, fog, and bats. `View`
+texture, background effects, fog, and bats. `View`
 is a typed enum:
 
 ```go
 config.Fog = false // disable the moving mist
 config.Bats = false // disable the occasional flying bats
+config.BackgroundBlur = 0.002 // blur background rock and vines together
+config.ShadowOpacity = 0.65 // dynamic rock shadows; 0 disables them
+config.ShadowBlur = 0.008 // 0 gives a hard shadow
+config.ShadowOffset = infinicave.V{X: 0.018, Y: 0.025} // positive Y is down
 config.View = infinicave.ViewShaded // or ViewClay, ViewHeight, ViewNormals, ViewShadows
 config.CollisionTolerance = 0.002 // approximation tolerance in scene units
 ```
 
-`Texture` accepts 0–16. Diagnostic views disable texture, fog, and bats and hide vegetation.
+`Texture` accepts 0–16. Diagnostic views disable texture, background effects, fog, and bats and hide vegetation.
+Background and shadow blur accept 0–0.05 scene units; zero disables the respective
+blur. Shadow opacity accepts 0–1, and each offset component accepts −1–1 scene
+units. Effects scale with the destination width, so their apparent size stays
+consistent when resizing or exporting. The background pass combines rocks and
+background vines, then applies a soft shadow from the current foreground rock
+silhouette. Carving updates that silhouette immediately, including cuts across
+section seams. Fog, mushrooms, foreground rocks, and foreground vines stay sharp.
+The viewer exposes the same settings as `-background-blur`, `-shadow-opacity`,
+`-shadow-blur`, `-shadow-x`, and `-shadow-y`.
 Fog drifts over the background rock and vines, behind mushrooms and foreground
 rock and vines. It follows world coordinates across section seams, scrolling,
 and resizing, and advances once per `Scene.Update` so repeated draws share the
@@ -357,7 +371,7 @@ By default, each section grows new random guide curves with varying lengths, dir
 
 Guides form slightly jagged rock borders by cutting the foreground Voronoi cells along broad, uneven facets. Tiny clipping fragments and long, thin foreground cells merge into neighbors on the same side of the guide, favoring compact combined faces. Site spacing compresses across exposed lips and expands into the flanks without adding aligned rows. Flanks use fewer, larger facets; the outer footprint is cut through the cells along a relief contour, rather than ending in a row of whole tiles.
 
-Guides define solid raised formations: a narrow bevel rises to a crest, then a broad flank descends toward the recessed background. The flank steepens toward its foot so the surface turns gradually into shadow. Control-point heights follow this shared relief with small mineral irregularities. Neighboring heights determine one normal per face, and guide-adjacent faces turn toward the guide. A single light from above and left illuminates the rock; a world-aligned depth buffer supplies cast shadows and contact darkening. Existing rock faces stay opaque even in shadow. Exposed boundaries receive shallow side walls and narrow bevels, while internal triangulation remains invisible. A restrained warm-gray palette reserves the lightest tones for crests, with coherent patina on the lower spurs and faint mineral strokes aligned with each facet. Side walls and bevels remain shallow. Background rock retains a darker charcoal material.
+Guides define solid raised formations: a narrow bevel rises to a crest, then a broad flank descends toward the recessed background. The flank steepens toward its foot so the surface turns gradually into shadow. Control-point heights follow this shared relief with small mineral irregularities. Neighboring heights determine one normal per face, and guide-adjacent faces turn toward the guide. A single light from above and left illuminates the rock; a world-aligned depth buffer supplies foreground self-shadowing and contact darkening. A separate draw-time pass casts soft silhouette shadows onto the blurred background rock and vines, following runtime cuts immediately. Existing rock faces stay opaque even in shadow. Exposed boundaries receive shallow side walls and narrow bevels, while internal triangulation remains invisible. A restrained warm-gray palette reserves the lightest tones for crests, with coherent patina on the lower spurs and faint mineral strokes aligned with each facet. Side walls and bevels remain shallow. Background rock retains a darker charcoal material.
 
 Run with `go run ./cmd/infinicave` (Go 1.27 and a graphical desktop). Use `-seed 42` for a reproducible world.
 
@@ -383,7 +397,7 @@ Hover over a foreground rock for a soft warm highlight and glow over its entire 
 
 `go run ./cmd/infinicave -seed 42 -output scene.png` exports the bottom 1000 × 2400 pixels and exits. `-texture 0` disables the surface texture. `-fog=false` disables the moving fog. `-collision-tolerance 0.002` simplifies collision polygons with a 0.002-unit tolerance.
 
-The `-view` options are `shaded` (default), `clay`, `height`, `normals`, and `shadows`. Diagnostic views disable texture, fog, and vegetation; clay uses neutral gray material with the same lighting and exposed edges.
+The `-view` options are `shaded` (default), `clay`, `height`, `normals`, and `shadows`. Diagnostic views disable texture, background effects, fog, and vegetation; clay uses neutral gray material with the same lighting and exposed edges.
 
 ```sh
 go run ./cmd/infinicave -seed 42 -view clay -output clay.png
@@ -392,6 +406,6 @@ go run ./cmd/infinicave -seed 42 -view normals -output normals.png
 go run ./cmd/infinicave -seed 42 -view shadows -output shadows.png
 ```
 
-Relief, shadows, rock triangulation, outlines, and vine and mushroom meshes are prepared in the background once per cached section. Background rock, foreground rock, both vine layers, and mushrooms are polygonized concurrently, using up to `GOMAXPROCS - 1` workers (at least one) to leave CPU capacity for rendering. The game loop uploads meshes with limits on submission time, triangle indices, and draw calls per tick. Collision polygons are published before vegetation generation and mesh preparation; complete terrain uploads first, and vegetation appears when all its layers finish. Vegetation meshes are batched in draw order, and their textures are cropped to occupied bounds while retaining world-aligned grain. Vine steering uses reusable fields and linear distance sweeps; guide proposals are cached in a bounded window and rock adjacency uses spatial buckets. These caches do not affect geometry: the same seed, section, and guide inputs reproduce the same result regardless of load order or eviction. The renderer uses a shallow 2.5D surface: illumination is constant within each polygon, with depth shadows averaged over the face to preserve the faceted appearance.
+Relief, foreground self-shadowing, rock triangulation, outlines, and vine and mushroom meshes are prepared in the background once per cached section. Background rock, foreground rock, both vine layers, and mushrooms are polygonized concurrently, using up to `GOMAXPROCS - 1` workers (at least one) to leave CPU capacity for rendering. The game loop uploads meshes with limits on submission time, triangle indices, and draw calls per tick. Collision polygons are published before vegetation generation and mesh preparation; complete terrain uploads first, and vegetation appears when all its layers finish. Vegetation meshes are batched in draw order, and their textures are cropped to occupied bounds while retaining world-aligned grain. Vine steering uses reusable fields and linear distance sweeps; guide proposals are cached in a bounded window and rock adjacency uses spatial buckets. These caches do not affect geometry: the same seed, section, and guide inputs reproduce the same result regardless of load order or eviction. The renderer uses a shallow 2.5D surface: illumination is constant within each polygon, with foreground depth shadows averaged over the face to preserve the faceted appearance. Background blur and cast shadows use reusable GPU buffers each draw; separable Gaussian passes run at reduced resolution for large softness values.
 
 Run checks with `go test ./...` and `go vet ./...`. Ebitengine initializes the display for tests, so these also need a graphical session.

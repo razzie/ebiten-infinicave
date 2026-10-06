@@ -98,8 +98,8 @@ func shadeRockGrids(background, foreground RockGrid, noise *Perlin) {
 	for layer, grid := range []RockGrid{background, foreground} {
 		parallelFor(len(grid), func(i int) {
 			c := &grid[i]
-			c.Shadow, c.Ambient = depth.illumination(*c)
 			if layer == 1 {
+				c.Shadow, c.Ambient = depth.illumination(*c)
 				c.Color = rockSurfaceColor(c.Normal, c.Shadow, c.Ambient)
 				// Weathering is coherent across a formation. Lower spurs and
 				// recessed feet stay subdued; only the raised crests catch ivory.
@@ -110,11 +110,10 @@ func shadeRockGrids(background, foreground RockGrid, noise *Perlin) {
 				c.Color.G = uint8(math.Round(float64(c.Color.G) * patina * .985))
 				c.Color.B = uint8(math.Round(float64(c.Color.B) * patina * .955))
 			} else {
+				// Background cast shadows are composited from the current rock
+				// silhouette at draw time, including carved openings and vines.
+				c.Shadow, c.Ambient = 1, 1
 				c.Color = backgroundSurfaceColor(c.Center, noise, c.Normal)
-				factor := (.3 + .7*c.Shadow) * (.6 + .4*c.Ambient)
-				c.Color.R = uint8(math.Round(float64(c.Color.R) * factor))
-				c.Color.G = uint8(math.Round(float64(c.Color.G) * factor))
-				c.Color.B = uint8(math.Round(float64(c.Color.B) * factor))
 			}
 		})
 	}

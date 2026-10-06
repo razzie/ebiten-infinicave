@@ -14,18 +14,31 @@ const Width = 1
 const SectionHeight = 1
 
 // Config controls generation and rendering. Start with DefaultConfig to use
-// the viewer's appearance. A zero Config is valid and disables texture, fog, and bats.
+// the viewer's appearance. A zero Config disables texture, background effects,
+// fog, and bats.
 type Config struct {
 	Seed int64
 	// Texture is surface grain strength, from 0 (disabled) to 16.
 	Texture float64
+	// BackgroundBlur is Gaussian blur softness in scene units (0 disables it,
+	// maximum 0.05). Background rocks and vines are blurred together.
+	BackgroundBlur float64
+	// ShadowOpacity controls foreground rock shadows on the background, from
+	// 0 (disabled) to 1. Shadows follow the current silhouette, including cuts.
+	ShadowOpacity float64
+	// ShadowBlur is shadow softness in scene units, from 0 (hard) to 0.05.
+	ShadowBlur float64
+	// ShadowOffset projects rock shadows in scene units; positive Y is down.
+	// Each component must be between -1 and 1.
+	ShadowOffset V
 	// Fog enables moving mist between the background and foreground layers.
 	// Diagnostic views disable fog regardless of this setting.
 	Fog bool
 	// Bats enables occasional animated bats flying across the viewport.
 	// Bats use world coordinates and are hidden outside ViewShaded.
 	Bats bool
-	// View selects the material. Diagnostic views disable texture, fog, and vegetation.
+	// View selects the material. Diagnostic views disable texture, background
+	// effects, fog, and vegetation.
 	View View
 	// CollisionTolerance is the polygon simplification tolerance in scene units.
 	// Zero preserves exact collision geometry. Larger values reduce vertices and
@@ -47,7 +60,8 @@ type Config struct {
 
 // DefaultConfig returns the viewer's appearance with a deterministic seed of 0.
 func DefaultConfig() Config {
-	return Config{Texture: 8, Fog: true, Bats: true, View: ViewShaded}
+	return Config{Texture: 8, BackgroundBlur: .002, ShadowOpacity: .65,
+		ShadowBlur: .008, ShadowOffset: V{.018, .025}, Fog: true, Bats: true, View: ViewShaded}
 }
 
 func (c Config) validate() error {
@@ -56,6 +70,19 @@ func (c Config) validate() error {
 	}
 	if c.View < ViewShaded || c.View > ViewShadows {
 		return fmt.Errorf("infinicave: invalid terrain view %v", c.View)
+	}
+	for _, setting := range []struct {
+		name         string
+		value, limit float64
+	}{{"background blur", c.BackgroundBlur, .05}, {"shadow blur", c.ShadowBlur, .05}, {"shadow opacity", c.ShadowOpacity, 1}} {
+		if math.IsNaN(setting.value) || math.IsInf(setting.value, 0) || setting.value < 0 || setting.value > setting.limit {
+			return fmt.Errorf("infinicave: %s must be between 0 and %g", setting.name, setting.limit)
+		}
+	}
+	for _, offset := range []float64{c.ShadowOffset.X, c.ShadowOffset.Y} {
+		if math.IsNaN(offset) || math.IsInf(offset, 0) || math.Abs(offset) > 1 {
+			return fmt.Errorf("infinicave: shadow offset components must be between -1 and 1")
+		}
 	}
 	if math.IsNaN(c.CollisionTolerance) || math.IsInf(c.CollisionTolerance, 0) || c.CollisionTolerance < 0 {
 		return fmt.Errorf("infinicave: collision tolerance must be finite and nonnegative")
@@ -88,6 +115,7 @@ type Scene struct {
 	material             *ebiten.Shader
 	vineMaterial         *ebiten.Shader
 	fog                  *fogRenderer
+	background           *backgroundRenderer
 	bats                 *batFlock
 	geometryRevisionBase uint64 // revisions accumulated across world resets
 	texture              float64
@@ -123,6 +151,13 @@ func NewScene(config Config) (*Scene, error) {
 		if err != nil {
 			g.Close()
 			return nil, fmt.Errorf("infinicave: compile fog shader: %w", err)
+		}
+	}
+	if g.view == ViewShaded && (config.BackgroundBlur > 0 || config.ShadowOpacity > 0) {
+		g.background, err = newBackgroundRenderer(config)
+		if err != nil {
+			g.Close()
+			return nil, fmt.Errorf("infinicave: compile background shaders: %w", err)
 		}
 	}
 	g.world = newWorld(config.Seed, g.view, g.collisionTolerance, g.loadSection)
@@ -203,7 +238,7 @@ func (g *Scene) SetRenderWidth(pixels int) {
 // or a closed Scene.
 func (g *Scene) Draw(dst *ebiten.Image, viewport Viewport) {
 	if !g.closed && viewport.valid() {
-		g.world.draw(dst, viewport.Y, viewport.Height, g.fog)
+		g.world.draw(dst, viewport.Y, viewport.Height, g.fog, g.background)
 		if g.bats != nil {
 			g.bats.draw(dst, viewport)
 		}
@@ -243,6 +278,9 @@ func (g *Scene) Close() {
 	}
 	if g.fog != nil {
 		g.fog.shader.Deallocate()
+	}
+	if g.background != nil {
+		g.background.close()
 	}
 	if g.vineMaterial != nil {
 		g.vineMaterial.Deallocate()

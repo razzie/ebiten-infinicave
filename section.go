@@ -35,9 +35,10 @@ func GenerateSection(seed, id int64) (Section, error) {
 }
 
 // GenerateSectionWithConfig generates a section using the same seed,
-// collision tolerance, and section content loader as a Scene. Texture and View
-// only affect rendering. A custom loader must return the same content for
-// repeated IDs to preserve geometry across neighboring sections and cache eviction.
+// collision tolerance, and section content loader as a Scene. Texture,
+// background effects, and View only affect rendering. A custom loader must return
+// the same content for repeated IDs to preserve geometry across neighboring
+// sections and cache eviction.
 // OnCollisionReady, when set, runs on the caller's goroutine before vegetation
 // generation and receives an independent copy of the section's collision.
 func GenerateSectionWithConfig(config Config, id int64) (Section, error) {
