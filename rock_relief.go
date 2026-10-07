@@ -86,21 +86,27 @@ func shapeReliefGrid(grid RockGrid, guides []Guide, noise *Perlin, branches *Bra
 	})
 }
 
-func rockSurfaceColor(normal V3, shadow, ambient float64) color.NRGBA {
+func rockSurfaceColor(normal V3, shadow, ambient float64, orientation ...Orientation) color.NRGBA {
 	// Material reflectance is separate from visibility and distance to a guide.
 	// A low ambient floor keeps flanks charcoal; only lit faces reach warm tan.
-	diffuse := math.Pow(surfaceLight(normal), 1.25)
+	diffuse := math.Pow(surfaceLight(normal, orientation...), 1.25)
 	return cellColor(.16 + .05*ambient + .66*diffuse*shadow)
 }
 
-func shadeRockGrids(background, foreground RockGrid, noise *Perlin) {
+func shadeRockGrids(background, foreground RockGrid, noise *Perlin, orientation ...Orientation) {
+	mode := optionalOrientation(orientation)
+	for _, grid := range []RockGrid{background, foreground} {
+		for i := range grid {
+			grid[i].orientation = mode
+		}
+	}
 	depth := newRockDepth(background, foreground)
 	for layer, grid := range []RockGrid{background, foreground} {
 		parallelFor(len(grid), func(i int) {
 			c := &grid[i]
 			if layer == 1 {
 				c.Shadow, c.Ambient = depth.illumination(*c)
-				c.Color = rockSurfaceColor(c.Normal, c.Shadow, c.Ambient)
+				c.Color = rockSurfaceColor(c.Normal, c.Shadow, c.Ambient, mode)
 				// Weathering is coherent across a formation. Lower spurs and
 				// recessed feet stay subdued; only the raised crests catch ivory.
 				patina := .72 + .28*smoothstep(0.005, 0.065, c.Z)
@@ -113,7 +119,7 @@ func shadeRockGrids(background, foreground RockGrid, noise *Perlin) {
 				// Background cast shadows are composited from the current rock
 				// silhouette at draw time, including carved openings and vines.
 				c.Shadow, c.Ambient = 1, 1
-				c.Color = backgroundSurfaceColor(c.Center, noise, c.Normal)
+				c.Color = backgroundSurfaceColor(c.Center, noise, c.Normal, mode)
 			}
 		})
 	}

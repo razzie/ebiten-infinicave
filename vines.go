@@ -10,6 +10,7 @@ import (
 // RockCell is shared by rendering and vine growth; colors belong to entire
 // Voronoi faces, not a second approximation of the original noise field.
 type RockCell struct {
+	orientation     Orientation // Lighting basis for the internal section frame.
 	Center          V
 	Polygon         []V
 	Color           color.NRGBA
@@ -61,7 +62,8 @@ const (
 // A small CPU field composites both grids in drawing order. Its clearance
 // measures distance from light faces and black voids, including vine width.
 type VineTerrain struct {
-	workspace *vineWorkspace
+	orientation Orientation
+	workspace   *vineWorkspace
 	// Surface growth stays entirely on the raised rock instead of tucking
 	// beneath it or making shallow excursions across the background.
 	onForeground bool
@@ -323,6 +325,9 @@ func generateVinesInBand(field *VineTerrain, rng *rand.Rand, bottom, top float64
 		}
 		sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].score > candidates[j].score })
 		angle := -math.Pi/2 + lerp(-.9, .9, rng.Float64())
+		if field.orientation == Horizontal {
+			angle -= math.Pi / 2 // Prefer world-up growth in either mode.
+		}
 		heading := V{math.Cos(angle), math.Sin(angle)}
 		radius := lerp(radiusLow, radiusHigh, rng.Float64())
 		phase := rng.Float64() * 2 * math.Pi

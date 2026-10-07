@@ -16,7 +16,8 @@ func (v V3) Norm() V3 {
 	return V3{v.X / length, v.Y / length, v.Z / length}
 }
 
-func surfaceLight(normal V3) float64 {
+func surfaceLight(normal V3, orientation ...Orientation) float64 {
+	normal = optionalOrientation(orientation).normal(normal)
 	return math.Max(0, rockLight.X*normal.X+rockLight.Y*normal.Y+rockLight.Z*normal.Z)
 }
 

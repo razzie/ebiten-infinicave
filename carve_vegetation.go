@@ -92,7 +92,7 @@ func (g *Scene) prepareCarvedVegetation(mesh *sectionMesh) {
 	if g.view == ViewShaded {
 		plants := mesh.geometry.vegetation
 		mesh.vines = prepareVines(plants.vines)
-		mesh.foregroundVines = prepareForegroundVines(plants.foregroundVines)
+		mesh.foregroundVines = prepareForegroundVines(plants.foregroundVines, g.orientation)
 		mesh.mushrooms = prepareMushrooms(plants.mushrooms)
 	}
 	finishSectionMesh(mesh)

@@ -26,13 +26,14 @@ type hoverTarget struct {
 }
 
 type hoverRenderer struct {
-	shader    *ebiten.Shader
-	target    hoverTarget
-	image     *ebiten.Image
-	origin    infinicave.V // world coordinates
-	revision  uint64
-	pixels    int
-	low, high int64
+	orientation infinicave.Orientation
+	shader      *ebiten.Shader
+	target      hoverTarget
+	image       *ebiten.Image
+	origin      infinicave.V // world coordinates
+	revision    uint64
+	pixels      int
+	low, high   int64
 }
 
 func newHoverRenderer() (*hoverRenderer, error) {
@@ -57,12 +58,24 @@ func (r *hoverRenderer) close() {
 }
 
 func hoverAt(scene *infinicave.Scene, cursor infinicave.V, viewport infinicave.Viewport, pixels int) hoverTarget {
-	if cursor.X < 0 || cursor.X >= infinicave.Width || cursor.Y < 0 || cursor.Y >= viewport.Height {
-		return hoverTarget{}
-	}
-	point := cursor.Add(infinicave.V{Y: viewerCameraY(viewport.Y, pixels)})
-	if point.Y >= 0 {
-		return hoverTarget{}
+	var point infinicave.V
+	if scene.Orientation() == infinicave.Horizontal {
+		if cursor.X < 0 || cursor.X >= viewport.Width || cursor.Y < 0 || cursor.Y >= infinicave.Width {
+			return hoverTarget{}
+		}
+		cameraX := -(viewerCameraY(-(viewport.X+viewport.Width), pixels) + viewport.Width)
+		point = cursor.Add(infinicave.V{X: cameraX})
+		if point.X < 0 {
+			return hoverTarget{}
+		}
+	} else {
+		if cursor.X < 0 || cursor.X >= infinicave.Width || cursor.Y < 0 || cursor.Y >= viewport.Height {
+			return hoverTarget{}
+		}
+		point = cursor.Add(infinicave.V{Y: viewerCameraY(viewport.Y, pixels)})
+		if point.Y >= 0 {
+			return hoverTarget{}
+		}
 	}
 	result, err := scene.Query(infinicave.Ray{Origin: point}, infinicave.QueryOptions{GuideRadius: guideHoverRadius})
 	if err != nil || !result.Found || !result.Complete {
@@ -95,6 +108,7 @@ func (r *hoverRenderer) selectTarget(target hoverTarget, scene *infinicave.Scene
 		return
 	}
 	r.target = target
+	r.orientation = scene.Orientation()
 	r.revision, r.pixels, r.low, r.high = revision, pixels, low, high
 	r.render(polygons)
 }
@@ -112,9 +126,14 @@ func (r *hoverRenderer) render(polygons [][]infinicave.V) {
 	}
 	// Raster cropping preserves concave boundaries and hole winding, while
 	// bounding GPU memory to the visible section bands and their glow margin.
-	lo.Y = math.Max(lo.Y, -float64(r.high+1)*infinicave.SectionHeight)
-	hi.Y = math.Min(hi.Y, math.Min(0, -float64(r.low)*infinicave.SectionHeight))
-	if hi.Y < lo.Y {
+	if r.orientation == infinicave.Horizontal {
+		lo.X = math.Max(lo.X, float64(r.low)*infinicave.SectionHeight)
+		hi.X = math.Min(hi.X, float64(r.high+1)*infinicave.SectionHeight)
+	} else {
+		lo.Y = math.Max(lo.Y, -float64(r.high+1)*infinicave.SectionHeight)
+		hi.Y = math.Min(hi.Y, math.Min(0, -float64(r.low)*infinicave.SectionHeight))
+	}
+	if hi.Y < lo.Y || hi.X < lo.X {
 		return
 	}
 	pixels := float64(r.pixels)
@@ -174,14 +193,15 @@ func (g *Game) drawHover(screen *ebiten.Image) {
 	pixels := g.renderPixels()
 	scale := float64(infinicave.Width) / float64(pixels)
 	viewport := g.viewport()
-	cameraY := viewerCameraY(viewport.Y, pixels)
-	low := max(0, int64(math.Floor(-(cameraY+viewport.Height)/infinicave.SectionHeight)))
+	cameraY := viewerCameraY(g.camera.Y, pixels)
+	low := max(0, int64(math.Floor(-(cameraY+g.camera.Height)/infinicave.SectionHeight)))
 	high := max(low, int64(math.Ceil(-cameraY/infinicave.SectionHeight))-1)
-	target := hoverAt(g.scene, infinicave.V{X: (x - g.renderOffsetX()) * scale, Y: y * scale}, viewport, pixels)
+	target := hoverAt(g.scene, infinicave.V{X: (x - g.renderOffsetX()) * scale, Y: (y - g.renderOffsetY()) * scale}, viewport, pixels)
 	r.selectTarget(target, g.scene, pixels, low, high)
 	if r.image != nil {
 		op := &ebiten.DrawImageOptions{}
-		op.GeoM.Translate(g.renderOffsetX()+r.origin.X*float64(pixels), (r.origin.Y-cameraY)*float64(pixels))
+		px, py := g.screenPoint(r.origin)
+		op.GeoM.Translate(float64(px), float64(py))
 		screen.DrawImage(r.image, op)
 	}
 }

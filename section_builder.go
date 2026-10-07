@@ -5,26 +5,27 @@ import "math/rand"
 // A worker owns its cache. Canonical proposals and resolved guides are never
 // translated or handed to callers, so revisits and load order cannot mutate them.
 type guideCache struct {
-	seed      int64
-	proposals map[int64][]Guide
-	resolved  map[int64][]Guide
+	orientation Orientation
+	seed        int64
+	proposals   map[int64][]Guide
+	resolved    map[int64][]Guide
 }
 
-func newGuideCache(seed int64) *guideCache {
-	return &guideCache{seed: seed, proposals: make(map[int64][]Guide), resolved: make(map[int64][]Guide)}
+func newGuideCache(seed int64, orientation ...Orientation) *guideCache {
+	return &guideCache{orientation: optionalOrientation(orientation), seed: seed, proposals: make(map[int64][]Guide), resolved: make(map[int64][]Guide)}
 }
 
 func (c *guideCache) window(id int64) []Guide {
 	for owner := id - 3; owner <= id+3; owner++ {
 		if _, ok := c.proposals[owner]; !ok {
-			c.proposals[owner] = generateGuideSection(rand.New(rand.NewSource(sectionSeed(c.seed, owner))))
+			c.proposals[owner] = generateGuideSection(rand.New(rand.NewSource(sectionSeed(c.seed, owner))), c.orientation)
 		}
 	}
 	var guides []Guide
 	for owner := id + 2; owner >= id-2; owner-- {
 		section, ok := c.resolved[owner]
 		if !ok {
-			section = spacedWorldGuideSection(c.seed, owner, c.proposals)
+			section = spacedWorldGuideSection(c.seed, owner, c.proposals, c.orientation)
 			for i := range section {
 				section[i].Seed = sectionSeed(sectionSeed(c.seed, owner), int64(i+1)) | 1
 			}
@@ -57,8 +58,8 @@ type sectionBuilder struct {
 	fields      vineWorkspace
 }
 
-func newSectionBuilder(seed int64, loadSection SectionLoader) *sectionBuilder {
-	return &sectionBuilder{seed: seed, loadSection: loadSection, guides: newGuideCache(seed)}
+func newSectionBuilder(seed int64, loadSection SectionLoader, orientation ...Orientation) *sectionBuilder {
+	return &sectionBuilder{seed: seed, loadSection: loadSection, guides: newGuideCache(seed, orientation...)}
 }
 
 func (b *sectionBuilder) build(id int64) sectionData {

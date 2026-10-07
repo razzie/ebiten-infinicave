@@ -9,6 +9,7 @@ import (
 )
 
 type Mushroom struct {
+	orientation   Orientation // Cap and growth directions in the section frame.
 	Stem          []V
 	Anchor        V
 	RootDirection V
@@ -36,7 +37,9 @@ var mushroomColors = [...]color.NRGBA{
 	{160, 139, 91, 255},
 }
 
-func mushroomsForGuides(guides []Guide, foreground RockGrid) []MushroomGroup {
+func mushroomsForGuides(guides []Guide, foreground RockGrid, orientation ...Orientation) []MushroomGroup {
+	mode := optionalOrientation(orientation)
+	up := mode.internal(V{0, -1})
 	ground := mushroomGroundFromCells(foreground)
 	var groups []MushroomGroup
 	for i := range guides {
@@ -63,7 +66,8 @@ func mushroomsForGuides(guides []Guide, foreground RockGrid) []MushroomGroup {
 					continue
 				}
 				air := rockNormal.Mul(-1)
-				if air.Y > 0 {
+				worldAir := mode.world(air)
+				if worldAir.Y > 0 {
 					continue
 				}
 				size := lerp(.65, 1.2, rng.Float64())
@@ -72,22 +76,23 @@ func mushroomsForGuides(guides []Guide, foreground RockGrid) []MushroomGroup {
 				capHeight := capWidth * lerp(.38, .53, rng.Float64())
 				// The root is buried in the rock; the foreground is drawn over it.
 				root := anchor.Sub(air.Mul(mushroomSink))
-				stemEnd := anchor.Add(air.Mul(stemLength * .38)).Add(V{0, -stemLength * .72})
-				capBack := capWidth*.5*math.Abs(air.X) + capHeight*(1.18*math.Max(air.Y, 0)+.02*math.Max(-air.Y, 0))
+				stemEnd := anchor.Add(air.Mul(stemLength * .38)).Add(up.Mul(stemLength * .72))
+				capBack := capWidth*.5*math.Abs(worldAir.X) + capHeight*(1.18*math.Max(worldAir.Y, 0)+.02*math.Max(-worldAir.Y, 0))
 				requiredAir := capBack + .0005
-				requiredAir = math.Max(requiredAir, stemLength*.24*math.Max(-air.Y, 0)+.0005)
+				requiredAir = math.Max(requiredAir, stemLength*.24*math.Max(-worldAir.Y, 0)+.0005)
 				if distance := stemEnd.Sub(anchor).Dot(air); distance < requiredAir {
 					stemEnd = stemEnd.Add(air.Mul(requiredAir - distance))
 				}
 				control1 := root.Add(air.Mul(stemLength*.46 + mushroomSink))
-				control2 := stemEnd.Add(V{0, stemLength * .24})
+				control2 := stemEnd.Sub(up.Mul(stemLength * .24))
 				stem := make([]V, 9)
 				for k := range stem {
 					stem[k] = cubicBezier(root, control1, control2, stemEnd, float64(k)/float64(len(stem)-1))
 				}
 				mushroom := Mushroom{
-					Stem: stem, Anchor: anchor, RootDirection: air,
-					CapCenter: V{stemEnd.X, stemEnd.Y - capHeight*.18},
+					orientation: mode,
+					Stem:        stem, Anchor: anchor, RootDirection: air,
+					CapCenter: stemEnd.Add(up.Mul(capHeight * .18)),
 					CapWidth:  capWidth, CapHeight: capHeight,
 					Color: mushroomColors[rng.Intn(len(mushroomColors))],
 				}
@@ -136,9 +141,10 @@ func mushroomOnGround(p V, ground []mushroomGround) bool {
 
 func mushroomWithinForegroundInset(m Mushroom) bool {
 	left, right := foregroundScreenInset, generationWidth-foregroundScreenInset
-	half := m.CapWidth / 2
-	if m.CapCenter.X-half < left || m.CapCenter.X+half > right {
-		return false
+	for _, p := range m.capOutline() {
+		if p.X < left || p.X > right {
+			return false
+		}
 	}
 	for _, p := range m.Stem {
 		if p.X < left || p.X > right {
@@ -184,7 +190,7 @@ func prepareMushrooms(groups []MushroomGroup) triangleMesh {
 			ribbon(m.Stem, m.CapWidth*.19, color.NRGBA{R: 46, G: 37, B: 28, A: 255})
 			ribbon(m.Stem, m.CapWidth*.11, color.NRGBA{R: 216, G: 190, B: 143, A: 255})
 			outline := m.capOutline()
-			center := V{m.CapCenter.X, m.CapCenter.Y - m.CapHeight*.4}
+			center := m.CapCenter.Add(m.orientation.internal(V{0, -m.CapHeight * .4}))
 			fan(center, outline, .001, color.NRGBA{R: 48, G: 36, B: 27, A: 255})
 			fan(center, outline, 0, m.Color)
 		}
@@ -194,8 +200,8 @@ func prepareMushrooms(groups []MushroomGroup) triangleMesh {
 
 func (m Mushroom) capOutline() []V {
 	const samples = 8
-	x, y, half, h := m.CapCenter.X, m.CapCenter.Y, m.CapWidth/2, m.CapHeight
-	top := y - h
+	x, y, half, h := 0.0, 0.0, m.CapWidth/2, m.CapHeight
+	top := -h
 	curves := [3][4]V{
 		{{x - half, y}, {x - half*.92, top + h*.12}, {x - half*.4, top}, {x, top}},
 		{{x, top}, {x + half*.4, top}, {x + half*.92, top + h*.12}, {x + half, y}},
@@ -204,7 +210,8 @@ func (m Mushroom) capOutline() []V {
 	var outline []V
 	for _, c := range curves {
 		for k := 0; k < samples; k++ {
-			outline = append(outline, cubicBezier(c[0], c[1], c[2], c[3], float64(k)/samples))
+			p := cubicBezier(c[0], c[1], c[2], c[3], float64(k)/samples)
+			outline = append(outline, m.CapCenter.Add(m.orientation.internal(p)))
 		}
 	}
 	return outline

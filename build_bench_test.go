@@ -24,10 +24,11 @@ func statsOf(s sectionData) sectionStats {
 // polished contours slightly. Vine counts reflect generation in scene units;
 // rescaling floats can change steering ties and the resulting offshoots.
 // Counts use background material without baked foreground shadow darkening.
+// Foreground snapshots include the completed-curve horizontal guide bias.
 func TestSectionStatsStable(t *testing.T) {
 	want := map[int64]sectionStats{
-		1:  {9710, 2002, 121, 1.0971447622},
-		42: {9651, 1970, 108, .9921188598},
+		1:  {9710, 1860, 107, .9871250503},
+		42: {9651, 2049, 118, 1.0537253627},
 	}
 	for seed, w := range want {
 		got := statsOf(buildSection(seed, 0))

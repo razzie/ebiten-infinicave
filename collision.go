@@ -7,14 +7,17 @@ import "math"
 // Outer loops have positive signed area; holes have negative signed area. Physics engines
 // requiring convex fixtures must decompose these loops and account for holes.
 //
-// Geometry includes a section of padding on either side of the owned band,
-// [Top, Top+SectionHeight). Use only that band when combining adjacent sections.
+// Geometry includes a section of padding on either side along the scrolling
+// axis. Use only the owned square Min/Max when combining adjacent sections.
 // Background rock, vines, mushrooms, and decorative bevels are not solid.
 type CollisionGeometry struct {
-	// ID is 0 at the floor, then -1, -2, ... upward.
-	ID       int64
-	Top      float64
-	Polygons [][]V
+	// ID is 0 at the starting edge, then -1, -2, ... upward or rightward.
+	ID  int64
+	Top float64
+	// Origin and Min/Max describe the owned square in either orientation.
+	// Top is legacy vertical metadata and is zero in horizontal scenes.
+	Origin, Min, Max V
+	Polygons         [][]V
 }
 
 // Contains reports whether a world point lies in solid rock, including its
@@ -40,7 +43,8 @@ func (g CollisionGeometry) Contains(p V) bool {
 // CollisionGeometry returns a copy of a cached section's collision boundaries.
 // Geometry becomes available before vegetation generation and render uploads.
 // Missing, evicted, and closed sections return false.
-// IDs are 0 at the floor, then -1, -2, ... upward; positive IDs return false.
+// IDs are 0 at the starting edge, then -1, -2, ... in the direction of growth;
+// positive IDs return false.
 // Call after Update; retain the returned copy as long as your game needs it.
 func (g *Scene) CollisionGeometry(id int64) (CollisionGeometry, bool) {
 	if g.closed || id > 0 || id == -1<<63 {
@@ -48,10 +52,10 @@ func (g *Scene) CollisionGeometry(id int64) (CollisionGeometry, bool) {
 	}
 	section := g.world.sections[-id]
 	if section != nil && section.geometry != nil {
-		return copyCollisionGeometry(section.geometry.collision), true
+		return g.orientation.collision(section.geometry.collision), true
 	}
 	if geometry := g.world.collision[-id]; geometry != nil {
-		return copyCollisionGeometry(geometry.collision), true
+		return g.orientation.collision(geometry.collision), true
 	}
 	return CollisionGeometry{}, false
 }
@@ -78,7 +82,7 @@ func (w *world) receiveCollision(g *Scene) {
 		w.collision[terrain.id] = geometry
 		w.collisionRevision++
 		if g.onCollisionReady != nil {
-			g.onCollisionReady(copyCollisionGeometry(geometry.collision))
+			g.onCollisionReady(g.orientation.collision(geometry.collision))
 		}
 	default:
 	}
@@ -92,6 +96,8 @@ func collisionVertexKey(p V) [2]int64 {
 // connected block keeps corner contacts from joining unrelated formations.
 func prepareCollisionGeometry(id int64, grid RockGrid, boundary []rockEdge, h *terrainGeometry, tolerance float64) CollisionGeometry {
 	geometry := CollisionGeometry{ID: -id, Top: sectionTop(id)}
+	geometry.Origin = V{Y: geometry.Top}
+	geometry.Min, geometry.Max = geometry.Origin, geometry.Origin.Add(V{1, 1})
 	byBlock := make([][]rockEdge, len(h.blocks))
 	for _, edge := range boundary {
 		block := h.faces[edge.Cell].block

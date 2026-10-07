@@ -39,15 +39,16 @@ func (b bat) bank(t float64) float64 {
 }
 
 type batFlock struct {
-	rng       *rand.Rand
-	perMinute float64
-	next      float64 // seconds until the next arrival
-	bats      []bat
+	orientation Orientation
+	rng         *rand.Rand
+	perMinute   float64
+	next        float64 // seconds until the next arrival
+	bats        []bat
 }
 
-func newBatFlock(seed int64, perMinute float64) *batFlock {
+func newBatFlock(seed int64, perMinute float64, orientation ...Orientation) *batFlock {
 	// Keep ambient animation independent of terrain generation and its RNG.
-	f := &batFlock{rng: rand.New(rand.NewSource(seed)), perMinute: perMinute}
+	f := &batFlock{orientation: optionalOrientation(orientation), rng: rand.New(rand.NewSource(seed)), perMinute: perMinute}
 	f.next = (60 / perMinute) * (.25 + f.rng.Float64()*.375)
 	return f
 }
@@ -128,12 +129,22 @@ func (f *batFlock) draw(dst *ebiten.Image, viewport Viewport) {
 		path := batSilhouette(flap)
 		transform := &vector.AddPathOptions{}
 		transform.GeoM.Scale(size, size)
-		transform.GeoM.Rotate(b.bank(t))
+		transform.GeoM.Rotate(f.silhouetteAngle(b, t))
 		transform.GeoM.Translate(x, y)
 		var screenPath vector.Path
 		screenPath.AddPath(&path, transform)
 		vector.FillPath(dst, &screenPath, nil, options)
 	}
+}
+
+// Keep the silhouette upright in world coordinates while its route crosses
+// the bounded axis. The landscape compositor supplies the opposite turn.
+func (f *batFlock) silhouetteAngle(b bat, t float64) float64 {
+	angle := b.bank(t)
+	if f.orientation == Horizontal {
+		angle -= math.Pi / 2
+	}
+	return angle
 }
 
 func batSilhouette(flap float32) vector.Path {

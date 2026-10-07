@@ -67,7 +67,14 @@ func TestForegroundGridStaysInsideHorizontalScreenInset(t *testing.T) {
 }
 
 func TestWorldSectionSeam(t *testing.T) {
-	a, b := buildSection(42, 0), buildSection(42, 1)
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		t.Run(orientation.String(), func(t *testing.T) { testWorldSectionSeam(t, orientation) })
+	}
+}
+
+func testWorldSectionSeam(t *testing.T, orientation Orientation) {
+	builder := newSectionBuilder(42, nil, orientation)
+	a, b := builder.build(0), builder.build(1)
 	// Compare whole rock faces in a strip around the shared seam, not just
 	// sample colors. Geometry, relief, shadowing, and material must agree.
 	type face struct {
@@ -145,7 +152,7 @@ func TestWorldSectionSeam(t *testing.T) {
 		t.Fatal("vines stopped at all section boundaries")
 	}
 	// Eviction must not change either geometry or parent attachment indices.
-	again := buildSection(42, 0)
+	again := newSectionBuilder(42, nil, orientation).build(0)
 	if !reflect.DeepEqual(a, again) {
 		t.Fatal("revisiting an evicted section changes the scene")
 	}

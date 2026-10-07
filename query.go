@@ -108,6 +108,17 @@ type GuideGeometry struct {
 // Call on the game goroutine after Update, as with other Scene methods.
 // Invalid arguments return an error. Closed scenes return an incomplete result.
 func (g *Scene) Query(ray Ray, options QueryOptions) (QueryResult, error) {
+	ray.Origin = g.orientation.internal(ray.Origin)
+	ray.Direction = g.orientation.internal(ray.Direction)
+	result, err := g.query(ray, options)
+	if result.Found {
+		result.Hit.Point = g.orientation.world(result.Hit.Point)
+		result.Hit.Normal = g.orientation.world(result.Hit.Normal)
+	}
+	return result, err
+}
+
+func (g *Scene) query(ray Ray, options QueryOptions) (QueryResult, error) {
 	direction, err := validateQuery(ray, options)
 	if err != nil {
 		return QueryResult{}, err
@@ -207,6 +218,10 @@ func (g *Scene) Formation(id FormationID) (f Formation, available bool) {
 	f, available = index.formations[index.aliases[id.object]]
 	if available {
 		f.Polygons = copyQueryPolygons(f.Polygons)
+		for _, poly := range f.Polygons {
+			mapPoints(poly, g.orientation.world)
+		}
+		f.Min, f.Max = g.orientation.bounds(f.Min, f.Max)
 		f.SectionIDs = append([]int64(nil), f.SectionIDs...)
 	}
 	return
@@ -225,6 +240,8 @@ func (g *Scene) Guide(id GuideID) (guide GuideGeometry, available bool) {
 	guide, available = index.guides[id.object]
 	if available {
 		guide.Points = append([]V(nil), guide.Points...)
+		mapPoints(guide.Points, g.orientation.world)
+		guide.Min, guide.Max = g.orientation.bounds(guide.Min, guide.Max)
 		guide.S = append([]float64(nil), guide.S...)
 	}
 	return

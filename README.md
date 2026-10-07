@@ -1,6 +1,6 @@
 # ebiten-infinicave
 
-A Go library for an infinite procedural cavern with faceted rock, branching vines, and mushrooms, rendered with Ebitengine. The world starts at a bottom edge and grows infinitely upward as you scroll. Terrain is generated in the background and nearby sections are cached; returning to an evicted area regenerates the same rocks and vines from its seed.
+A Go library for an infinite procedural cavern with faceted rock, branching vines, and mushrooms, rendered with Ebitengine. Choose a fixed vertical or horizontal scrolling orientation: the world grows upward from a bottom edge or rightward from a left edge. Terrain is generated in the background and nearby sections are cached; returning to an evicted area regenerates the same rocks and vines from its seed and orientation.
 
 The root package is `infinicave`; the interactive viewer and PNG exporter live in
 `cmd/infinicave`. The library leaves your game loop, input, camera, window settings,
@@ -46,6 +46,32 @@ upward. Section `id` owns the world band from Y = `id-1` to Y = `id`.
 prefetching. Y must be finite and no greater than `-viewport.Height`; height must
 be finite and positive. Invalid viewports do no work and report not ready.
 
+Set `Config.Orientation = infinicave.Horizontal` before `NewScene` for horizontal
+scrolling. The cave is then one scene unit high, occupies X >= 0 and Y from 0 to 1,
+and grows rightward. IDs remain single integers: `0` at the left edge, then `-1`,
+`-2`, and so on; section `id` owns X from `-id` to `-id+1`. Horizontal viewports
+use `X` and `Width`, with finite X >= 0 and finite Width > 0. Their velocity is
+movement along world X, with positive values moving rightward. For example:
+
+```go
+config := infinicave.DefaultConfig()
+config.Orientation = infinicave.Horizontal
+scene, err := infinicave.NewScene(config)
+if err != nil {
+    return err
+}
+defer scene.Close()
+viewport := infinicave.Viewport{X: 0, Width: 1.6}
+scene.Update(viewport)
+scene.Draw(screen, viewport)
+```
+
+Orientation stays fixed through `Reset`. Each orientation is deterministic, but
+the same seed can produce different layouts in the two modes. Guides favor
+horizontal ledges, mushrooms grow upward, and lighting comes from above and left
+in both. Vines retain world-oriented growth preferences. Horizontal foreground
+cutoffs and background margins run across the top and bottom; bats cross vertically.
+
 Rendering uses `min(width, height)` pixels per scene unit. Landscape targets
 show a centered 1 × 1 cave; portrait targets retain their full width. Set
 `Viewport.Height` to `height / min(width, height)`: for example, a 1000 × 800
@@ -53,6 +79,10 @@ image uses height 1, and a 500 × 800 image uses height 1.6. Background Voronoi
 cells and fog extend from X = −0.5 to 1.5, fading smoothly across the side
 margins. Bats cross this extended area and fade near its edges. Hover and
 carving coordinates follow the centered cave.
+These are the vertical-scrolling rules. In horizontal scenes, the cave centers
+vertically, `Viewport.Width` is `width / min(width, height)`, and the extended
+background and fog occupy Y = −0.5 to 1.5. Camera movement, queries, carving,
+collision callbacks, and fetched geometry all use ordinary world X/Y.
 Generation, spatial fields, and collision calculations use scene units throughout.
 Only mesh preparation and rendering convert coordinates to pixels. Set
 `scene.SetRenderWidth(min(nativeWidth, nativeHeight))` before `Update` to rasterize cached textures
@@ -148,7 +178,8 @@ custom layouts are responsible for spacing.
 Holes carve the shaped foreground and damage its generated vegetation. Circles use `Center`
 and `Radius`; segments use `Start`, `End`, and full `Width`, with flat ends.
 Authored holes can cross seams, but their bounds must stay within local Y = -1
-to 2; describe longer cuts using several section-local holes. Invalid holes and
+to 2 in vertical scenes or local X = -1 to 2 in horizontal scenes; describe
+longer cuts using several section-local holes. Invalid holes and
 invalid guides (nonfinite points or fewer than two distinct consecutive points)
 are ignored. `Section.Holes` includes the valid holes in its padded window.
 
@@ -230,8 +261,9 @@ Point queries also return zero normals.
 never generate sections and cannot confirm a hit beyond an unloaded gap. A hit
 before a gap is complete even if the rest of the requested ray is not loaded.
 The world occupies X from 0 to 1 and Y at or above the floor (Y <= 0); portions
-of a ray outside that strip are known empty. Guide-radius queries conservatively
-require loaded neighboring bands within the radius in Y.
+of a ray outside that strip are known empty. Horizontal scenes occupy X >= 0
+and Y from 0 to 1 instead. Guide-radius queries conservatively require loaded
+neighboring bands within the radius along the scrolling axis.
 
 Formation and guide IDs are opaque, comparable references scoped to one world.
 They survive partial cache eviction and neighboring-section reloads while the
@@ -340,14 +372,16 @@ if err != nil {
     return err
 }
 // section.Foreground contains rock face polygons, heights, and normals.
-// Convert local Y to world Y by adding section.Top.
+// Convert local points to world points by adding section.Origin.
 // section.Collision.Polygons already use world coordinates.
 ```
 
 `GenerateSection` is synchronous and allocates no GPU resources. Run it in a
-background goroutine in an interactive application. IDs start at 0 at the bottom
-and decrease upward; positive IDs return an error. Each section owns its geometry
-and includes one section of padding above and below for seamless generation.
+background goroutine in an interactive application. `GenerateSection` defaults
+to vertical orientation; use `GenerateSectionWithConfig` for horizontal scenes.
+IDs start at 0 at the starting edge and decrease upward or rightward; positive
+IDs return an error. Each section owns its geometry and includes one section of
+padding on either side along the scrolling axis for seamless generation.
 All exposed positions, lengths, radii, and rock heights use scene units; normals
 and directions remain unit vectors. The owned local square is `[0, 1] × [0, 1]`,
 with generation padding spanning local Y from -1 to 2. `section.WindowTop` marks
@@ -355,6 +389,11 @@ the start of that padding in world coordinates. Its owned world band is `[sectio
 vegetation may extend outside that band. Collision contours also include padding;
 use only the owned band when combining adjacent sections. The exposed grids
 describe visual faces, and `section.Collision` contains the collision boundaries.
+For either orientation, use `section.Origin` to translate section-local geometry,
+`section.Min`/`Max` for its owned world square, and `section.WindowOrigin` for the
+padded window's origin. Horizontal padding spans local X from -1 to 2.
+`Top` and `WindowTop` are legacy vertical metadata and are zero in horizontal
+scenes. Collision geometry also exposes `Origin`, `Min`, and `Max`.
 Use `GenerateSectionWithConfig(config, id)` to share a scene's seed, collision
 tolerance, and section content loader with synchronous generation. This
 package depends on Ebitengine, so desktop initialization still needs a graphical
@@ -381,8 +420,18 @@ Guides define solid raised formations: a narrow bevel rises to a crest, then a b
 
 Run with `go run ./cmd/infinicave` (Go 1.27 and a graphical desktop). Use `-seed 42` for a reproducible world.
 
+The viewer's `-mode portrait` default scrolls vertically in a 9:16 window whose
+height is 80% of the display. `-mode landscape` scrolls horizontally in a 16:9
+window whose width is 80% of the display:
+
+```sh
+go run ./cmd/infinicave -mode landscape -seed 42
+```
+
 - Mouse wheel / trackpad: scroll vertically; scroll up to explore new terrain.
 - Up / Down or W / S: scroll continuously.
+- Landscape mode: Right / Left or D / A scroll continuously; wheel up explores
+  rightward, and horizontal trackpad gestures follow the horizontal direction.
 - Page Up / Page Down: move by most of a viewport.
 - Home / End: return to the starting bottom edge.
 - Left mouse: press and hold to grow a blast; move the cursor to select a drill
@@ -401,7 +450,7 @@ The viewer renders at the window's native pixel resolution, including on HiDPI d
 
 Hover over a foreground rock for a soft warm highlight and glow over its entire connected block of cells, including across cached section boundaries. Point within 0.006 scene units of a guide to highlight only that guide line instead. Hover effects are disabled by default; use `-hover=true` to enable them. PNG exports never include hover effects.
 
-`go run ./cmd/infinicave -seed 42 -output scene.png` exports the bottom 1000 × 2400 pixels and exits. `-texture 0` disables the surface texture. `-fog=false` disables the moving fog. `-collision-tolerance 0.002` simplifies collision polygons with a 0.002-unit tolerance.
+`go run ./cmd/infinicave -seed 42 -output scene.png` exports the bottom 1000 × 2400 pixels and exits. Adding `-mode landscape` exports the leftmost 2400 × 1000 pixels instead. `-texture 0` disables the surface texture. `-fog=false` disables the moving fog. `-collision-tolerance 0.002` simplifies collision polygons with a 0.002-unit tolerance.
 
 The `-view` options are `shaded` (default), `clay`, `height`, `normals`, and `shadows`. Diagnostic views disable texture, background effects, fog, and vegetation; clay uses neutral gray material with the same lighting and exposed edges.
 

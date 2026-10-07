@@ -18,8 +18,9 @@ func main() {
 
 func run() error {
 	defaults := infinicave.DefaultConfig()
+	mode := flag.String("mode", "portrait", "scrolling mode: portrait (vertical) or landscape (horizontal)")
 	seed := flag.Int64("seed", rand.Int63(), "random seed (random by default)")
-	output := flag.String("output", "", "save the bottom 2400 pixels as a PNG and exit")
+	output := flag.String("output", "", "save the first 2400 pixels along the scrolling axis as a PNG and exit")
 	texture := flag.Float64("texture", 8, "surface texture strength (0 disables it, range 0-16)")
 	backgroundBlur := flag.Float64("background-blur", defaults.BackgroundBlur, "background rock and vine blur in scene units (0 disables it, range 0-0.05)")
 	shadowOpacity := flag.Float64("shadow-opacity", defaults.ShadowOpacity, "dynamic rock shadow opacity (0 disables it, range 0-1)")
@@ -33,6 +34,11 @@ func run() error {
 	tolerance := flag.Float64("collision-tolerance", 0, "collision polygon simplification tolerance in scene units (one section is 1 by 1)")
 	flag.Parse()
 	config := defaults
+	orientation, err := parseMode(*mode)
+	if err != nil {
+		return err
+	}
+	config.Orientation = orientation
 	config.Seed, config.Texture = *seed, *texture
 	config.BackgroundBlur, config.ShadowOpacity, config.ShadowBlur = *backgroundBlur, *shadowOpacity, *shadowBlur
 	config.ShadowOffset = infinicave.V{X: *shadowX, Y: *shadowY}
@@ -52,7 +58,7 @@ func run() error {
 		return err
 	}
 	defer scene.Close()
-	g := &Game{scene: scene, seed: *seed, output: *output}
+	g := &Game{mode: orientation, scene: scene, seed: *seed, output: *output}
 	if *hover && *output == "" {
 		g.highlight, err = newHoverRenderer()
 		if err != nil {
@@ -61,10 +67,34 @@ func run() error {
 		defer g.highlight.close()
 	}
 
-	_, displayHeight := ebiten.Monitor().Size()
-	windowHeight := displayHeight * 4 / 5
-	ebiten.SetWindowSize(windowHeight*9/16, windowHeight)
+	displayWidth, displayHeight := ebiten.Monitor().Size()
+	windowWidth, windowHeight := windowSize(orientation, displayWidth, displayHeight)
+	ebiten.SetWindowSize(windowWidth, windowHeight)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
-	ebiten.SetWindowTitle("ebiten-infinicave | Scroll / Up / Down | R: regenerate")
+	controls := "Up / Down"
+	if orientation == infinicave.Horizontal {
+		controls = "Left / Right"
+	}
+	ebiten.SetWindowTitle("ebiten-infinicave | Scroll / " + controls + " | R: regenerate")
 	return ebiten.RunGame(g)
+}
+
+func parseMode(mode string) (infinicave.Orientation, error) {
+	switch mode {
+	case "portrait":
+		return infinicave.Vertical, nil
+	case "landscape":
+		return infinicave.Horizontal, nil
+	default:
+		return infinicave.Vertical, fmt.Errorf("unknown mode %q: use portrait or landscape", mode)
+	}
+}
+
+func windowSize(mode infinicave.Orientation, displayWidth, displayHeight int) (int, int) {
+	if mode == infinicave.Horizontal {
+		width := max(1, displayWidth*4/5)
+		return width, max(1, width*9/16)
+	}
+	height := max(1, displayHeight*4/5)
+	return max(1, height*9/16), height
 }

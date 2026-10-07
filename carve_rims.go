@@ -33,7 +33,7 @@ func appendCarveRims(vertices []ebiten.Vertex, indices []uint32, topology *rockT
 		}
 		cell := topology.grid[edge.Cell]
 		outward := edge.B.Sub(edge.A).Perp().Norm().Mul(-1)
-		light := clamp(outward.Dot(V{-.6, -.8})*.5+.5, 0, 1)
+		light := clamp(outward.Dot(cell.orientation.internal(V{-.6, -.8}))*.5+.5, 0, 1)
 		steps := max(1, int(math.Ceil(edge.B.Sub(edge.A).Len()/.009)))
 		for step := 0; step < steps; step++ {
 			a := lerpV(edge.A, edge.B, float64(step)/float64(steps))

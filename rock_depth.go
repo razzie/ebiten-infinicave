@@ -9,7 +9,10 @@ const rockDepthStep = .004
 const rockDepthWidth = int(generationWidth / rockDepthStep)
 const rockDepthHeight = int(generationHeight / rockDepthStep)
 
-type rockDepth struct{ heights []float64 }
+type rockDepth struct {
+	heights []float64
+	light   V3
+}
 
 // Each face remains one plane, including concave faces. Clamp extrapolation
 // at long polygon tips so fitted slopes cannot create implausible spikes.
@@ -29,6 +32,14 @@ func (c RockCell) depthAt(p V) float64 {
 // the generation padding keep shadow queries identical across section seams.
 func newRockDepth(grids ...RockGrid) *rockDepth {
 	d := &rockDepth{heights: make([]float64, rockDepthWidth*rockDepthHeight)}
+	d.light = rockLight
+	for _, grid := range grids {
+		if len(grid) > 0 {
+			light := grid[0].orientation.internal(V{rockLight.X, rockLight.Y})
+			d.light = V3{light.X, light.Y, rockLight.Z}
+			break
+		}
+	}
 	for i := range d.heights {
 		d.heights[i] = -.016
 	}
@@ -70,8 +81,8 @@ func (d *rockDepth) at(p V) float64 {
 }
 
 func (d *rockDepth) visibility(p V, z float64) float64 {
-	direction := (V{rockLight.X, rockLight.Y}).Norm()
-	rise := rockLight.Z / math.Hypot(rockLight.X, rockLight.Y)
+	direction := (V{d.light.X, d.light.Y}).Norm()
+	rise := d.light.Z / math.Hypot(d.light.X, d.light.Y)
 	visible := 1.0
 	for distance := .008; distance <= .184; distance += .004 {
 		blocker := d.at(p.Add(direction.Mul(distance))) - z - distance*rise

@@ -86,7 +86,8 @@ func foregroundVinePalette(vines []Vine, index int) [len(vineColors)]color.NRGBA
 	return palette
 }
 
-func prepareForegroundVines(vines []Vine) []triangleMesh {
+func prepareForegroundVines(vines []Vine, orientation ...Orientation) []triangleMesh {
+	shadowOffset := optionalOrientation(orientation).internal(V{1, 1.5})
 	if len(vines) == 0 {
 		return nil
 	}
@@ -98,8 +99,8 @@ func prepareForegroundVines(vines []Vine) []triangleMesh {
 		vertices := append([]ebiten.Vertex(nil), stem.vertices...)
 		for i := range vertices {
 			v := &vertices[i]
-			v.DstX += 1
-			v.DstY += 1.5
+			v.DstX += float32(shadowOffset.X)
+			v.DstY += float32(shadowOffset.Y)
 			v.ColorR, v.ColorG, v.ColorB, v.ColorA = 0, 0, 0, .38
 		}
 		meshes = append(meshes, triangleMesh{vertices: vertices, indices: stem.indices, premultiplied: true})

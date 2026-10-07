@@ -2,18 +2,24 @@ package infinicave
 
 import "fmt"
 
-// Section holds generated geometry for a section plus one section of padding
-// above and below. Geometry uses scene units and section-local coordinates:
-// the owned square runs from (0, 0) to (1, 1). Add Top to Y to get world
-// coordinates. Padding spans Y = -1 to 2, with WindowTop marking its world
-// start. The owned world band is [Top, Top+SectionHeight). Vegetation may extend
-// into padding and should be drawn once per owning section. Background cells
-// extend horizontally from X = -0.5 to 1.5 for landscape rendering.
+// Section holds generated geometry plus one section of padding on each side
+// along the scrolling axis. Geometry uses ordinary X/Y scene units, local to
+// the owned square [0, 1]². Add Origin to local points to get world coordinates.
+// Padding spans local Y = -1 to 2 in Vertical scenes or local X = -1 to 2 in
+// Horizontal scenes. Min/Max describe the owned world square; WindowOrigin
+// starts the padded window. Vegetation may extend into padding and should be
+// drawn once per owning section. Background cells extend from -0.5 to 1.5
+// across the bounded axis. Top and WindowTop are legacy Vertical metadata.
 //
 // Each generated Section owns its slices; callers may modify them. Rock grids
 // describe visual faces; Collision contains boundaries for physics integration.
 type Section struct {
-	// ID is 0 at the floor, then -1, -2, ... upward. Top is ID-1.
+	Orientation Orientation
+	// Origin converts section-local points to world coordinates by addition.
+	// Min/Max bound the owned square; WindowOrigin starts the padded window.
+	Origin, WindowOrigin, Min, Max V
+	// ID is 0 at the starting edge, then -1, -2, ... upward or rightward.
+	// Top is ID-1 in Vertical scenes and zero in Horizontal scenes.
 	ID                     int64
 	Top, WindowTop         float64
 	Background, Foreground RockGrid
@@ -26,7 +32,8 @@ type Section struct {
 }
 
 // GenerateSection synchronously generates a full cave section without
-// allocating GPU resources. ID 0 is the bottom section; IDs -1, -2, ... grow upward.
+// allocating GPU resources. It uses Vertical orientation. ID 0 is the bottom
+// section; IDs -1, -2, ... grow upward. Use GenerateSectionWithConfig for Horizontal.
 // The same seed and ID reproduce the same geometry, independently of load order.
 // Positive IDs return an error. Generation is expensive; use a background
 // goroutine when calling from a game. This package still depends on Ebitengine,
@@ -49,11 +56,11 @@ func GenerateSectionWithConfig(config Config, id int64) (Section, error) {
 	if id > 0 || id == -1<<63 {
 		return Section{}, fmt.Errorf("infinicave: section ID must be nonpositive and greater than the minimum int64")
 	}
-	// Streaming uses nonnegative indices internally; public IDs follow world Y.
+	// Streaming uses nonnegative indices internally in the direction of growth.
 	index := -id
 	var collision CollisionGeometry
-	data := newSectionBuilder(config.Seed, config.LoadSection).buildWithTerrain(index, func(data sectionData) {
-		collision = prepareTerrainGeometry(data, config.CollisionTolerance).collision
+	data := newSectionBuilder(config.Seed, config.Orientation.sectionLoader(config.LoadSection), config.Orientation).buildWithTerrain(index, func(data sectionData) {
+		collision = config.Orientation.collision(prepareTerrainGeometry(data, config.CollisionTolerance).collision)
 		if config.OnCollisionReady != nil {
 			config.OnCollisionReady(copyCollisionGeometry(collision))
 		}
@@ -65,5 +72,5 @@ func GenerateSectionWithConfig(config Config, id int64) (Section, error) {
 		Mushrooms: data.mushrooms, Guides: data.guides, Holes: data.holes,
 		Collision: collision,
 	}
-	return section, nil
+	return config.Orientation.section(section), nil
 }

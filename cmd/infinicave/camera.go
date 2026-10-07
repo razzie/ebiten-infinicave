@@ -14,9 +14,10 @@ const (
 	cameraGlide    = 0.1
 )
 
-// World Y is negative above the starting floor at zero. Y moves every tick by
-// Velocity, whether or not the sections it reveals have been generated.
-// Target is only the destination of a glide (Home/End).
+// The camera uses the shared section frame: negative Y moves forward along
+// either scrolling axis. Game.viewport maps it to public world Y or X. Y moves
+// every tick by Velocity, even while terrain loads. Height is the visible
+// scrolling extent; Target is the destination of a glide (Home/End).
 type Camera struct {
 	Y, Target, Velocity float64
 	Gliding             bool
@@ -62,13 +63,17 @@ func (c *Camera) step() {
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	width, height := max(1, outsideWidth), max(1, outsideHeight)
 	if g.output != "" {
-		width, height = renderWidth, exportHeight
+		width, height = g.exportSize()
 	}
 	if g.screenWidth != width || g.screenHeight != height {
 		g.carving = carveGesture{}
 		g.screenWidth, g.screenHeight = width, height
 	}
-	sceneHeight := float64(height) / float64(min(width, height)) * infinicave.Width
+	extent := height
+	if g.mode == infinicave.Horizontal {
+		extent = width
+	}
+	sceneHeight := float64(extent) / float64(min(width, height)) * infinicave.Width
 	if g.camera.Height == 0 {
 		g.camera.Y, g.camera.Target = -sceneHeight, -sceneHeight
 	}
@@ -93,15 +98,24 @@ func (g *Game) updateCamera() {
 	if g.output != "" {
 		return
 	}
-	_, wheel := ebiten.Wheel()
+	wheelX, wheel := ebiten.Wheel()
+	if g.mode == infinicave.Horizontal && wheelX != 0 {
+		wheel = -wheelX
+	}
 	// An impulse of d*(1-friction) coasts about d scene units in total.
 	const gain = 1 - cameraFriction
 	impulse := -wheel * .048 * gain
 	accel := .48 / float64(ebiten.TPS()) * gain
-	if ebiten.IsKeyPressed(ebiten.KeyArrowUp) || ebiten.IsKeyPressed(ebiten.KeyW) {
+	forward, backward := ebiten.KeyArrowUp, ebiten.KeyArrowDown
+	forwardAlt, backwardAlt := ebiten.KeyW, ebiten.KeyS
+	if g.mode == infinicave.Horizontal {
+		forward, backward = ebiten.KeyArrowRight, ebiten.KeyArrowLeft
+		forwardAlt, backwardAlt = ebiten.KeyD, ebiten.KeyA
+	}
+	if ebiten.IsKeyPressed(forward) || ebiten.IsKeyPressed(forwardAlt) {
 		impulse -= accel
 	}
-	if ebiten.IsKeyPressed(ebiten.KeyArrowDown) || ebiten.IsKeyPressed(ebiten.KeyS) {
+	if ebiten.IsKeyPressed(backward) || ebiten.IsKeyPressed(backwardAlt) {
 		impulse += accel
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyPageUp) {
@@ -120,9 +134,36 @@ func (g *Game) updateCamera() {
 
 func (g *Game) renderPixels() int { return max(1, min(g.screenWidth, g.screenHeight)) }
 
-func (g *Game) renderOffsetX() float64 { return float64(g.screenWidth-g.renderPixels()) / 2 }
+func (g *Game) renderOffsetX() float64 {
+	if g.mode == infinicave.Horizontal {
+		return 0
+	}
+	return float64(g.screenWidth-g.renderPixels()) / 2
+}
+
+func (g *Game) renderOffsetY() float64 {
+	if g.mode == infinicave.Horizontal {
+		return float64(g.screenHeight-g.renderPixels()) / 2
+	}
+	return 0
+}
+
+func (g *Game) cameraX() float64 {
+	return -(viewerCameraY(g.camera.Y, g.renderPixels()) + g.camera.Height)
+}
 
 func (g *Game) worldPoint(cursor infinicave.V) infinicave.V {
+	if g.mode == infinicave.Horizontal {
+		return infinicave.V{X: g.cameraX() + cursor.X/float64(g.renderPixels()), Y: (cursor.Y - g.renderOffsetY()) / float64(g.renderPixels())}
+	}
 	cursor.X -= g.renderOffsetX()
 	return viewerWorldPoint(cursor, g.camera.Y, g.renderPixels())
+}
+
+func (g *Game) screenPoint(p infinicave.V) (float32, float32) {
+	scale := float64(g.renderPixels())
+	if g.mode == infinicave.Horizontal {
+		return float32((p.X - g.cameraX()) * scale), float32(g.renderOffsetY() + p.Y*scale)
+	}
+	return float32(g.renderOffsetX() + p.X*scale), float32((p.Y - viewerCameraY(g.camera.Y, g.renderPixels())) * scale)
 }

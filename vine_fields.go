@@ -142,6 +142,12 @@ func newVineTerrainMode(background, foreground RockGrid, onForeground bool) *Vin
 
 func newVineTerrainWithWorkspace(background, foreground RockGrid, onForeground bool, workspace *vineWorkspace) *VineTerrain {
 	field := &VineTerrain{onForeground: onForeground, clearance: workspace.take(), edges: newVineEdgeGraph(background), workspace: workspace}
+	for _, grid := range []RockGrid{background, foreground} {
+		if len(grid) > 0 {
+			field.orientation = grid[0].orientation
+			break
+		}
+	}
 	field.borders = vineBordersForEdges(field.edges, workspace)
 	tones := workspace.take()
 	defer workspace.put(tones)

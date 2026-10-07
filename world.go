@@ -19,6 +19,7 @@ const (
 // Rocks use world-space seeds; vines belong to one section but retain their
 // complete geometry across its neighbors, so section edges cannot cut a fork.
 type sectionData struct {
+	orientation            Orientation
 	id                     int64
 	background, foreground RockGrid
 	vines                  []Vine
@@ -135,6 +136,7 @@ func buildSection(seed, id int64) sectionData {
 }
 
 func buildSectionCached(seed, id int64, loadSection SectionLoader, guideCache *guideCache, fields *vineWorkspace, onTerrain func(sectionData)) sectionData {
+	orientation := guideCache.orientation
 	top := sectionTop(id)
 	backgroundNoise := NewPerlin(rand.New(rand.NewSource(seed ^ 0x62617365)))
 	backgroundNoise.OffsetY = top
@@ -161,7 +163,7 @@ func buildSectionCached(seed, id int64, loadSection SectionLoader, guideCache *g
 	polishRockContours(foreground, guides, func(p V) float64 {
 		return reliefHeight(p, guides, noise, branches)
 	})
-	shadeRockGrids(background, foreground, backgroundNoise)
+	shadeRockGrids(background, foreground, backgroundNoise, orientation)
 	topology := newRockTopology(foreground)
 	vegetationGrid := topology.grid
 	// Retain the terrain after each cut so vegetation keeps the same sequential
@@ -183,14 +185,14 @@ func buildSectionCached(seed, id int64, loadSection SectionLoader, guideCache *g
 		}
 		cuts = append(cuts, cutStage{cut, topology.grid})
 	}
-	data := sectionData{id: id, background: background, foreground: foreground, guides: guides, holes: holes, foregroundTopology: topology}
+	data := sectionData{orientation: orientation, id: id, background: background, foreground: foreground, guides: guides, holes: holes, foregroundTopology: topology}
 	if len(topology.cuts) > 0 {
 		data.foreground = topology.grid
 	}
 	if onTerrain != nil {
 		onTerrain(data)
 	}
-	mushrooms := mushroomsForGuides(guides, vegetationGrid)
+	mushrooms := mushroomsForGuides(guides, vegetationGrid, orientation)
 	field := newVineTerrainWithWorkspace(background, foreground, false, fields)
 	vines := generateVinesInBand(field, rand.New(rand.NewSource(sectionSeed(seed^0x76696e6573, id))), 0, SectionHeight, 5)
 	field.release()
@@ -204,10 +206,10 @@ func buildSectionCached(seed, id int64, loadSection SectionLoader, guideCache *g
 	return data
 }
 
-func newWorld(seed int64, view View, tolerance float64, loadSection SectionLoader) *world {
+func newWorld(seed int64, view View, tolerance float64, loadSection SectionLoader, orientation ...Orientation) *world {
 	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1), results: make(chan sectionMesh, 1), terrain: make(chan sectionTerrain, 1), done: make(chan struct{})}
 	go func() {
-		builder := newSectionBuilder(seed, loadSection)
+		builder := newSectionBuilder(seed, loadSection, orientation...)
 		for {
 			select {
 			case <-w.done:

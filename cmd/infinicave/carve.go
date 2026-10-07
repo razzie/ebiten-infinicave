@@ -110,10 +110,7 @@ func (g *Game) drawCarving(screen *ebiten.Image) {
 		return
 	}
 	scale := float64(g.renderPixels()) / infinicave.Width
-	cameraY := viewerCameraY(g.camera.Y, g.renderPixels())
-	pixel := func(p infinicave.V) (float32, float32) {
-		return float32(g.renderOffsetX() + p.X*scale), float32((p.Y - cameraY) * scale)
-	}
+	pixel := g.screenPoint
 	x, y := pixel(c.origin)
 	clr := color.NRGBA{R: 255, G: 185, B: 95, A: 210}
 	if !c.segment {

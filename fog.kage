@@ -5,6 +5,7 @@ var Pixels float
 var MinX float
 var Top float
 var Time float
+var Horizontal float
 
 func noise(p vec2) float {
 	q := fract(vec3(p.x, p.y, p.x) * .1031)
@@ -23,6 +24,10 @@ func smoothNoise(p vec2) float {
 
 func Fragment(dst vec4, src vec2, color vec4) vec4 {
 	p := src / Pixels + vec2(MinX, Top)
+	across := p.x
+	if Horizontal != 0 {
+		p = vec2(-p.y, p.x)
+	}
 	// Broad drifting clouds carry narrower wisps moving at a different speed.
 	// Warping breaks up the noise grid without tying the pattern to the screen.
 	flow := p + vec2(-.018, .009)*Time
@@ -33,7 +38,7 @@ func Fragment(dst vec4, src vec2, color vec4) vec4 {
 	density += smoothNoise(cloud*4.07+vec2(23, 19))*.14
 	wisps := smoothNoise((p+warp*.1+vec2(.011, .004)*Time)*vec2(5, 13))
 	alpha := smoothstep(.25, .8, density)*.18 + smoothstep(.5, .85, wisps)*.045
-	alpha *= smoothstep(-.5, 0, p.x) * (1-smoothstep(1, 1.5, p.x))
+	alpha *= smoothstep(-.5, 0, across) * (1-smoothstep(1, 1.5, across))
 	// Premultiplied alpha preserves the dark background beneath the mist.
 	return vec4(vec3(.32, .36, .37)*alpha, alpha)
 }

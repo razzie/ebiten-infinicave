@@ -18,12 +18,13 @@ type guidePocket struct {
 }
 
 type guideLayout struct {
-	pockets []guidePocket
-	probes  []V
+	orientation Orientation
+	pockets     []guidePocket
+	probes      []V
 }
 
-func newGuideLayout(rng *rand.Rand) guideLayout {
-	layout := guideLayout{}
+func newGuideLayout(rng *rand.Rand, orientation ...Orientation) guideLayout {
+	layout := guideLayout{orientation: optionalOrientation(orientation)}
 	for n := 1 + rng.Intn(2); n > 0; n-- {
 		layout.pockets = append(layout.pockets, guidePocket{
 			V{lerp(0.17, generationWidth-0.17, rng.Float64()), lerp(0.17, generationWidth-0.17, rng.Float64())},
@@ -59,21 +60,25 @@ func generateGuides(rng *rand.Rand) []Guide {
 	return guides
 }
 
-func generateGuideSection(rng *rand.Rand) []Guide {
-	return newGuideLayout(rng).fill(rng, nil, nil, 0)
+func generateGuideSection(rng *rand.Rand, orientation ...Orientation) []Guide {
+	return newGuideLayout(rng, orientation...).fill(rng, nil, nil, 0)
 }
 
 // Grow a fresh curve with independently varying length, heading, curvature,
 // and knot spacing. Persistent turns make broad hooks; changing turns make
 // uneven ledges and S-bends. There are no reusable knot templates.
-func randomGuide(rng *rand.Rand, center V, crowded bool) Guide {
+func randomGuide(rng *rand.Rand, center V, crowded bool, orientation ...Orientation) Guide {
 	length := lerp(0.23, 0.62, rng.Float64())
 	if crowded {
 		length = lerp(0.15, 0.36, rng.Float64())
 	}
 	angle := lerp(-.8, .8, rng.Float64())
-	if rng.Float64() < .22 {
+	preferHorizontal := rng.Float64() >= .22
+	if !preferHorizontal {
 		angle = lerp(-math.Pi/2, math.Pi/2, rng.Float64())
+	}
+	if optionalOrientation(orientation) == Horizontal {
+		angle -= math.Pi / 2 // World-horizontal ledges in the section frame.
 	}
 	turn := lerp(-1.3, 1.3, rng.Float64())
 	knots := []V{{}}
@@ -83,6 +88,23 @@ func randomGuide(rng *rand.Rand, center V, crowded bool) Guide {
 		knots = append(knots, knots[len(knots)-1].Add(V{math.Cos(angle), math.Sin(angle)}.Mul(step)))
 		turn = clamp(turn*.75+lerp(-.55, .55, rng.Float64()), -1.4, 1.4)
 		s += step
+	}
+	// Curvature can erase the initial heading bias. Classify the completed
+	// curve in world axes, keeping most proposals horizontal without removing
+	// the minority of steep ledges and hooks.
+	if preferHorizontal {
+		var dx, dy float64
+		mode := optionalOrientation(orientation)
+		for i := 1; i < len(knots); i++ {
+			d := mode.world(knots[i].Sub(knots[i-1]))
+			dx += math.Abs(d.X)
+			dy += math.Abs(d.Y)
+		}
+		if dy > dx {
+			for i, p := range knots {
+				knots[i] = p.Perp()
+			}
+		}
 	}
 	lo, hi := knots[0], knots[0]
 	for _, p := range knots {
@@ -131,7 +153,7 @@ func (layout guideLayout) fill(rng *rand.Rand, guides, obstacles []Guide, margin
 			}
 		}
 		center := layout.probes[anchor].Add(V{lerp(-0.04, 0.04, rng.Float64()), lerp(-0.04, 0.04, rng.Float64())})
-		g := randomGuide(rng, center, attempt > guidePlacementAttempts/3)
+		g := randomGuide(rng, center, attempt > guidePlacementAttempts/3, layout.orientation)
 		if g.Min.X < foregroundScreenInset || g.Max.X > generationWidth-foregroundScreenInset || g.Min.Y < margin || g.Max.Y > generationWidth-margin {
 			continue
 		}
@@ -227,7 +249,7 @@ func guideSelfClear(g Guide) bool {
 // Resolve boundary conflicts against deterministic neighbor proposals, then
 // refill holes. Refills stay half a clearance inside their owner, so adjacent
 // refills cannot collide. Decisions never depend on which window loads first.
-func spacedWorldGuideSection(seed, owner int64, proposals map[int64][]Guide) []Guide {
+func spacedWorldGuideSection(seed, owner int64, proposals map[int64][]Guide, orientation ...Orientation) []Guide {
 	var guides, obstacles []Guide
 	priority := uint64(sectionSeed(seed^0x7370616365, owner))
 	for neighbor := owner - 1; neighbor <= owner+1; neighbor += 2 {
@@ -253,6 +275,6 @@ func spacedWorldGuideSection(seed, owner int64, proposals map[int64][]Guide) []G
 			guides = append(guides, g)
 		}
 	}
-	layout := newGuideLayout(rand.New(rand.NewSource(sectionSeed(seed, owner))))
+	layout := newGuideLayout(rand.New(rand.NewSource(sectionSeed(seed, owner))), orientation...)
 	return layout.fill(rand.New(rand.NewSource(sectionSeed(seed^0x66696c6c, owner))), guides, obstacles, guideClearance/2)
 }

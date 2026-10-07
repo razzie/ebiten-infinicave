@@ -53,6 +53,7 @@ func (g *Scene) CarveSegment(start, end V, width float64) (CarveResult, error) {
 // Carve applies a Hole in world coordinates. It is also the common entry point
 // for saved or externally supplied edits; SectionLoader uses local coordinates.
 func (g *Scene) Carve(hole Hole) (CarveResult, error) {
+	hole = mapHole(hole, g.orientation.internal)
 	cut, err := hole.rockCut()
 	if err != nil {
 		return CarveResult{}, err

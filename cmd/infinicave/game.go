@@ -17,6 +17,7 @@ const (
 )
 
 type Game struct {
+	mode         infinicave.Orientation
 	camera       Camera
 	scene        *infinicave.Scene
 	loading      bool
@@ -33,6 +34,9 @@ type Game struct {
 }
 
 func (g *Game) viewport() infinicave.Viewport {
+	if g.mode == infinicave.Horizontal {
+		return infinicave.Viewport{X: -(g.camera.Y + g.camera.Height), Width: g.camera.Height, Velocity: -g.camera.Velocity}
+	}
 	return infinicave.Viewport{Y: g.camera.Y, Height: g.camera.Height, Velocity: g.camera.Velocity}
 }
 
@@ -65,7 +69,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.scene.Draw(screen, g.viewport())
 	g.drawHover(screen)
 	if g.loading {
-		ebitenutil.DebugPrintAt(screen, "Growing upward...", 8, 24)
+		message := "Growing upward..."
+		if g.mode == infinicave.Horizontal {
+			message = "Growing rightward..."
+		}
+		ebitenutil.DebugPrintAt(screen, message, 8, 24)
 	}
 	if g.output == "" {
 		g.drawCarving(screen)
@@ -73,10 +81,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 	if g.output != "" && !g.exported && !g.loading {
 		g.exported = true
-		img := ebiten.NewImage(renderWidth, exportHeight)
+		width, height := g.exportSize()
+		img := ebiten.NewImage(width, height)
 		defer img.Deallocate()
-		height := float64(exportHeight) / renderWidth * infinicave.Width
-		g.scene.Draw(img, infinicave.Viewport{Y: -height, Height: height})
+		g.scene.Draw(img, g.viewport())
 		f, err := os.Create(g.output)
 		if err != nil {
 			g.exportErr = err
@@ -87,4 +95,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			g.exportErr = err
 		}
 	}
+}
+
+func (g *Game) exportSize() (int, int) {
+	if g.mode == infinicave.Horizontal {
+		return exportHeight, renderWidth
+	}
+	return renderWidth, exportHeight
 }

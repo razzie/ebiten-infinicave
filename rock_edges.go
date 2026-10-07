@@ -133,7 +133,7 @@ func appendRockWalls(vertices []ebiten.Vertex, indices []uint32, grid RockGrid, 
 	for _, edge := range edges {
 		c := grid[edge.Cell]
 		outward := edge.B.Sub(edge.A).Perp().Norm().Mul(-1)
-		view := V{.045, .08}
+		view := c.orientation.internal(V{.045, .08})
 		if outward.Dot(view) <= 0 {
 			continue
 		}
@@ -141,7 +141,7 @@ func appendRockWalls(vertices []ebiten.Vertex, indices []uint32, grid RockGrid, 
 		a := edge.A.Add(view.Mul(za))
 		b := edge.B.Add(view.Mul(zb))
 		normal := (V3{outward.X, outward.Y, .1}).Norm()
-		clr := rockSurfaceColor(normal, c.Shadow*.65, c.Ambient*.55)
+		clr := rockSurfaceColor(normal, c.Shadow*.65, c.Ambient*.55, c.orientation)
 		clr = rockViewColor(RockCell{Color: clr}, viewMode)
 		vertices, indices = appendRockQuad(vertices, indices, [4]V{edge.A, edge.B, b, a}, clr)
 	}
@@ -154,7 +154,8 @@ func rockViewColor(c RockCell, view View) color.NRGBA {
 		v := uint8(math.Round(255 * clamp((c.Z+.012)/.112, 0, 1)))
 		return color.NRGBA{v, v, v, 255}
 	case ViewNormals:
-		return color.NRGBA{uint8(127.5 * (c.Normal.X + 1)), uint8(127.5 * (c.Normal.Y + 1)), uint8(127.5 * (c.Normal.Z + 1)), 255}
+		n := c.orientation.normal(c.Normal)
+		return color.NRGBA{uint8(127.5 * (n.X + 1)), uint8(127.5 * (n.Y + 1)), uint8(127.5 * (n.Z + 1)), 255}
 	case ViewShadows:
 		v := uint8(math.Round(255 * c.Shadow))
 		return color.NRGBA{v, v, v, 255}
@@ -177,7 +178,7 @@ func appendRockBevels(vertices []ebiten.Vertex, indices []uint32, grid RockGrid,
 			continue
 		}
 		normal := (V3{c.Normal.X - inward.X*.5, c.Normal.Y - inward.Y*.5, c.Normal.Z}).Norm()
-		clr := rockViewColor(RockCell{Color: rockSurfaceColor(normal, c.Shadow, c.Ambient)}, view)
+		clr := rockViewColor(RockCell{Color: rockSurfaceColor(normal, c.Shadow, c.Ambient, c.orientation)}, view)
 		vertices, indices = appendRockQuad(vertices, indices, [4]V{edge.A, edge.B, b, a}, clr)
 	}
 	return vertices, indices

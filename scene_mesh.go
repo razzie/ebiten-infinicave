@@ -42,7 +42,7 @@ func prepareSection(data sectionData, view View) sectionMesh {
 	jobs <- func() { mesh.foreground = prepareGridWithTopology(data.foreground, view, data.foregroundTopology) }
 	if view == ViewShaded {
 		jobs <- func() { mesh.vines = prepareVines(data.vines) }
-		jobs <- func() { mesh.foregroundVines = prepareForegroundVines(data.foregroundVines) }
+		jobs <- func() { mesh.foregroundVines = prepareForegroundVines(data.foregroundVines, data.orientation) }
 		jobs <- func() { mesh.mushrooms = prepareMushrooms(data.mushrooms) }
 	}
 	close(jobs)
@@ -134,7 +134,7 @@ func prepareGridWithTopology(grid RockGrid, view View, topology *rockTopology) g
 			if clr.A == 255 && clr.R <= 3 && clr.G <= 3 && clr.B <= 3 {
 				hiddenEdges[key] = true
 			}
-			alpha := uint8(math.Round((96 + 28*surfaceLight(cell.Normal)) * float64(clr.A) / 255))
+			alpha := uint8(math.Round((96 + 28*surfaceLight(cell.Normal, cell.orientation)) * float64(clr.A) / 255))
 			if view != ViewShaded {
 				alpha = 0
 			}

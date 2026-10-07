@@ -6,7 +6,8 @@ import "math"
 // use section-local scene units, with the owned square spanning (0, 0) to (1, 1).
 // The structure can grow to include other authored objects in future versions.
 // Empty Guides produces no procedural foreground. Holes remove foreground rock
-// after shaping. Hole bounds must fit Y = -1 to 2, including seam crossings;
+// after shaping. Hole bounds must fit -1 to 2 along the scrolling axis,
+// including seam crossings (Y for Vertical, X for Horizontal);
 // declare longer cuts as multiple section-local holes. Invalid holes are ignored.
 type SectionContent struct {
 	Guides []Guide
@@ -14,7 +15,9 @@ type SectionContent struct {
 }
 
 // SectionLoader loads content for one square section. IDs start at 0 at the
-// floor and decrease upward: -1, -2, ... . The loader owns its returned slices;
+// starting edge and decrease in the direction of growth: -1, -2, ... . Points
+// use ordinary section-local X/Y in the configured orientation.
+// The loader owns its returned slices;
 // generation copies them and recomputes guide S, Min, and Max.
 // BrightSign defaults to 1; use -1 to reverse the lit side. A zero Seed receives
 // a stable seed based on the world seed, section ID, and guide's slice index.

@@ -7,10 +7,11 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-// Width is the fixed width of the cave in scene units.
+// Width is the fixed cross-axis span of the cave in scene units: its width in
+// Vertical scenes and its height in Horizontal scenes.
 const Width = 1
 
-// SectionHeight is the height of one square streamed section in scene units.
+// SectionHeight is the edge length of one square streamed section in scene units.
 const SectionHeight = 1
 
 // Config controls generation and rendering. Start with DefaultConfig to use
@@ -18,6 +19,9 @@ const SectionHeight = 1
 // fog, and bats.
 type Config struct {
 	Seed int64
+	// Orientation fixes the scrolling axis for the scene's lifetime. The zero
+	// value is Vertical. Horizontal grows rightward and keeps plants upright.
+	Orientation Orientation
 	// Texture is surface grain strength, from 0 (disabled) to 16.
 	Texture float64
 	// BackgroundBlur is Gaussian blur softness in scene units (0 disables it,
@@ -66,6 +70,9 @@ func DefaultConfig() Config {
 }
 
 func (c Config) validate() error {
+	if c.Orientation != Vertical && c.Orientation != Horizontal {
+		return fmt.Errorf("infinicave: invalid orientation %v", c.Orientation)
+	}
 	if math.IsNaN(c.Texture) || math.IsInf(c.Texture, 0) || c.Texture < 0 || c.Texture > 16 {
 		return fmt.Errorf("infinicave: texture must be between 0 and 16")
 	}
@@ -94,14 +101,18 @@ func (c Config) validate() error {
 	return nil
 }
 
-// Viewport describes the region to render, always Width scene units wide.
-// World Y is negative above the starting floor at zero. For a viewport at the
-// floor, use Y = -Height. Velocity is scene units per tick and only controls
-// prefetching; the caller owns camera movement.
+// Viewport describes the region to render. Vertical scenes use Y and Height,
+// with Y <= -Height and a starting viewport at Y = -Height. Horizontal scenes
+// use X and Width, with X >= 0 and a starting viewport at X = 0. The other
+// axis spans [0, 1]. Velocity is movement along world Y or X in scene units
+// per tick and controls prefetching; the caller owns camera movement.
 type Viewport struct {
 	Y        float64
 	Height   float64
 	Velocity float64
+	// Horizontal scenes use X and Width instead of Y and Height. X is the
+	// left edge, must be nonnegative, and positive Velocity moves rightward.
+	X, Width float64
 }
 
 func (v Viewport) valid() bool {
@@ -115,6 +126,8 @@ func (v Viewport) valid() bool {
 // goroutine; generation and mesh preparation run in background workers.
 // The zero value is not usable.
 type Scene struct {
+	orientation          Orientation
+	orientedTarget       *ebiten.Image
 	world                *world
 	material             *ebiten.Shader
 	backgroundFade       *ebiten.Shader
@@ -137,7 +150,7 @@ func NewScene(config Config) (*Scene, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
-	g := &Scene{texture: config.Texture, view: config.View, collisionTolerance: config.CollisionTolerance, loadSection: config.LoadSection, onCollisionReady: config.OnCollisionReady}
+	g := &Scene{orientation: config.Orientation, texture: config.Texture, view: config.View, collisionTolerance: config.CollisionTolerance, loadSection: config.LoadSection, onCollisionReady: config.OnCollisionReady}
 	if g.view != ViewShaded {
 		g.texture = 0
 	}
@@ -157,22 +170,24 @@ func NewScene(config Config) (*Scene, error) {
 		return nil, fmt.Errorf("infinicave: compile vine shader: %w", err)
 	}
 	if config.Fog && g.view == ViewShaded {
-		g.fog, err = newFogRenderer()
+		g.fog, err = newFogRenderer(g.orientation)
 		if err != nil {
 			g.Close()
 			return nil, fmt.Errorf("infinicave: compile fog shader: %w", err)
 		}
 	}
 	if g.view == ViewShaded && (config.BackgroundBlur > 0 || config.ShadowOpacity > 0) {
-		g.background, err = newBackgroundRenderer(config)
+		effects := config
+		effects.ShadowOffset = g.orientation.internal(config.ShadowOffset)
+		g.background, err = newBackgroundRenderer(effects)
 		if err != nil {
 			g.Close()
 			return nil, fmt.Errorf("infinicave: compile background shaders: %w", err)
 		}
 	}
-	g.world = newWorld(config.Seed, g.view, g.collisionTolerance, g.loadSection)
+	g.world = newWorld(config.Seed, g.view, g.collisionTolerance, g.orientation.sectionLoader(g.loadSection), g.orientation)
 	if config.BatsPerMinute > 0 && g.view == ViewShaded {
-		g.bats = newBatFlock(config.Seed, config.BatsPerMinute)
+		g.bats = newBatFlock(config.Seed, config.BatsPerMinute, g.orientation)
 	}
 	return g, nil
 }
@@ -185,7 +200,8 @@ func NewScene(config Config) (*Scene, error) {
 // before vegetation. OnCollisionReady runs here as soon as generated polygons
 // arrive. An invalid viewport or a closed Scene returns false without doing work.
 func (g *Scene) Update(viewport Viewport) bool {
-	if g.closed || !viewport.valid() {
+	viewport, valid := g.orientation.viewport(viewport)
+	if g.closed || !valid {
 		return false
 	}
 	w := g.world
@@ -242,20 +258,46 @@ func (g *Scene) SetRenderWidth(pixels int) {
 
 // Draw draws available terrain, fog, vegetation, and enabled bats into dst,
 // scaling uniformly at min(dst width, dst height) pixels per scene unit. The
-// cave is centered horizontally in landscape targets. Background and fog extend
-// from X = -0.5 to 1.5 and fade toward those edges. Use viewport.Height = target
-// height / min(target width, target height), and the same viewport as Update.
+// cave is centered across its bounded axis. Background and fog extend from
+// -0.5 to 1.5 across that axis and fade toward its edges. Use viewport.Height =
+// target height / min(target width, target height) for Vertical, or viewport.Width
+// = target width / min(target width, target height) for Horizontal, with the
+// same viewport as Update. Horizontal scenes use a reusable native-size buffer
+// to map the section-frame compositor into world orientation.
 // Missing terrain is left untouched; bats may fly across unloaded areas. Draw does
 // not add hover, loading text, or UI, and does nothing for an invalid viewport
 // or a closed Scene.
 func (g *Scene) Draw(dst *ebiten.Image, viewport Viewport) {
-	if !g.closed && viewport.valid() {
-		g.world.draw(dst, viewport.Y, viewport.Height, g.fog, g.background)
-		if g.bats != nil {
-			g.bats.draw(dst, viewport)
-		}
+	viewport, valid := g.orientation.viewport(viewport)
+	if g.closed || !valid {
+		return
+	}
+	target := dst
+	if g.orientation == Horizontal {
+		// Reuse the section-frame compositor at native resolution. A quarter
+		// turn is an exact pixel mapping; transparent gaps preserve dst.
+		size := dst.Bounds().Size()
+		ensureEffectImage(&g.orientedTarget, size.Y, size.X)
+		g.orientedTarget.Clear()
+		target = g.orientedTarget
+	}
+	g.world.draw(target, viewport.Y, viewport.Height, g.fog, g.background)
+	if g.bats != nil {
+		g.bats.draw(target, viewport)
+	}
+	if g.orientation == Horizontal {
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.SetElement(0, 0, 0)
+		op.GeoM.SetElement(0, 1, -1)
+		op.GeoM.SetElement(1, 0, 1)
+		op.GeoM.SetElement(1, 1, 0)
+		op.GeoM.Translate(float64(dst.Bounds().Dx()), 0)
+		dst.DrawImage(target, op)
 	}
 }
+
+// Orientation returns the scene's fixed scrolling orientation.
+func (g *Scene) Orientation() Orientation { return g.orientation }
 
 // Reset replaces the world with a new seed, keeping rendering settings and
 // the section content loader and collision callback. Enabled bats restart
@@ -268,10 +310,10 @@ func (g *Scene) Reset(seed int64) {
 	pixels := g.world.renderWidth()
 	g.geometryRevisionBase = g.GeometryRevision() + 1
 	g.world.close()
-	g.world = newWorld(seed, g.view, g.collisionTolerance, g.loadSection)
+	g.world = newWorld(seed, g.view, g.collisionTolerance, g.orientation.sectionLoader(g.loadSection), g.orientation)
 	g.world.pixels = pixels
 	if g.bats != nil {
-		g.bats = newBatFlock(seed, g.bats.perMinute)
+		g.bats = newBatFlock(seed, g.bats.perMinute, g.orientation)
 	}
 }
 
@@ -285,6 +327,10 @@ func (g *Scene) Close() {
 	g.geometryRevisionBase = g.GeometryRevision() + 1
 	g.closed = true
 	g.bats = nil
+	if g.orientedTarget != nil {
+		g.orientedTarget.Deallocate()
+		g.orientedTarget = nil
+	}
 	if g.world != nil {
 		g.world.close()
 	}
