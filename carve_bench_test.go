@@ -1,21 +1,26 @@
 package infinicave
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/razzie/ebiten-infinicave/internal/geom"
+	"github.com/razzie/ebiten-infinicave/internal/terrain"
+)
 
 // Use generated terrain and an already populated query cache, as in the viewer.
 // Setup and section generation are excluded from the measured edit latency.
 func BenchmarkCarve(b *testing.B) {
-	data := make([]sectionData, 3)
+	data := make([]terrain.SectionData, 3)
 	for i := range data {
-		data[i] = buildSection(42, int64(i))
+		data[i] = terrain.BuildSection(42, int64(i))
 	}
 	for _, name := range []string{"circle", "segment"} {
 		b.Run(name, func(b *testing.B) {
 			original := queryScene(data...)
 			original.collisionTolerance = 0
 			var center V
-			for _, face := range original.world.sections[0].geometry.faces {
-				p := faceCenter(face.poly).Add(V{Y: -1})
+			for _, face := range original.world.sections[0].geometry.Faces {
+				p := geom.PolygonCenter(face.Poly).Add(V{Y: -1})
 				if p.X > .2 && p.X < .8 && p.Y > -.8 && p.Y < -.2 {
 					center = p
 					break

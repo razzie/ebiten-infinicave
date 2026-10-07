@@ -3,6 +3,9 @@ package infinicave
 import (
 	"fmt"
 	"math"
+
+	"github.com/razzie/ebiten-infinicave/internal/geom"
+	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
 // TargetMask selects the objects a world query can hit.
@@ -108,12 +111,12 @@ type GuideGeometry struct {
 // Call on the game goroutine after Update, as with other Scene methods.
 // Invalid arguments return an error. Closed scenes return an incomplete result.
 func (g *Scene) Query(ray Ray, options QueryOptions) (QueryResult, error) {
-	ray.Origin = g.orientation.internal(ray.Origin)
-	ray.Direction = g.orientation.internal(ray.Direction)
+	ray.Origin = terrain.InternalPoint(g.orientation, ray.Origin)
+	ray.Direction = terrain.InternalPoint(g.orientation, ray.Direction)
 	result, err := g.query(ray, options)
 	if result.Found {
-		result.Hit.Point = g.orientation.world(result.Hit.Point)
-		result.Hit.Normal = g.orientation.world(result.Hit.Normal)
+		result.Hit.Point = terrain.WorldPoint(g.orientation, result.Hit.Point)
+		result.Hit.Normal = terrain.WorldPoint(g.orientation, result.Hit.Normal)
 	}
 	return result, err
 }
@@ -135,8 +138,8 @@ func (g *Scene) query(ray Ray, options QueryOptions) (QueryResult, error) {
 	index := g.world.queryIndex()
 	// The playable world is a unit-wide strip above the floor. Rays may start
 	// outside it and enter it; portions outside it are confirmed empty.
-	start, end, intersects := rayBox(ray.Origin, direction, ray.MaxDistance,
-		V{0, math.Inf(-1)}, V{Width, 0})
+	start, end, intersects := geom.RayBox(ray.Origin, direction, ray.MaxDistance,
+		V{X: 0, Y: math.Inf(-1)}, V{X: Width, Y: 0})
 	if !intersects {
 		return QueryResult{Complete: true}, nil
 	}
@@ -149,18 +152,18 @@ func (g *Scene) query(ray Ray, options QueryOptions) (QueryResult, error) {
 	consider := func(hit Hit) {
 		// A closing edge at the start of unknown terrain is not a confirmed
 		// surface. Never return a hit beyond the first unavailable interval.
-		if hit.Distance < start-queryEpsilon || hit.Distance > limit+queryEpsilon ||
-			(!covered && hit.Distance >= cutoff-queryEpsilon) {
+		if hit.Distance < start-geom.QueryEpsilon || hit.Distance > limit+geom.QueryEpsilon ||
+			(!covered && hit.Distance >= cutoff-geom.QueryEpsilon) {
 			return
 		}
-		if !result.Found || hit.Distance < result.Hit.Distance-queryEpsilon ||
-			(math.Abs(hit.Distance-result.Hit.Distance) <= queryEpsilon && hitLess(hit, result.Hit)) {
+		if !result.Found || hit.Distance < result.Hit.Distance-geom.QueryEpsilon ||
+			(math.Abs(hit.Distance-result.Hit.Distance) <= geom.QueryEpsilon && hitLess(hit, result.Hit)) {
 			result.Hit, result.Found, result.Complete = hit, true, true
 		}
 	}
 	if options.Targets&TargetRock != 0 {
 		for _, formation := range index.formations {
-			if _, _, ok := rayBox(ray.Origin, direction, limit, formation.Min, formation.Max); !ok {
+			if _, _, ok := geom.RayBox(ray.Origin, direction, limit, formation.Min, formation.Max); !ok {
 				continue
 			}
 			hit := Hit{Kind: TargetRock, FormationID: formation.ID}
@@ -174,7 +177,7 @@ func (g *Scene) query(ray Ray, options QueryOptions) (QueryResult, error) {
 			}
 			for _, edge := range index.formationEdges[formation.ID.object] {
 				a, b := edge.A, edge.B
-				if distance, ok := raySegment(ray.Origin, direction, a, b, limit); ok {
+				if distance, ok := geom.RaySegment(ray.Origin, direction, a, b, limit); ok {
 					hit.Distance = distance
 					hit.Point = ray.Origin.Add(direction.Mul(distance))
 					hit.Normal = b.Sub(a).Perp().Norm().Mul(-1)
@@ -186,13 +189,13 @@ func (g *Scene) query(ray Ray, options QueryOptions) (QueryResult, error) {
 	if options.Targets&TargetGuide != 0 {
 		radius := options.GuideRadius
 		for _, guide := range index.guides {
-			if _, _, ok := rayBox(ray.Origin, direction, limit,
-				guide.Min.Sub(V{radius, radius}), guide.Max.Add(V{radius, radius})); !ok {
+			if _, _, ok := geom.RayBox(ray.Origin, direction, limit,
+				guide.Min.Sub(V{X: radius, Y: radius}), guide.Max.Add(V{X: radius, Y: radius})); !ok {
 				continue
 			}
 			for i, a := range guide.Points[:len(guide.Points)-1] {
 				b := guide.Points[i+1]
-				distance, normal, inside, ok := rayCapsule(ray.Origin, direction, a, b, radius, limit)
+				distance, normal, inside, ok := geom.RayCapsule(ray.Origin, direction, a, b, radius, limit)
 				if ok {
 					consider(Hit{Kind: TargetGuide, GuideID: guide.ID,
 						Point: ray.Origin.Add(direction.Mul(distance)), Normal: normal,
@@ -217,11 +220,13 @@ func (g *Scene) Formation(id FormationID) (f Formation, available bool) {
 	}
 	f, available = index.formations[index.aliases[id.object]]
 	if available {
-		f.Polygons = copyQueryPolygons(f.Polygons)
+		f.Polygons = geom.CopyPolygons(f.Polygons)
 		for _, poly := range f.Polygons {
-			mapPoints(poly, g.orientation.world)
+			terrain.MapPoints(poly, func(point geom.V) geom.V {
+				return terrain.WorldPoint(g.orientation, point)
+			})
 		}
-		f.Min, f.Max = g.orientation.bounds(f.Min, f.Max)
+		f.Min, f.Max = terrain.WorldBounds(g.orientation, f.Min, f.Max)
 		f.SectionIDs = append([]int64(nil), f.SectionIDs...)
 	}
 	return
@@ -240,14 +245,14 @@ func (g *Scene) Guide(id GuideID) (guide GuideGeometry, available bool) {
 	guide, available = index.guides[id.object]
 	if available {
 		guide.Points = append([]V(nil), guide.Points...)
-		mapPoints(guide.Points, g.orientation.world)
-		guide.Min, guide.Max = g.orientation.bounds(guide.Min, guide.Max)
+		terrain.MapPoints(guide.Points, func(point geom.V) geom.V {
+			return terrain.WorldPoint(g.orientation, point)
+		})
+		guide.Min, guide.Max = terrain.WorldBounds(g.orientation, guide.Min, guide.Max)
 		guide.S = append([]float64(nil), guide.S...)
 	}
 	return
 }
-
-const queryEpsilon = 1e-10
 
 func validateQuery(ray Ray, options QueryOptions) (V, error) {
 	finite := func(x float64) bool { return !math.IsNaN(x) && !math.IsInf(x, 0) }
@@ -262,7 +267,7 @@ func validateQuery(ray Ray, options QueryOptions) (V, error) {
 	}
 	// Divide components directly so subnormal directions do not
 	// overflow the reciprocal of scale.
-	direction := V{ray.Direction.X / scale, ray.Direction.Y / scale}
+	direction := V{X: ray.Direction.X / scale, Y: ray.Direction.Y / scale}
 	direction = direction.Mul(1 / math.Hypot(direction.X, direction.Y))
 	end := ray.Origin.Add(direction.Mul(ray.MaxDistance))
 	if !finite(end.X) || !finite(end.Y) {
@@ -279,105 +284,4 @@ func hitLess(a, b Hit) bool {
 		return a.GuideID.object < b.GuideID.object
 	}
 	return a.FormationID.object < b.FormationID.object
-}
-
-func copyQueryPolygons(polygons [][]V) [][]V {
-	copy := make([][]V, len(polygons))
-	for i, poly := range polygons {
-		copy[i] = append([]V(nil), poly...)
-	}
-	return copy
-}
-
-func rayBox(origin, direction V, distance float64, lo, hi V) (float64, float64, bool) {
-	start, end := 0.0, distance
-	for _, axis := range [][4]float64{{origin.X, direction.X, lo.X, hi.X}, {origin.Y, direction.Y, lo.Y, hi.Y}} {
-		if axis[1] == 0 {
-			if axis[0] < axis[2] || axis[0] > axis[3] {
-				return 0, 0, false
-			}
-			continue
-		}
-		a, b := (axis[2]-axis[0])/axis[1], (axis[3]-axis[0])/axis[1]
-		if a > b {
-			a, b = b, a
-		}
-		start, end = math.Max(start, a), math.Min(end, b)
-		if start > end {
-			return 0, 0, false
-		}
-	}
-	return start, end, true
-}
-
-func raySegment(origin, direction, a, b V, limit float64) (float64, bool) {
-	edge, offset := b.Sub(a), a.Sub(origin)
-	denominator := cross(direction, edge)
-	if math.Abs(denominator) <= 1e-14*math.Max(edge.Len(), 1e-12) {
-		if math.Abs(cross(offset, direction)) > queryEpsilon {
-			return 0, false
-		}
-		t0, t1 := offset.Dot(direction), b.Sub(origin).Dot(direction)
-		start, end := math.Min(t0, t1), math.Max(t0, t1)
-		if end < -queryEpsilon || start > limit+queryEpsilon {
-			return 0, false
-		}
-		return math.Max(0, start), true
-	}
-	distance, fraction := cross(offset, edge)/denominator, cross(offset, direction)/denominator
-	if distance < -queryEpsilon || distance > limit+queryEpsilon || fraction < -queryEpsilon || fraction > 1+queryEpsilon {
-		return 0, false
-	}
-	return clamp(distance, 0, limit), true
-}
-
-// A guide's selectable area is the union of segment capsules, including round
-// end caps. This computes the first entry, not merely the closest approach.
-func rayCapsule(origin, direction, a, b V, radius, limit float64) (float64, V, bool, bool) {
-	if guideSegmentsDistance2(origin, origin, a, b) <= radius*radius+1e-20 {
-		return 0, V{}, true, true
-	}
-	if direction == (V{}) {
-		return 0, V{}, false, false
-	}
-	if radius == 0 {
-		distance, ok := raySegment(origin, direction, a, b, limit)
-		normal := b.Sub(a).Perp().Norm()
-		if normal.Dot(direction) > 0 {
-			normal = normal.Mul(-1)
-		}
-		return distance, normal, false, ok
-	}
-	best, normal := math.Inf(1), V{}
-	consider := func(distance float64, n V) {
-		if distance >= -queryEpsilon && distance <= limit+queryEpsilon && distance < best {
-			best, normal = math.Max(0, distance), n
-		}
-	}
-	edge := b.Sub(a)
-	if length := edge.Len(); length > 0 {
-		tangent := edge.Mul(1 / length)
-		perpendicular := tangent.Perp()
-		if speed := direction.Dot(perpendicular); speed != 0 {
-			for _, sign := range []float64{-1, 1} {
-				distance := (sign*radius - origin.Sub(a).Dot(perpendicular)) / speed
-				along := origin.Add(direction.Mul(distance)).Sub(a).Dot(tangent)
-				if along >= 0 && along <= length {
-					consider(distance, perpendicular.Mul(sign))
-				}
-			}
-		}
-	}
-	for _, center := range []V{a, b} {
-		offset := center.Sub(origin)
-		projection := offset.Dot(direction)
-		perpendicular := cross(offset, direction)
-		discriminant := radius*radius - perpendicular*perpendicular
-		if discriminant >= 0 {
-			distance := projection - math.Sqrt(discriminant)
-			n := origin.Add(direction.Mul(distance)).Sub(center).Norm()
-			consider(distance, n)
-		}
-	}
-	return best, normal, false, !math.IsInf(best, 1)
 }

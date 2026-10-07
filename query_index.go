@@ -6,6 +6,9 @@ import (
 	"math"
 	"sort"
 	"sync/atomic"
+
+	"github.com/razzie/ebiten-infinicave/internal/geom"
+	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
 var queryWorldCounter atomic.Uint64
@@ -18,7 +21,7 @@ type worldQueryIndex struct {
 	guideIDs                  map[[32]byte]uint64
 	aliases                   map[uint64]uint64
 	formations                map[uint64]Formation
-	formationEdges            map[uint64][]rockEdge
+	formationEdges            map[uint64][]terrain.RockEdge
 	formationBlocks           map[uint64][]queryBlock
 	guides                    map[uint64]GuideGeometry
 	sections                  []int64 // internal nonnegative IDs, ascending
@@ -50,13 +53,13 @@ func (q *worldQueryIndex) expire(w *world) {
 		if h == nil {
 			continue
 		}
-		for _, face := range h.faces {
-			faces[face.key] = true
+		for _, face := range h.Faces {
+			faces[face.Key] = true
 		}
-		for _, guide := range h.guides {
+		for _, guide := range h.Guides {
 			points := make([]V, len(guide.Pts))
 			for i, p := range guide.Pts {
-				points[i] = p.Add(V{Y: h.top})
+				points[i] = p.Add(V{Y: h.Top})
 			}
 			guides[queryGuideKey(points)] = true
 		}
@@ -83,7 +86,7 @@ func (q *worldQueryIndex) expire(w *world) {
 
 type queryBlock struct {
 	section  int64
-	geometry *terrainGeometry
+	geometry *terrain.Geometry
 	faces    []int
 }
 
@@ -99,7 +102,7 @@ func sameQueryBlocks(old, current []queryBlock) bool {
 			return false
 		}
 		for j, face := range a.faces {
-			p, q := a.geometry.faces[face].poly, b.geometry.faces[b.faces[j]].poly
+			p, q := a.geometry.Faces[face].Poly, b.geometry.Faces[b.faces[j]].Poly
 			if len(p) != len(q) || &p[0] != &q[0] {
 				return false
 			}
@@ -108,10 +111,10 @@ func sameQueryBlocks(old, current []queryBlock) bool {
 	return true
 }
 
-func queryFaceComplete(w *world, face terrainFace, top float64) bool {
-	lo, hi := face.min.Y+top, math.Min(0, face.max.Y+top)
-	first := max(0, int64(math.Floor(-hi+queryEpsilon)))
-	last := int64(math.Ceil(-lo-queryEpsilon)) - 1
+func queryFaceComplete(w *world, face terrain.Face, top float64) bool {
+	lo, hi := face.Min.Y+top, math.Min(0, face.Max.Y+top)
+	first := max(0, int64(math.Floor(-hi+geom.QueryEpsilon)))
+	last := int64(math.Ceil(-lo-geom.QueryEpsilon)) - 1
 	for owner := first; owner <= last; owner++ {
 		if s := w.sections[owner]; s == nil || s.geometry == nil {
 			return false
@@ -131,7 +134,7 @@ func (q *worldQueryIndex) rebuild(w *world) {
 	var blocks []queryBlock
 	for _, id := range q.sections {
 		h := w.sections[id].geometry
-		for _, faces := range h.blocks {
+		for _, faces := range h.Blocks {
 			blocks = append(blocks, queryBlock{id, h, faces})
 		}
 	}
@@ -152,7 +155,7 @@ func (q *worldQueryIndex) rebuild(w *world) {
 	byPreviousID := make(map[uint64]int)
 	for i, block := range blocks {
 		for _, face := range block.faces {
-			key := block.geometry.faces[face].key
+			key := block.geometry.Faces[face].Key
 			if other, ok := byKey[key]; ok {
 				join(i, other)
 			}
@@ -177,7 +180,7 @@ func (q *worldQueryIndex) rebuild(w *world) {
 		groups[r] = append(groups[r], i)
 	}
 	formations := make(map[uint64]Formation)
-	formationEdges := make(map[uint64][]rockEdge)
+	formationEdges := make(map[uint64][]terrain.RockEdge)
 	formationBlocks := make(map[uint64][]queryBlock)
 	faceIDs := make(map[[2]int64]uint64)
 	aliases := make(map[uint64]uint64)
@@ -188,15 +191,15 @@ func (q *worldQueryIndex) rebuild(w *world) {
 			sources[i] = blocks[node]
 		}
 		first := sources[0]
-		cachedID := q.faceIDs[first.geometry.faces[first.faces[0]].key]
+		cachedID := q.faceIDs[first.geometry.Faces[first.faces[0]].Key]
 		if cachedID != 0 && sameQueryBlocks(q.formationBlocks[cachedID], sources) {
 			f := q.formations[cachedID]
 			f.Complete = true
 			for _, block := range sources {
 				for _, i := range block.faces {
-					face := block.geometry.faces[i]
-					faceIDs[face.key] = cachedID
-					f.Complete = f.Complete && queryFaceComplete(w, face, block.geometry.top)
+					face := block.geometry.Faces[i]
+					faceIDs[face.Key] = cachedID
+					f.Complete = f.Complete && queryFaceComplete(w, face, block.geometry.Top)
 				}
 			}
 			formations[cachedID], formationEdges[cachedID] = f, q.formationEdges[cachedID]
@@ -213,9 +216,9 @@ func (q *worldQueryIndex) rebuild(w *world) {
 			block := blocks[node]
 			h := block.geometry
 			for _, i := range block.faces {
-				face := h.faces[i]
-				keys = append(keys, face.key)
-				if old := q.faceIDs[face.key]; old != 0 {
+				face := h.Faces[i]
+				keys = append(keys, face.Key)
+				if old := q.faceIDs[face.Key]; old != 0 {
 					previous[old] = true
 					if id == 0 || old < id {
 						id = old
@@ -223,15 +226,15 @@ func (q *worldQueryIndex) rebuild(w *world) {
 				}
 				// Padding discovers connections and missing continuation, but
 				// only the owned band contributes geometry to the union.
-				complete = complete && queryFaceComplete(w, face, h.top)
-				poly := clipHalfPlane(face.poly, V{0, -1}, 0)
-				poly = clipHalfPlane(poly, V{0, 1}, SectionHeight)
-				if len(poly) < 3 || math.Abs(faceArea(poly)) < 1e-15 {
+				complete = complete && queryFaceComplete(w, face, h.Top)
+				poly := geom.ClipHalfPlane(face.Poly, V{X: 0, Y: -1}, 0)
+				poly = geom.ClipHalfPlane(poly, V{X: 0, Y: 1}, SectionHeight)
+				if len(poly) < 3 || math.Abs(geom.PolygonArea(poly)) < 1e-15 {
 					continue
 				}
 				worldPoly := make([]V, len(poly))
 				for j, p := range poly {
-					worldPoly[j] = p.Add(V{Y: h.top})
+					worldPoly[j] = p.Add(V{Y: h.Top})
 				}
 				grid = append(grid, RockCell{Polygon: worldPoly, Raised: true})
 				sectionIDs[-block.section] = true
@@ -255,8 +258,8 @@ func (q *worldQueryIndex) rebuild(w *world) {
 			f.SectionIDs = append(f.SectionIDs, section)
 		}
 		sort.Slice(f.SectionIDs, func(i, j int) bool { return f.SectionIDs[i] > f.SectionIDs[j] })
-		edges := rockBoundaryEdges(grid, rockNeighbors(grid), true)
-		loops, ok := traceCollisionLoops(edges)
+		edges := terrain.RockBoundaryEdges(grid, terrain.RockNeighbors(grid), true)
+		loops, ok := terrain.TraceCollisionLoops(edges)
 		if !ok {
 			// Match CollisionGeometry's degenerate-junction fallback. Ray
 			// tests still use only union edges, never the internal face edges.
@@ -265,11 +268,11 @@ func (q *worldQueryIndex) rebuild(w *world) {
 			}
 		}
 		f.Polygons = loops
-		f.Min, f.Max = polygonBounds(grid[0].Polygon)
+		f.Min, f.Max = geom.PolygonBounds(grid[0].Polygon)
 		for _, cell := range grid[1:] {
-			lo, hi := polygonBounds(cell.Polygon)
-			f.Min = V{math.Min(f.Min.X, lo.X), math.Min(f.Min.Y, lo.Y)}
-			f.Max = V{math.Max(f.Max.X, hi.X), math.Max(f.Max.Y, hi.Y)}
+			lo, hi := geom.PolygonBounds(cell.Polygon)
+			f.Min = V{X: math.Min(f.Min.X, lo.X), Y: math.Min(f.Min.Y, lo.Y)}
+			f.Max = V{X: math.Max(f.Max.X, hi.X), Y: math.Max(f.Max.Y, hi.Y)}
 		}
 		formations[id], formationEdges[id] = f, edges
 		formationBlocks[id] = sources
@@ -285,13 +288,13 @@ func (q *worldQueryIndex) rebuild(w *world) {
 	guides := make(map[uint64]GuideGeometry)
 	for _, section := range q.sections {
 		h := w.sections[section].geometry
-		for _, g := range h.guides {
+		for _, g := range h.Guides {
 			if len(g.Pts) < 2 {
 				continue
 			}
 			points := make([]V, len(g.Pts))
 			for i, p := range g.Pts {
-				points[i] = p.Add(V{Y: h.top})
+				points[i] = p.Add(V{Y: h.Top})
 			}
 			key := queryGuideKey(points)
 			if guideIDs[key] != 0 {
@@ -305,7 +308,7 @@ func (q *worldQueryIndex) rebuild(w *world) {
 			for i := 1; i < len(points); i++ {
 				guide.S[i] = guide.S[i-1] + points[i].Sub(points[i-1]).Len()
 			}
-			guide.Min, guide.Max = polygonBounds(points)
+			guide.Min, guide.Max = geom.PolygonBounds(points)
 			guideIDs[key], guides[id] = id, guide
 		}
 	}
@@ -351,14 +354,14 @@ func (q *worldQueryIndex) coverage(origin, direction V, start, end float64, opti
 			last = q.sections[i]
 			i++
 		}
-		lo, hi := sectionTop(last)+radius, sectionTop(first)+SectionHeight-radius
+		lo, hi := terrain.SectionTop(last)+radius, terrain.SectionTop(first)+SectionHeight-radius
 		if first == 0 {
 			hi = 0 // below the floor is known empty, not unloaded terrain
 		}
 		if lo > hi {
 			continue
 		}
-		a, b, ok := rayBox(origin, direction, end, V{0, lo}, V{Width, hi})
+		a, b, ok := geom.RayBox(origin, direction, end, V{X: 0, Y: lo}, V{X: Width, Y: hi})
 		if ok {
 			intervals = append(intervals, interval{math.Max(start, a), b})
 		}
@@ -366,7 +369,7 @@ func (q *worldQueryIndex) coverage(origin, direction V, start, end float64, opti
 	sort.Slice(intervals, func(i, j int) bool { return intervals[i].start < intervals[j].start })
 	cursor := start
 	for _, interval := range intervals {
-		if interval.end < cursor || interval.start > cursor+queryEpsilon {
+		if interval.end < cursor || interval.start > cursor+geom.QueryEpsilon {
 			continue
 		}
 		cursor = math.Max(cursor, interval.end)

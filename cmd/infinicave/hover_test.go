@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/razzie/ebiten-infinicave"
+	infinicave "github.com/razzie/ebiten-infinicave"
 )
 
 func TestHoverUsesQueriesAndInvalidatesGeometryCache(t *testing.T) {
@@ -135,5 +135,48 @@ func TestHoverRasterBoundsLimitLongFormations(t *testing.T) {
 	r.clear()
 	if r.image != nil || r.target.kind != 0 {
 		t.Fatal("empty selection retained the overlay")
+	}
+}
+
+func TestLandscapeHoverUsesWorldCoordinates(t *testing.T) {
+	scene, err := infinicave.NewScene(infinicave.Config{
+		Seed: 42, Orientation: infinicave.Horizontal, View: infinicave.ViewClay,
+		LoadSection: func(id int64) infinicave.SectionContent {
+			if id != 0 {
+				return infinicave.SectionContent{}
+			}
+			return infinicave.SectionContent{Guides: []infinicave.Guide{{Pts: []infinicave.V{{X: .2, Y: .5}, {X: .8, Y: .5}}}}}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(scene.Close)
+	scene.SetRenderWidth(100)
+	viewport := infinicave.Viewport{X: .00049, Width: 1.8}
+	deadline := time.Now().Add(20 * time.Second)
+	for !scene.Update(viewport) {
+		if time.Now().After(deadline) {
+			t.Fatal("landscape hover fixture did not load")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	target := hoverAt(scene, infinicave.V{X: .5, Y: .5}, viewport, 100)
+	if target.kind != infinicave.TargetGuide {
+		t.Fatalf("landscape guide hover disagrees with the raster origin: %+v", target)
+	}
+	r, err := newHoverRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(r.close)
+	r.selectTarget(target, scene, 100, 0, 1)
+	if r.image == nil || r.image.Bounds().Dx() < r.image.Bounds().Dy() || r.orientation != infinicave.Horizontal {
+		t.Fatal("landscape guide highlight has incorrect world bounds")
+	}
+	for _, cursor := range []infinicave.V{{X: -.001, Y: .5}, {X: 1.8, Y: .5}, {X: .5, Y: -.001}, {X: .5, Y: 1}} {
+		if got := hoverAt(scene, cursor, viewport, 100); got.kind != 0 {
+			t.Fatalf("landscape margin selected terrain: %v", cursor)
+		}
 	}
 }

@@ -2,12 +2,24 @@ package infinicave
 
 import (
 	"fmt"
-	"image/color"
-	"math"
 	"sort"
 
-	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/razzie/ebiten-infinicave/internal/geom"
+	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
+
+// Hole describes a foreground rock cut in scene units. Circle uses Center and
+// Radius; Segment uses Start, End and full Width. Only the selected fields are
+// read. Carve uses world coordinates; SectionContent uses section-local points.
+// Radii and widths must be positive and finite; segment endpoints distinct.
+type Hole = terrain.Hole
+
+// HoleShape selects a circular blast or a flat-ended rectangular drill cut.
+type HoleShape = terrain.HoleShape
+
+const HoleCircle = terrain.HoleCircle
+
+const HoleSegment = terrain.HoleSegment
 
 // FormationChange maps an affected formation to its remaining connected parts.
 // No Remaining IDs means its cached portion was destroyed; two or more means
@@ -53,32 +65,26 @@ func (g *Scene) CarveSegment(start, end V, width float64) (CarveResult, error) {
 // Carve applies a Hole in world coordinates. It is also the common entry point
 // for saved or externally supplied edits; SectionLoader uses local coordinates.
 func (g *Scene) Carve(hole Hole) (CarveResult, error) {
-	hole = mapHole(hole, g.orientation.internal)
-	cut, err := hole.rockCut()
+	hole = terrain.MapHole(hole, func(point geom.V) geom.V {
+		return terrain.InternalPoint(g.orientation, point)
+	})
+	cut, err := terrain.CutFromHole(hole)
 	if err != nil {
 		return CarveResult{}, err
 	}
 	return g.carve(cut)
 }
 
-func finiteCarveValue(x float64) bool { return !math.IsNaN(x) && !math.IsInf(x, 0) }
-func finiteCarvePoint(p V) bool       { return finiteCarveValue(p.X) && finiteCarveValue(p.Y) }
-
-type rockCut struct {
-	poly     []V
-	min, max V
-}
-
-func (g *Scene) carve(cut rockCut) (CarveResult, error) {
+func (g *Scene) carve(cut terrain.RockCut) (CarveResult, error) {
 	if g.closed || g.world == nil {
 		return CarveResult{}, fmt.Errorf("infinicave: cannot carve a closed scene")
 	}
-	if cut.max.X <= 0 || cut.min.X >= Width || cut.min.Y >= 0 {
+	if cut.Max.X <= 0 || cut.Min.X >= Width || cut.Min.Y >= 0 {
 		return CarveResult{Complete: true}, nil
 	}
 	w := g.world
 	q := w.queryIndex()
-	result := CarveResult{Complete: cut.covered(q.sections)}
+	result := CarveResult{Complete: cut.Covered(q.sections)}
 	affected := make(map[uint64]bool)
 	// Track each replacement face's origin, including unchanged faces from
 	// the same formation. This maps both sides of a split to their parent.
@@ -86,26 +92,26 @@ func (g *Scene) carve(cut rockCut) (CarveResult, error) {
 	for _, id := range q.sections {
 		section := w.sections[id]
 		old := section.geometry
-		updated, parents, changed := cut.geometry(id, old, g.collisionTolerance)
-		updated, plantsChanged := cut.plants(updated)
+		updated, parents, changed := cut.Geometry(id, old, g.collisionTolerance)
+		updated, plantsChanged := cut.Plants(updated)
 		if plantsChanged {
 			section.geometry = updated
 			g.redrawCarvedVegetation(section, id)
 		}
 		if !changed {
-			for _, face := range old.faces {
-				origins[face.key] = q.faceIDs[face.key]
+			for _, face := range old.Faces {
+				origins[face.Key] = q.faceIDs[face.Key]
 			}
 			continue
 		}
 		for i, parent := range parents {
-			origins[updated.faces[i].key] = q.faceIDs[old.faces[parent].key]
+			origins[updated.Faces[i].Key] = q.faceIDs[old.Faces[parent].Key]
 		}
 		// Only actual removed area marks a formation affected, not a bounds
 		// overlap or a boundary touch.
-		for i, face := range old.faces {
-			if cut.intersects(face.poly, old.top) {
-				affected[q.faceIDs[old.faces[i].key]] = true
+		for i, face := range old.Faces {
+			if cut.Intersects(face.Poly, old.Top) {
+				affected[q.faceIDs[old.Faces[i].Key]] = true
 			}
 		}
 		section.geometry = updated
@@ -131,7 +137,7 @@ func (g *Scene) carve(cut rockCut) (CarveResult, error) {
 	// Collision may be ready while its section is still generating decoration
 	// or uploading. Keep that early cache in sync with edits as well.
 	for id, geometry := range w.collision {
-		updated, _, changed := cut.geometry(id, geometry, g.collisionTolerance)
+		updated, _, changed := cut.Geometry(id, geometry, g.collisionTolerance)
 		w.collision[id] = updated
 		if changed && w.sections[id] == nil {
 			result.SectionIDs = append(result.SectionIDs, -id)
@@ -171,275 +177,4 @@ func (g *Scene) carve(cut rockCut) (CarveResult, error) {
 		result.Complete = result.Complete && change.Complete
 	}
 	return result, nil
-}
-
-// Check section coverage with intervals, avoiding a walk through potentially
-// enormous unloaded ranges for large cuts. Out-of-world area is known empty.
-func (cut rockCut) covered(sections []int64) bool {
-	if cut.max.X <= 0 || cut.min.X >= Width || cut.min.Y >= 0 {
-		return true
-	}
-	end := math.Min(0, cut.max.Y)
-	for i := len(sections) - 1; i >= 0; i-- {
-		top := sectionTop(sections[i])
-		if top+SectionHeight <= cut.min.Y || top >= end {
-			continue
-		}
-		if top > cut.min.Y+queryEpsilon {
-			return false
-		}
-		cut.min.Y = top + SectionHeight
-		if cut.min.Y >= end-queryEpsilon {
-			return true
-		}
-	}
-	return false
-}
-
-func (cut rockCut) localPolygon(top float64) []V {
-	poly := make([]V, len(cut.poly))
-	for i, p := range cut.poly {
-		poly[i] = p.Sub(V{Y: top})
-	}
-	return poly
-}
-
-func cutIntersection(poly, hole []V) []V {
-	for i, a := range hole {
-		normal := hole[(i+1)%len(hole)].Sub(a).Perp().Mul(-1).Norm()
-		poly = clipHalfPlane(poly, normal, a.Dot(normal))
-		if len(poly) < 3 {
-			return nil
-		}
-	}
-	return poly
-}
-
-func convexCarveFace(poly []V) bool {
-	for i, a := range poly {
-		b, c := poly[(i+1)%len(poly)], poly[(i+2)%len(poly)]
-		if cross(b.Sub(a), c.Sub(b)) < -1e-16 {
-			return false
-		}
-	}
-	return true
-}
-
-func (cut rockCut) intersects(poly []V, top float64) bool {
-	lo, hi := polygonBounds(poly)
-	if hi.X <= cut.min.X || lo.X >= cut.max.X || hi.Y+top <= cut.min.Y || lo.Y+top >= cut.max.Y {
-		return false
-	}
-	hole := cut.localPolygon(top)
-	if convexCarveFace(poly) {
-		return faceArea(cutIntersection(poly, hole)) > 1e-15
-	}
-	for _, tri := range faceTriangles(poly) {
-		if faceArea(cutIntersection([]V{poly[tri[0]], poly[tri[1]], poly[tri[2]]}, hole)) > 1e-15 {
-			return true
-		}
-	}
-	return false
-}
-
-// Subtract a convex hole by peeling off the outside of each half-plane.
-// Each piece is disjoint; the final inside remainder is discarded. Triangulate
-// concave source faces first so half-plane clipping cannot bridge concavities.
-func subtractRockCut(poly, hole []V) [][]V {
-	sources := [][]V{poly}
-	if !convexCarveFace(poly) {
-		sources = nil
-		for _, tri := range faceTriangles(poly) {
-			sources = append(sources, []V{poly[tri[0]], poly[tri[1]], poly[tri[2]]})
-		}
-	}
-	var pieces [][]V
-	for _, source := range sources {
-		inside := source
-		for i, a := range hole {
-			normal := hole[(i+1)%len(hole)].Sub(a).Perp().Mul(-1).Norm()
-			outside := clipHalfPlane(inside, normal.Mul(-1), -a.Dot(normal))
-			if len(outside) >= 3 && faceArea(outside) > 1e-15 {
-				pieces = append(pieces, outside)
-			}
-			inside = clipHalfPlane(inside, normal, a.Dot(normal))
-			if len(inside) < 3 || faceArea(inside) <= 1e-15 {
-				break
-			}
-		}
-	}
-	// Remove partition edges within the original facet where possible. A ring
-	// stays as multiple simple faces; joinFaces never fills an enclosed hole.
-	for i := 0; i < len(pieces); i++ {
-		for j := i + 1; j < len(pieces); j++ {
-			if mergeableBorder(pieces[i], pieces[j], nil) <= mergeTolerance {
-				continue
-			}
-			if merged := joinFaces(pieces[i], pieces[j]); len(merged) >= 3 {
-				pieces[i] = merged
-				pieces = append(pieces[:j], pieces[j+1:]...)
-				j = i // retry the enlarged face against all remaining pieces
-			}
-		}
-	}
-	return pieces
-}
-
-func (cut rockCut) geometry(id int64, old *terrainGeometry, tolerance float64) (*terrainGeometry, []int, bool) {
-	if old == nil {
-		return old, nil, false
-	}
-	grid, parents, changed := cut.grid(old.grid, old.top)
-	if !changed {
-		return old, nil, false
-	}
-	cuts := append(append([]rockCut(nil), old.cuts...), cut)
-	topology := carveTopology(old.topology, grid, parents, cuts, old.top)
-	updated := prepareTerrainGeometry(sectionData{id: id, guides: old.guides, foregroundTopology: topology}, tolerance)
-	updated.vegetation = old.vegetation
-	return updated, parents, true
-}
-
-func (cut rockCut) grid(source RockGrid, top float64) (RockGrid, []int, bool) {
-	var grid RockGrid
-	var parents []int
-	changed := false
-	hole := cut.localPolygon(top)
-	for i, cell := range source {
-		if !cut.intersects(cell.Polygon, top) {
-			if changed {
-				grid = append(grid, cell)
-				parents = append(parents, i)
-			}
-			continue
-		}
-		if !changed {
-			// Most cached sections miss a small cut entirely. Allocate only
-			// when it removes area, and copy the untouched prefix once.
-			grid = make(RockGrid, i, len(source)+8)
-			copy(grid, source[:i])
-			parents = make([]int, i, len(source)+8)
-			for j := range parents {
-				parents[j] = j
-			}
-			changed = true
-		}
-		for _, poly := range subtractRockCut(cell.Polygon, hole) {
-			fragment := cell
-			fragment.Polygon = poly
-			if !insideFace(fragment.Center, poly) {
-				fragment.Center = faceCenter(poly)
-				fragment.Z = cell.depthAt(fragment.Center)
-			}
-			grid = append(grid, fragment)
-			parents = append(parents, i)
-		}
-	}
-	if !changed {
-		return source, nil, false
-	}
-	return grid, parents, changed
-}
-
-func carvedTopology(grid RockGrid, cuts []rockCut, top float64) *rockTopology {
-	t := &rockTopology{grid: grid, neighbors: rockNeighbors(grid), cuts: cuts, top: top}
-	t.prepareBoundary()
-	return t
-}
-
-func (g *Scene) redrawCarvedSection(section *worldSection) {
-	if section.foreground == nil { // CPU-only geometry consumers/tests
-		return
-	}
-	mesh := prepareGridWithTopology(nil, g.view, section.geometry.topology)
-	if section.mesh != nil {
-		section.mesh.foreground = mesh
-		section.mesh.geometry = section.geometry
-	}
-	g.drawCarvedForeground(section.foreground, mesh, section.geometry.top)
-}
-
-func (g *Scene) drawCarvedForeground(dst *ebiten.Image, mesh gridMesh, top float64) {
-	pixels := dst.Bounds().Dx()
-	mesh = scaleGridMesh(mesh, pixels, 0)
-	dst.Clear()
-	g.drawGridFaces(dst, mesh.faces, top-SectionHeight)
-	if g.world.white == nil {
-		g.world.white = ebiten.NewImage(1, 1)
-		g.world.white.Fill(color.White)
-	}
-	for _, outline := range mesh.outlines {
-		outline.draw(dst, g.world.white)
-	}
-}
-
-func (g *Scene) applyStoredCuts(mesh *sectionMesh) {
-	changed := false
-	plantsChanged := false
-	for _, cut := range g.world.cuts {
-		geometry, _, edited := cut.geometry(mesh.id, mesh.geometry, g.collisionTolerance)
-		geometry, plantsEdited := cut.plants(geometry)
-		mesh.geometry = geometry
-		changed = changed || edited
-		plantsChanged = plantsChanged || plantsEdited
-	}
-	if changed {
-		mesh.foreground = prepareGridWithTopology(nil, g.view, mesh.geometry.topology)
-	}
-	if plantsChanged {
-		g.prepareCarvedVegetation(mesh)
-	}
-}
-
-// Restart affected uploads, including partially drawn or blurred vegetation.
-// Published foreground was edited above and need not be uploaded again.
-func (g *Scene) carveUpload(cut rockCut) {
-	u := g.world.upload
-	if u == nil {
-		return
-	}
-	geometry, _, changed := cut.geometry(u.data.id, u.data.geometry, g.collisionTolerance)
-	geometry, plantsChanged := cut.plants(geometry)
-	if !changed && !plantsChanged {
-		return
-	}
-	defer func() {
-		pixels := u.pixels
-		if pixels == 0 {
-			pixels = g.world.renderWidth()
-		}
-		u.raster = scaleSectionMesh(u.data, pixels)
-	}()
-	u.data.geometry = geometry
-	if changed {
-		u.data.foreground = prepareGridWithTopology(nil, g.view, geometry.topology)
-	}
-	if plantsChanged {
-		g.prepareCarvedVegetation(&u.data)
-		for _, img := range []*ebiten.Image{u.vines, u.foregroundVines, u.mushrooms} {
-			if img != nil {
-				img.Deallocate()
-			}
-		}
-		u.vines, u.foregroundVines, u.mushrooms = nil, nil, nil
-		if u.stage >= 5 {
-			u.stage, u.next = 5, 0
-			if section := g.world.sections[u.data.id]; section != nil {
-				section.geometry = geometry
-			}
-		}
-	}
-	if u.stage >= 5 {
-		return
-	}
-	if !changed {
-		return
-	}
-	if u.stage >= 2 {
-		if u.foreground != nil {
-			u.foreground.Deallocate()
-			u.foreground = nil
-		}
-		u.stage, u.next = 2, 0
-	}
 }

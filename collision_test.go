@@ -1,115 +1,116 @@
 package infinicave
 
 import (
-	"math"
 	"reflect"
 	"testing"
+
+	"github.com/razzie/ebiten-infinicave/internal/render"
+	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
-func TestCollisionUnionWithHoleAndPartialSharedBorders(t *testing.T) {
-	// Four strips enclose a hole. Their shared edges have different lengths.
-	grid := RockGrid{
-		terrainRect(0.03, 0.1, 0.08, 0.02), terrainRect(0.03, 0.16, 0.08, 0.02),
-		terrainRect(0.03, 0.12, 0.02, 0.04), terrainRect(0.09, 0.12, 0.02, 0.04),
-		// A corner-touching rectangle stays a separate block.
-		terrainRect(0.11, 0.18, 0.02, 0.02),
+func TestCollisionReadyDuringUploadIncludesStoredCutsAndOwnsPolygons(t *testing.T) {
+	w := &world{
+		sections: make(map[int64]*worldSection), terrain: make(chan sectionTerrain, 1),
+		jobs: make(chan int64, 1), done: make(chan struct{}), working: true,
+		// Empty draw batches keep an unrelated upload busy.
+		upload: &sectionUpload{stage: 1, img: render.NewBackgroundImageAt(1000), data: render.SectionMesh{
+			Background: render.GridMesh{Outlines: make([]render.TriangleMesh, uploadDrawsPerTick*2)},
+		}},
 	}
-	geometry := prepareTerrainGeometry(sectionData{foreground: grid}, 0).collision
-	if len(geometry.Polygons) != 3 {
-		t.Fatalf("got %d contours, want outer boundary, hole, and separate rectangle", len(geometry.Polygons))
+	g, err := NewScene(Config{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	area, holes := 0.0, 0
-	for _, poly := range geometry.Polygons {
-		area += faceArea(poly)
-		if faceArea(poly) < 0 {
-			holes++
+	g.world.close()
+	g.world = w
+	defer g.Close()
+	cut, _ := terrain.CutFromHole((Hole{Shape: HoleCircle, Center: V{X: .5, Y: -1.5}, Radius: .1}))
+	w.cuts = []terrain.RockCut{cut}
+	early := terrain.PrepareTerrainGeometry(terrain.SectionData{ID: 1, Foreground: RockGrid{terrainRect(.2, .2, .6, .6)}}, 0)
+	w.terrain <- sectionTerrain{id: 1, geometry: early}
+	called := 0
+	g.onCollisionReady = func(geometry CollisionGeometry) {
+		called++
+		if w.upload == nil || w.sections[1] != nil || !w.working {
+			t.Fatal("collision waited for generation or upload to finish")
 		}
-	}
-	if math.Abs(area-.0052) > 1e-12 || holes != 1 {
-		t.Fatalf("area %v / holes %d; internal borders or hole are incorrect", area, holes)
-	}
-	for _, p := range []V{{0.04, -0.89}, {0.1, -0.85}, {0.04, -0.84}, {0.03, -0.88}, {0.12, -0.81}} {
-		if !geometry.Contains(p) {
-			t.Fatalf("solid point %v was missed", p)
+		cached, ok := g.CollisionGeometry(-1)
+		if !ok || geometry.ID != -1 || geometry.Top != -2 || !reflect.DeepEqual(geometry, cached) {
+			t.Fatal("callback and collision accessor disagree")
 		}
-	}
-	for _, p := range []V{{0.07, -0.85}, {0.02, -0.85}, {0.14, -0.85}} {
-		if geometry.Contains(p) {
-			t.Fatalf("empty point %v was filled", p)
+		if geometry.Contains(V{X: .5, Y: -1.5}) || !geometry.Contains(V{X: .3, Y: -1.3}) {
+			t.Fatal("early collision did not apply stored runtime cuts")
 		}
+		geometry.Polygons[0][0].X = 100
+		cached.Polygons[0][0].X = 200
 	}
-	if got := prepareTerrainGeometry(sectionData{foreground: grid}, 0).collision; !reflect.DeepEqual(got, geometry) {
-		t.Fatal("collision contour ordering is nondeterministic")
+	viewport := Viewport{Y: -.8, Height: .8}
+	if g.Update(viewport) || called != 1 {
+		t.Fatal("Update did not notify before rendering was ready")
 	}
-	for _, tolerance := range []float64{.001, .010, 1} {
-		g := prepareTerrainGeometry(sectionData{foreground: grid}, tolerance).collision
-		if g.Contains(V{0.07, -0.85}) || !g.Contains(V{0.04, -0.85}) {
-			t.Fatal("simplification lost the hole or its enclosing rock")
-		}
+	cached, ok := g.CollisionGeometry(-1)
+	if !ok || cached.Polygons[0][0].X > 1 || !early.Collision.Contains(V{X: .5, Y: -1.5}) {
+		t.Fatal("game-thread edits or callback modified worker-owned geometry")
+	}
+	// A runtime edit must update early geometry and report its section for physics.
+	w.upload.img.Deallocate()
+	w.upload = nil
+	result, err := g.CarveCircle(V{X: .3, Y: -1.3}, .03)
+	if err != nil || !reflect.DeepEqual(result.SectionIDs, []int64{-1}) {
+		t.Fatalf("early carve did not report edited collisions: %+v, %v", result, err)
+	}
+	cached, _ = g.CollisionGeometry(-1)
+	if cached.Contains(V{X: .3, Y: -1.3}) || called != 1 {
+		t.Fatal("runtime carve left early collision stale or repeated notification")
+	}
+	w.prune(-100.8, .8, 0)
+	if _, ok := g.CollisionGeometry(-1); ok {
+		t.Fatal("distant early collision was not evicted")
 	}
 }
 
-func TestCollisionSimplificationToleranceAndSeams(t *testing.T) {
-	poly := []V{{0.03, 0.98}, {0.04, 0.9801}, {0.05, 0.98}, {0.06, 0.9801}, {0.07, 0.98},
-		{0.07, 1.02}, {0.06, 1.0201}, {0.05, 1.02}, {0.04, 1.0201}, {0.03, 1.02}}
-	before := append([]V(nil), poly...)
-	simplified := simplifyCollisionLoop(poly, .0002)
-	if len(simplified) >= len(poly) {
-		t.Fatal("tolerance did not reduce boundary complexity")
+func TestCollisionReadyCallbackSurvivesResetAndCanCloseScene(t *testing.T) {
+	called := 0
+	var g *Scene
+	var err error
+	g, err = NewScene(Config{OnCollisionReady: func(CollisionGeometry) {
+		called++
+		g.Close()
+	}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(poly, before) {
-		t.Fatal("simplification mutated visual geometry")
-	}
-	for _, p := range poly {
-		best := math.Inf(1)
-		for i, a := range simplified {
-			best = math.Min(best, guideSegmentsDistance2(p, p, a, simplified[(i+1)%len(simplified)]))
-		}
-		if best > .0002*.0002+1e-15 {
-			t.Fatalf("vertex %v exceeds tolerance: %v", p, math.Sqrt(best))
-		}
-	}
-	for _, seam := range []V{{0.03, 1}, {0.07, 1}} {
-		found := false
-		for _, p := range simplified {
-			found = found || p == seam
-		}
-		if !found {
-			t.Fatalf("exact section crossing %v was removed", seam)
-		}
-	}
-	// Deep concavities and narrow features must never become self-crossing.
-	concave := []V{{0.03, 1.1}, {0.07, 1.1}, {0.07, 1.11}, {0.04, 1.11}, {0.04, 1.14}, {0.03, 1.14}}
-	for _, tolerance := range []float64{.001, .010, 1} {
-		g := simplifyCollisionLoop(concave, tolerance)
-		if len(g) < 3 || !simpleCollisionLoop(g) || faceArea(g) <= 0 {
-			t.Fatal("simplification produced an invalid polygon")
-		}
+	defer g.Close()
+	g.Reset(7)
+	geometry := terrain.PrepareTerrainGeometry(terrain.SectionData{}, 0)
+	g.world.terrain <- sectionTerrain{geometry: geometry}
+	if g.Update(Viewport{Y: -.8, Height: .8}) || called != 1 || !g.closed {
+		t.Fatal("reset lost callback or Update continued after callback closed scene")
 	}
 }
 
 func TestSceneCollisionGeometryOwnershipAndAvailability(t *testing.T) {
-	h := prepareTerrainGeometry(sectionData{foreground: RockGrid{terrainRect(0.03, 0.1, 0.03, 0.03)}}, 0)
+	h := terrain.PrepareTerrainGeometry(terrain.SectionData{Foreground: RockGrid{terrainRect(0.03, 0.1, 0.03, 0.03)}}, 0)
 	scene := &Scene{world: &world{sections: map[int64]*worldSection{0: {geometry: h}}}}
 	geometry, ok := scene.CollisionGeometry(0)
 	if !ok || len(geometry.Polygons) == 0 {
 		t.Fatal("cached collision geometry is unavailable")
 	}
-	if geometry.Top != -1 || !geometry.Contains(V{.04, -.89}) || geometry.Contains(V{.4, -.89}) {
+	if geometry.Top != -1 || !geometry.Contains(V{X: .04, Y: -.89}) || geometry.Contains(V{X: .4, Y: -.89}) {
 		t.Fatal("cached collision geometry does not use scene units")
 	}
-	before := h.collision.Polygons[0][0]
+	before := h.Collision.Polygons[0][0]
 	geometry.Polygons[0][0].X += 100
-	if h.collision.Polygons[0][0] != before {
+	if h.Collision.Polygons[0][0] != before {
 		t.Fatal("caller modified the cached collision geometry")
 	}
 	copy, ok := scene.CollisionGeometry(0)
-	if !ok || !copy.Contains(V{.04, -.89}) {
+	if !ok || !copy.Contains(V{X: .04, Y: -.89}) {
 		t.Fatal("repeated collision access changed the cached geometry")
 	}
-	upper := prepareTerrainGeometry(sectionData{id: 1, foreground: RockGrid{terrainRect(0.03, 0.1, 0.03, 0.03)}}, 0)
+	upper := terrain.PrepareTerrainGeometry(terrain.SectionData{ID: 1, Foreground: RockGrid{terrainRect(0.03, 0.1, 0.03, 0.03)}}, 0)
 	scene.world.sections[1] = &worldSection{geometry: upper}
-	if geometry, ok := scene.CollisionGeometry(-1); !ok || geometry.ID != -1 || geometry.Top != -2 || !geometry.Contains(V{.04, -1.89}) {
+	if geometry, ok := scene.CollisionGeometry(-1); !ok || geometry.ID != -1 || geometry.Top != -2 || !geometry.Contains(V{X: .04, Y: -1.89}) {
 		t.Fatal("negative section ID did not resolve the correct cached geometry")
 	}
 	if _, ok := scene.CollisionGeometry(1); ok {
@@ -121,23 +122,5 @@ func TestSceneCollisionGeometryOwnershipAndAvailability(t *testing.T) {
 	scene.closed = true
 	if _, ok := scene.CollisionGeometry(0); ok {
 		t.Fatal("closed scene exposed stale geometry")
-	}
-}
-
-func TestGeneratedCollisionMatchesRockFaces(t *testing.T) {
-	data := newSectionBuilder(42, testCurlSection).build(0)
-	h := prepareTerrainGeometry(data, 0)
-	grid := insetForegroundGrid(data.foreground)
-	for y := .00125; y < 1; y += 0.013 {
-		for x := 0.01825; x < generationWidth-0.018; x += 0.013 {
-			p := V{x, y}
-			inside := false
-			for _, cell := range grid {
-				inside = inside || insideFace(p, cell.Polygon)
-			}
-			if h.collision.Contains(p.Add(V{Y: h.top})) != inside {
-				t.Fatalf("exact collision boundary disagrees with visual rock at %v", p)
-			}
-		}
 	}
 }

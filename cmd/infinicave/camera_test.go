@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"testing"
 
 	infinicave "github.com/razzie/ebiten-infinicave"
@@ -101,36 +102,6 @@ func TestLayoutClampsEmptyWindowDimensions(t *testing.T) {
 	}
 }
 
-func TestResizeUpdatePreservesSeedAndCarvingStatus(t *testing.T) {
-	config := infinicave.DefaultConfig()
-	config.Seed = 42
-	scene, err := infinicave.NewScene(config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(scene.Close)
-	g := &Game{scene: scene, seed: config.Seed}
-	g.Layout(1000, 800)
-	g.carving = carveGesture{active: true}
-	g.carveStatus = "previous cut"
-	g.Layout(500, 400)
-	if err := g.Update(); err != nil {
-		t.Fatal(err)
-	}
-	if g.regenerate || g.seed != config.Seed || g.carving.active || g.carveStatus != "previous cut" || !g.loading {
-		t.Fatal("resize must refresh rendering with the current seed and retain carving status")
-	}
-	// Further ticks at the same size must not reset fresh gesture/status state.
-	g.carveStatus = "new cut"
-	g.Layout(500, 400)
-	if err := g.Update(); err != nil {
-		t.Fatal(err)
-	}
-	if g.carveStatus != "new cut" {
-		t.Fatal("unchanged layout regenerated again")
-	}
-}
-
 func TestExportLayoutRemainsFixedOnWindowResize(t *testing.T) {
 	g := &Game{output: "scene.png"}
 	for _, size := range [][2]int{{1000, 800}, {500, 400}, {1200, 900}} {
@@ -177,6 +148,61 @@ func TestLandscapeAndPortraitCoordinates(t *testing.T) {
 		}
 		if g.worldPoint(infinicave.V{X: tc.offset + float64(tc.pixels) + 1}).X <= 1 {
 			t.Fatal("right margin mapped inside cave")
+		}
+	}
+}
+
+func TestLandscapeCameraCoordinatesAndResize(t *testing.T) {
+	for _, size := range [][2]int{{1600, 900}, {501, 800}, {1001, 600}, {0, 0}} {
+		g := &Game{mode: infinicave.Horizontal}
+		w, h := g.Layout(size[0], size[1])
+		pixels := min(w, h)
+		wantExtent := float64(w) / float64(pixels)
+		v := g.viewport()
+		if v.X != 0 || v.Width != wantExtent || g.renderOffsetX() != 0 || g.renderOffsetY() != float64(h-pixels)/2 {
+			t.Fatalf("horizontal layout %v: %+v", size, v)
+		}
+		g.camera.Y -= 3.123456
+		g.camera.Velocity = -.01
+		v = g.viewport()
+		if math.Abs(v.X-3.123456) > 1e-12 || v.Velocity != .01 {
+			t.Fatalf("horizontal camera movement: %+v", v)
+		}
+		cursor := infinicave.V{X: float64(pixels) * .6, Y: g.renderOffsetY() + float64(pixels)*.4}
+		world := g.worldPoint(cursor)
+		if math.Abs(world.Y-.4) > 1e-12 || math.Abs(world.X-(g.cameraX()+.6)) > 1e-12 {
+			t.Fatalf("horizontal cursor: %v", world)
+		}
+		x, y := g.screenPoint(world)
+		if math.Abs(float64(x)-cursor.X) > .0001 || math.Abs(float64(y)-cursor.Y) > .0001 {
+			t.Fatal("horizontal carve preview does not match cursor coordinates")
+		}
+		if g.worldPoint(infinicave.V{Y: g.renderOffsetY() - 1}).Y >= 0 ||
+			g.worldPoint(infinicave.V{Y: g.renderOffsetY() + float64(pixels) + 1}).Y <= 1 {
+			t.Fatal("horizontal margins map inside the cave")
+		}
+		before := g.viewport().X
+		g.Layout(w*2, h*2)
+		if math.Abs(g.viewport().X-before) > 1e-12 {
+			t.Fatal("uniform resize moved the landscape camera")
+		}
+		g.camera.glideTo(g.camera.floor())
+		for i := 0; i < 400; i++ {
+			g.camera.step()
+		}
+		if g.viewport().X != 0 || g.camera.Velocity != 0 {
+			t.Fatal("horizontal camera did not return to the starting edge")
+		}
+	}
+}
+
+func TestLandscapeExportLayout(t *testing.T) {
+	g := &Game{mode: infinicave.Horizontal, output: "scene.png"}
+	for _, size := range [][2]int{{1600, 900}, {500, 800}, {800, 500}} {
+		w, h := g.Layout(size[0], size[1])
+		v := g.viewport()
+		if w != exportHeight || h != renderWidth || v.X != 0 || v.Width != 2.4 {
+			t.Fatalf("horizontal export changed: %d x %d / %+v", w, h, v)
 		}
 	}
 }

@@ -1,160 +1,87 @@
 package infinicave
 
 import (
-	"math"
-	"math/rand"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/razzie/ebiten-infinicave/internal/render"
+	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
-func TestWorldSeedsMatchOverlappingWindows(t *testing.T) {
-	seed := int64(42)
-	aTop, bTop := sectionTop(0), sectionTop(1)
-	noise := NewPerlin(rand.New(rand.NewSource(seed)))
-	noise.OffsetY = aTop
-	a := worldSeeds(seed, aTop, noise)
-	noise.OffsetY = bTop
-	b := worldSeeds(seed, bTop, noise)
-	collect := func(seeds []V, top float64) []V {
-		var result []V
-		for _, p := range seeds {
-			p.Y += top
-			if p.Y > -1.900 && p.Y < -.100 {
-				result = append(result, p)
+func TestWorldWorkerPreparesAllLayers(t *testing.T) {
+	w := newWorld(42, ViewShaded, 0, nil)
+	defer w.close()
+	w.request(0)
+	var early *terrain.Geometry
+	select {
+	case terrain := <-w.terrain:
+		early = terrain.geometry
+		if terrain.id != 0 || early == nil || len(early.Collision.Polygons) == 0 {
+			t.Fatal("worker omitted early collision geometry")
+		}
+		if len(early.Vegetation.Vines)+len(early.Vegetation.ForegroundVines)+len(early.Vegetation.Mushrooms) != 0 {
+			t.Fatal("worker published collision after adding vegetation")
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("background collision preparation stalled")
+	}
+	select {
+	case mesh := <-w.results:
+		if mesh.Geometry == nil || len(mesh.Geometry.Collision.Polygons) == 0 {
+			t.Fatal("worker omitted collision geometry")
+		}
+		if early == mesh.Geometry || !reflect.DeepEqual(early.Collision, mesh.Geometry.Collision) || len(early.Vegetation.Vines) != 0 {
+			t.Fatal("worker mutated or replaced early collision boundaries")
+		}
+		if mesh.ID != 0 || len(mesh.Background.Faces.Indices) == 0 || len(mesh.Foreground.Faces.Indices) == 0 || len(mesh.Vines) == 0 || len(mesh.ForegroundVines) == 0 || len(mesh.Mushrooms.Indices) == 0 {
+			t.Fatal("worker returned incomplete section geometry")
+		}
+		checkMesh(t, mesh.Background.Faces)
+		checkMesh(t, mesh.Foreground.Faces)
+		checkMesh(t, mesh.Mushrooms)
+		for _, layer := range [][]render.TriangleMesh{mesh.Background.Outlines, mesh.Foreground.Outlines, mesh.Vines, mesh.ForegroundVines} {
+			for _, m := range layer {
+				checkMesh(t, m)
 			}
 		}
-		return result
-	}
-	left, right := collect(a, aTop), collect(b, bTop)
-	if len(left) != len(right) {
-		t.Fatal("overlapping sections use different terrain site counts")
-	}
-	for i, p := range left {
-		if p.Sub(right[i]).Len() > 1e-9 {
-			t.Fatal("overlapping sections use different terrain sites")
+		if len(w.sections) != 0 || w.upload != nil || w.white != nil {
+			t.Fatal("worker touched game-thread scene or GPU state")
 		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("background section preparation stalled")
 	}
 }
 
-func TestForegroundGridStaysInsideHorizontalScreenInset(t *testing.T) {
-	grid := RockGrid{
-		{Center: V{0.01, 0.05}, Polygon: []V{{0, 0}, {0.04, 0}, {0.04, 0.1}, {0, 0.1}}, Raised: true},
-		{Center: V{generationWidth - 0.01, 0.05}, Polygon: []V{{generationWidth - 0.04, 0}, {generationWidth, 0}, {generationWidth, 0.1}, {generationWidth - 0.04, 0.1}}, Raised: true},
-	}
-	original := make([][]V, len(grid))
-	for i := range grid {
-		original[i] = append([]V(nil), grid[i].Polygon...)
-	}
-
-	clipped := insetForegroundGrid(grid)
-	if len(clipped) != len(grid) {
-		t.Fatalf("inset retained %d cells, want %d", len(clipped), len(grid))
-	}
-	for _, cell := range clipped {
-		for _, p := range cell.Polygon {
-			if p.X < foregroundScreenInset-1e-9 || p.X > generationWidth-foregroundScreenInset+1e-9 {
-				t.Fatalf("foreground vertex reaches horizontal screen edge: %v", p)
-			}
+func TestDiagnosticWorkerRetainsTerrainGeometry(t *testing.T) {
+	w := newWorld(42, ViewClay, 0, testLedgeSection)
+	defer w.close()
+	w.request(0)
+	select {
+	case mesh := <-w.results:
+		if mesh.Geometry == nil || len(mesh.Geometry.Blocks) == 0 || len(mesh.Geometry.Guides) == 0 || len(mesh.Geometry.Collision.Polygons) == 0 {
+			t.Fatal("diagnostic view lost terrain or collision geometry")
 		}
-	}
-	for i := range grid {
-		if !reflect.DeepEqual(grid[i].Polygon, original[i]) {
-			t.Fatal("render inset mutated the source geometry")
-		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("terrain geometry preparation stalled")
 	}
 }
 
-func TestWorldSectionSeam(t *testing.T) {
-	for _, orientation := range []Orientation{Vertical, Horizontal} {
-		t.Run(orientation.String(), func(t *testing.T) { testWorldSectionSeam(t, orientation) })
-	}
-}
-
-func testWorldSectionSeam(t *testing.T, orientation Orientation) {
-	builder := newSectionBuilder(42, nil, orientation)
-	a, b := builder.build(0), builder.build(1)
-	// Compare whole rock faces in a strip around the shared seam, not just
-	// sample colors. Geometry, relief, shadowing, and material must agree.
-	type face struct {
-		color           [4]uint8
-		polygon         []V
-		seed            int64
-		z               float64
-		normal          V3
-		shadow, ambient float64
-	}
-	collect := func(grid RockGrid, top float64) map[[2]int64]face {
-		result := make(map[[2]int64]face)
-		for _, c := range grid {
-			y := c.Center.Y + top
-			if y < -1.120 || y > -.880 {
-				continue
-			}
-			poly := make([]V, len(c.Polygon))
-			for i, p := range c.Polygon {
-				poly[i] = V{p.X, p.Y + top}
-			}
-			key := [2]int64{int64(math.Round(c.Center.X * 1e8)), int64(math.Round(y * 1e8))}
-			result[key] = face{[4]uint8{c.Color.R, c.Color.G, c.Color.B, c.Color.A}, poly, cellSeed(42, c.Center, top), c.Z, c.Normal, c.Shadow, c.Ambient}
+func TestVisibleSectionsAtSeams(t *testing.T) {
+	for _, tc := range []struct {
+		y         float64
+		height    float64
+		low, high int64
+	}{
+		{-.8, .8, 0, 0}, {-1, 1, 0, 0}, {-1.001, .8, 0, 1}, {-2, 1, 1, 1}, {-10.8, .8, 10, 10}, {-1e6, .8, 999999, 999999},
+		{-1.0001, .0002, 0, 1}, {-1.0001, .0001, 1, 1},
+	} {
+		viewport := Viewport{Y: tc.y, Height: tc.height}
+		low, high := visibleSections(viewport.Y, viewport.Height)
+		if low != tc.low || high != tc.high {
+			t.Fatalf("viewport %v/%v: sections %d..%d, want %d..%d", tc.y, tc.height, low, high, tc.low, tc.high)
 		}
-		return result
-	}
-	for i, pair := range [][2]RockGrid{{a.background, b.background}, {a.foreground, b.foreground}} {
-		left, right := collect(pair[0], sectionTop(0)), collect(pair[1], sectionTop(1))
-		if len(left) == 0 || len(left) != len(right) {
-			t.Fatalf("layer %d seam has different faces: %d/%d", i, len(left), len(right))
-		}
-		for key, x := range left {
-			y, ok := right[key]
-			if !ok || x.color != y.color || x.seed != y.seed || len(x.polygon) != len(y.polygon) {
-				t.Fatalf("layer %d: mismatched face at %v", i, key)
-			}
-			if math.Abs(x.shadow-y.shadow) > 1e-8 || math.Abs(x.ambient-y.ambient) > 1e-8 || math.Abs(x.z-y.z) > 1e-11 || math.Abs(x.normal.X-y.normal.X)+math.Abs(x.normal.Y-y.normal.Y)+math.Abs(x.normal.Z-y.normal.Z) > 1e-8 {
-				t.Fatalf("layer %d: height, normal, or lighting seam at %v", i, key)
-			}
-			for j, p := range x.polygon {
-				if p.Sub(y.polygon[j]).Len() > 1e-9 {
-					t.Fatalf("layer %d: polygon seam at %v: %v vs %v", i, key, p, y.polygon[j])
-				}
-			}
-		}
-	}
-	// At least one full vine in the adjacent sections must span a boundary; its
-	// offshoots must remain attached even outside the owner's core section.
-	crossing := false
-	for _, section := range []sectionData{a, b} {
-		for i, v := range section.vines {
-			for j, p := range v.Points {
-				if j == 0 {
-					continue
-				}
-				prev := v.Points[j-1]
-				for _, edge := range []float64{0, SectionHeight} {
-					if (prev.P.Y-edge)*(p.P.Y-edge) < 0 && prev.Radius > 0 && p.Radius > 0 {
-						crossing = true
-					}
-				}
-			}
-			if v.Depth > 0 {
-				if v.Parent < 0 || v.Parent >= i {
-					t.Fatal("cross-section vine lost its parent")
-				}
-				parent := section.vines[v.Parent]
-				if parent.Points[v.Joint].P != v.Points[0].P {
-					t.Fatal("cross-section vine branch is detached")
-				}
-			}
-		}
-	}
-	if !crossing {
-		t.Fatal("vines stopped at all section boundaries")
-	}
-	// Eviction must not change either geometry or parent attachment indices.
-	again := newSectionBuilder(42, nil, orientation).build(0)
-	if !reflect.DeepEqual(a, again) {
-		t.Fatal("revisiting an evicted section changes the scene")
 	}
 }
 

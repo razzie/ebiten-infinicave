@@ -2,124 +2,17 @@ package infinicave
 
 import (
 	"fmt"
-	"math"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/razzie/ebiten-infinicave/internal/render"
+	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
-// Width is the fixed cross-axis span of the cave in scene units: its width in
-// Vertical scenes and its height in Horizontal scenes.
-const Width = 1
+// Width is the fixed cross-axis span of the cave in scene units.
+const Width = terrain.Width
 
 // SectionHeight is the edge length of one square streamed section in scene units.
-const SectionHeight = 1
-
-// Config controls generation and rendering. Start with DefaultConfig to use
-// the viewer's appearance. A zero Config disables texture, background effects,
-// fog, and bats.
-type Config struct {
-	Seed int64
-	// Orientation fixes the scrolling axis for the scene's lifetime. The zero
-	// value is Vertical. Horizontal grows rightward and keeps plants upright.
-	Orientation Orientation
-	// Texture is surface grain strength, from 0 (disabled) to 16.
-	Texture float64
-	// BackgroundBlur is Gaussian blur softness in scene units (0 disables it,
-	// maximum 0.05). Background rocks and vines are blurred together.
-	BackgroundBlur float64
-	// ShadowOpacity controls foreground rock shadows on the background, from
-	// 0 (disabled) to 1. Shadows follow the current silhouette, including cuts.
-	ShadowOpacity float64
-	// ShadowBlur is shadow softness in scene units, from 0 (hard) to 0.05.
-	ShadowBlur float64
-	// ShadowOffset projects rock shadows in scene units; positive Y is down.
-	// Each component must be between -1 and 1.
-	ShadowOffset V
-	// Fog enables moving mist between the background and foreground layers.
-	// Diagnostic views disable fog regardless of this setting.
-	Fog bool
-	// BatsPerMinute is the average number of animated bat arrivals per minute.
-	// It must be finite and nonnegative; zero disables bats.
-	// Bats use world coordinates and are hidden outside ViewShaded.
-	BatsPerMinute float64
-	// View selects the material. Diagnostic views disable texture, background
-	// effects, fog, and vegetation.
-	View View
-	// CollisionTolerance is the polygon simplification tolerance in scene units.
-	// Zero preserves exact collision geometry. Larger values reduce vertices and
-	// collision cost at the expense of accuracy. Rendering remains detailed.
-	CollisionTolerance float64
-	// LoadSection supplies authored guides and holes for each section.
-	// Nil uses the default random generator.
-	LoadSection SectionLoader
-	// OnCollisionReady receives foreground collision polygons without waiting
-	// for vegetation generation or render meshes.
-	// Scene calls it during Update on the game goroutine, including for prefetched
-	// sections. The geometry owns its slices and includes authored holes, stored
-	// runtime cuts, and CollisionTolerance. Nil disables notifications.
-	// Evicted sections notify again when regenerated; Reset retains the callback.
-	// Runtime edits do not notify; use CarveResult.SectionIDs to refresh collisions.
-	// GenerateSectionWithConfig calls it synchronously on the calling goroutine.
-	OnCollisionReady func(CollisionGeometry)
-}
-
-// DefaultConfig returns the viewer's appearance with a deterministic seed of 0.
-func DefaultConfig() Config {
-	return Config{Texture: 8, BackgroundBlur: .002, ShadowOpacity: .65,
-		ShadowBlur: .008, ShadowOffset: V{.018, .025}, Fog: true, BatsPerMinute: 7.5, View: ViewShaded}
-}
-
-func (c Config) validate() error {
-	if c.Orientation != Vertical && c.Orientation != Horizontal {
-		return fmt.Errorf("infinicave: invalid orientation %v", c.Orientation)
-	}
-	if math.IsNaN(c.Texture) || math.IsInf(c.Texture, 0) || c.Texture < 0 || c.Texture > 16 {
-		return fmt.Errorf("infinicave: texture must be between 0 and 16")
-	}
-	if c.View < ViewShaded || c.View > ViewShadows {
-		return fmt.Errorf("infinicave: invalid terrain view %v", c.View)
-	}
-	for _, setting := range []struct {
-		name         string
-		value, limit float64
-	}{{"background blur", c.BackgroundBlur, .05}, {"shadow blur", c.ShadowBlur, .05}, {"shadow opacity", c.ShadowOpacity, 1}} {
-		if math.IsNaN(setting.value) || math.IsInf(setting.value, 0) || setting.value < 0 || setting.value > setting.limit {
-			return fmt.Errorf("infinicave: %s must be between 0 and %g", setting.name, setting.limit)
-		}
-	}
-	for _, offset := range []float64{c.ShadowOffset.X, c.ShadowOffset.Y} {
-		if math.IsNaN(offset) || math.IsInf(offset, 0) || math.Abs(offset) > 1 {
-			return fmt.Errorf("infinicave: shadow offset components must be between -1 and 1")
-		}
-	}
-	if math.IsNaN(c.CollisionTolerance) || math.IsInf(c.CollisionTolerance, 0) || c.CollisionTolerance < 0 {
-		return fmt.Errorf("infinicave: collision tolerance must be finite and nonnegative")
-	}
-	if math.IsNaN(c.BatsPerMinute) || math.IsInf(c.BatsPerMinute, 0) || c.BatsPerMinute < 0 {
-		return fmt.Errorf("infinicave: bats per minute must be finite and nonnegative")
-	}
-	return nil
-}
-
-// Viewport describes the region to render. Vertical scenes use Y and Height,
-// with Y <= -Height and a starting viewport at Y = -Height. Horizontal scenes
-// use X and Width, with X >= 0 and a starting viewport at X = 0. The other
-// axis spans [0, 1]. Velocity is movement along world Y or X in scene units
-// per tick and controls prefetching; the caller owns camera movement.
-type Viewport struct {
-	Y        float64
-	Height   float64
-	Velocity float64
-	// Horizontal scenes use X and Width instead of Y and Height. X is the
-	// left edge, must be nonnegative, and positive Velocity moves rightward.
-	X, Width float64
-}
-
-func (v Viewport) valid() bool {
-	return v.Height > 0 && !math.IsNaN(v.Height) && !math.IsInf(v.Height, 0) &&
-		!math.IsNaN(v.Y) && !math.IsInf(v.Y, 0) &&
-		v.Y <= -v.Height && !math.IsNaN(v.Velocity) && !math.IsInf(v.Velocity, 0)
-}
+const SectionHeight = terrain.SectionHeight
 
 // Scene streams and renders an infinite cave. Create it with NewScene and
 // release it with Close. All Scene methods must run on the Ebitengine game
@@ -132,9 +25,9 @@ type Scene struct {
 	material             *ebiten.Shader
 	backgroundFade       *ebiten.Shader
 	vineMaterial         *ebiten.Shader
-	fog                  *fogRenderer
-	background           *backgroundRenderer
-	bats                 *batFlock
+	fog                  *render.FogRenderer
+	background           *render.BackgroundRenderer
+	bats                 *render.BatFlock
 	geometryRevisionBase uint64 // revisions accumulated across world resets
 	texture              float64
 	view                 View
@@ -155,39 +48,39 @@ func NewScene(config Config) (*Scene, error) {
 		g.texture = 0
 	}
 	var err error
-	g.material, err = ebiten.NewShader(materialShaderSource)
+	g.material, err = ebiten.NewShader(render.MaterialShaderSource)
 	if err != nil {
 		return nil, fmt.Errorf("infinicave: compile rock shader: %w", err)
 	}
-	g.backgroundFade, err = ebiten.NewShader(backgroundFadeShaderSource)
+	g.backgroundFade, err = ebiten.NewShader(render.BackgroundFadeShaderSource)
 	if err != nil {
 		g.Close()
 		return nil, fmt.Errorf("infinicave: compile background fade shader: %w", err)
 	}
-	g.vineMaterial, err = ebiten.NewShader(vineShaderSource)
+	g.vineMaterial, err = ebiten.NewShader(render.VineShaderSource)
 	if err != nil {
 		g.Close()
 		return nil, fmt.Errorf("infinicave: compile vine shader: %w", err)
 	}
 	if config.Fog && g.view == ViewShaded {
-		g.fog, err = newFogRenderer(g.orientation)
+		g.fog, err = render.NewFogRenderer(g.orientation)
 		if err != nil {
 			g.Close()
 			return nil, fmt.Errorf("infinicave: compile fog shader: %w", err)
 		}
 	}
 	if g.view == ViewShaded && (config.BackgroundBlur > 0 || config.ShadowOpacity > 0) {
-		effects := config
-		effects.ShadowOffset = g.orientation.internal(config.ShadowOffset)
-		g.background, err = newBackgroundRenderer(effects)
+		effects := render.BackgroundConfig{BackgroundBlur: config.BackgroundBlur, ShadowOpacity: config.ShadowOpacity, ShadowBlur: config.ShadowBlur}
+		effects.ShadowOffset = terrain.InternalPoint(g.orientation, config.ShadowOffset)
+		g.background, err = render.NewBackgroundRenderer(effects)
 		if err != nil {
 			g.Close()
 			return nil, fmt.Errorf("infinicave: compile background shaders: %w", err)
 		}
 	}
-	g.world = newWorld(config.Seed, g.view, g.collisionTolerance, g.orientation.sectionLoader(g.loadSection), g.orientation)
+	g.world = newWorld(config.Seed, g.view, g.collisionTolerance, terrain.OrientedSectionLoader(g.orientation, g.loadSection), g.orientation)
 	if config.BatsPerMinute > 0 && g.view == ViewShaded {
-		g.bats = newBatFlock(config.Seed, config.BatsPerMinute, g.orientation)
+		g.bats = render.NewBatFlock(config.Seed, config.BatsPerMinute, g.orientation)
 	}
 	return g, nil
 }
@@ -200,7 +93,7 @@ func NewScene(config Config) (*Scene, error) {
 // before vegetation. OnCollisionReady runs here as soon as generated polygons
 // arrive. An invalid viewport or a closed Scene returns false without doing work.
 func (g *Scene) Update(viewport Viewport) bool {
-	viewport, valid := g.orientation.viewport(viewport)
+	viewport, valid := orientedViewport(g.orientation, viewport)
 	if g.closed || !valid {
 		return false
 	}
@@ -210,10 +103,10 @@ func (g *Scene) Update(viewport Viewport) bool {
 		return false
 	}
 	if g.fog != nil {
-		g.fog.update()
+		g.fog.Update()
 	}
 	if g.bats != nil {
-		g.bats.update(viewport)
+		g.bats.Update(viewport)
 	}
 	g.world.viewport = viewport
 	if u := g.world.upload; u != nil && !meshVisible(u.data, viewport) {
@@ -268,7 +161,7 @@ func (g *Scene) SetRenderWidth(pixels int) {
 // not add hover, loading text, or UI, and does nothing for an invalid viewport
 // or a closed Scene.
 func (g *Scene) Draw(dst *ebiten.Image, viewport Viewport) {
-	viewport, valid := g.orientation.viewport(viewport)
+	viewport, valid := orientedViewport(g.orientation, viewport)
 	if g.closed || !valid {
 		return
 	}
@@ -277,13 +170,13 @@ func (g *Scene) Draw(dst *ebiten.Image, viewport Viewport) {
 		// Reuse the section-frame compositor at native resolution. A quarter
 		// turn is an exact pixel mapping; transparent gaps preserve dst.
 		size := dst.Bounds().Size()
-		ensureEffectImage(&g.orientedTarget, size.Y, size.X)
+		render.EnsureEffectImage(&g.orientedTarget, size.Y, size.X)
 		g.orientedTarget.Clear()
 		target = g.orientedTarget
 	}
 	g.world.draw(target, viewport.Y, viewport.Height, g.fog, g.background)
 	if g.bats != nil {
-		g.bats.draw(target, viewport)
+		g.bats.Draw(target, viewport)
 	}
 	if g.orientation == Horizontal {
 		op := &ebiten.DrawImageOptions{}
@@ -310,10 +203,10 @@ func (g *Scene) Reset(seed int64) {
 	pixels := g.world.renderWidth()
 	g.geometryRevisionBase = g.GeometryRevision() + 1
 	g.world.close()
-	g.world = newWorld(seed, g.view, g.collisionTolerance, g.orientation.sectionLoader(g.loadSection), g.orientation)
+	g.world = newWorld(seed, g.view, g.collisionTolerance, terrain.OrientedSectionLoader(g.orientation, g.loadSection), g.orientation)
 	g.world.pixels = pixels
 	if g.bats != nil {
-		g.bats = newBatFlock(seed, g.bats.perMinute, g.orientation)
+		g.bats = render.NewBatFlock(seed, g.bats.PerMinute, g.orientation)
 	}
 }
 
@@ -335,10 +228,10 @@ func (g *Scene) Close() {
 		g.world.close()
 	}
 	if g.fog != nil {
-		g.fog.shader.Deallocate()
+		g.fog.Close()
 	}
 	if g.background != nil {
-		g.background.close()
+		g.background.Close()
 	}
 	if g.vineMaterial != nil {
 		g.vineMaterial.Deallocate()

@@ -6,6 +6,9 @@ The root package is `infinicave`; the interactive viewer and PNG exporter live i
 `cmd/infinicave`. The library leaves your game loop, input, camera, window settings,
 and UI under your control.
 
+See [the architecture guide](docs/architecture.md) for package ownership, file
+navigation, and the generation/rendering lifecycle.
+
 Import it as `github.com/razzie/ebiten-infinicave`:
 
 ```sh
