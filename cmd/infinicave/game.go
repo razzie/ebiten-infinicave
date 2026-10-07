@@ -47,6 +47,11 @@ func (g *Game) Update() error {
 		}
 		return ebiten.Termination
 	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyF11) ||
+		(ebiten.IsKeyPressed(ebiten.KeyAlt) && inpututil.IsKeyJustPressed(ebiten.KeyEnter)) {
+		// Ebitengine restores the previous window size when leaving fullscreen.
+		ebiten.SetFullscreen(!ebiten.IsFullscreen())
+	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyR) {
 		g.seed++
 		g.regenerate = true
