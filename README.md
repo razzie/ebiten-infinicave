@@ -140,7 +140,8 @@ command-line tools; library code can use the constants directly.
 
 `Config.BatsPerMinute` sets the average number of small bats per minute entering either side of the
 viewport and fly across on curved paths, with swoops, varying speed, and banking
-as their wings flap. `Scene.Update` advances their animation once per tick;
+as their wings flap. Each bat has a subtle, fixed shade variation.
+`Scene.Update` advances their animation once per tick;
 repeated `Scene.Draw` calls share the same animation state. Their paths stay in
 world coordinates as you scroll or resize. `Scene.Reset` clears existing bats
 and starts a fresh, seed-reproducible arrival sequence at the configured frequency.

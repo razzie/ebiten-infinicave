@@ -18,6 +18,7 @@ type Bat struct {
 	control1, control2 float64 // heights of the cubic route's control points
 	duration, Age      float64
 	Size, phase, weave float64
+	shade              float32 // fixed brightness offset for this bat
 }
 
 // position combines a broad curved route with smaller swoops. Horizontal travel
@@ -106,6 +107,8 @@ func (f *BatFlock) spawn(viewport Viewport, age float64) {
 	if f.rng.Intn(2) == 0 {
 		b.Start.X, b.End.X = b.End.X, b.Start.X
 	}
+	// Reuse the random phase to preserve the arrival and flight sequence.
+	b.shade = float32((b.phase/(2*math.Pi) - .5) * .3)
 	if b.Age < b.duration {
 		f.Bats = append(f.Bats, b)
 	}
@@ -127,6 +130,8 @@ func (f *BatFlock) Draw(dst *ebiten.Image, viewport Viewport) {
 		}
 		options.ColorScale.Reset()
 		options.ColorScale.ScaleWithColor(color.NRGBA{R: 45, G: 35, B: 40, A: uint8(math.Round(255 * horizontalFade(position.X)))})
+		shade := 1 + b.shade
+		options.ColorScale.Scale(shade, shade, shade, 1)
 		flap := float32(math.Sin(b.Age*2*math.Pi*6 + b.phase))
 		path := batSilhouette(flap)
 		transform := &vector.AddPathOptions{}
