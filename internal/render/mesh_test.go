@@ -43,7 +43,7 @@ func TestPreparedOutlinesPreserveBlackPockets(t *testing.T) {
 			if v.DstX < 9.99 {
 				t.Fatal("outline entered a black pocket")
 			}
-			if math.Abs(float64(v.ColorR-v.ColorA*18/255)) > 1e-7 {
+			if math.Abs(float64(v.ColorR-v.ColorA*3/255)) > 1e-7 {
 				t.Fatal("outline color is not premultiplied")
 			}
 		}

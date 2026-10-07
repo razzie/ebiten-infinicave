@@ -10,6 +10,7 @@ import (
 // Voronoi faces, not a second approximation of the original noise field.
 type RockCell struct {
 	orientation     Orientation // Lighting basis for the internal section frame.
+	worldTop        float64     // Stable material origin across padded windows.
 	Center          geom.V
 	Polygon         []geom.V
 	Color           color.NRGBA
@@ -56,6 +57,12 @@ func InsetForegroundGrid(grid RockGrid) RockGrid {
 
 // RockOrientation returns the lighting basis of a generated rock face.
 func RockOrientation(cell RockCell) Orientation { return cell.orientation }
+
+// RockMaterialPoint supplies world coordinates for deterministic face detail.
+func RockMaterialPoint(cell RockCell, p geom.V) geom.V {
+	p.Y += cell.worldTop
+	return WorldPoint(cell.orientation, p)
+}
 
 // WithRockOrientation selects a lighting basis for an internal diagnostic face.
 func WithRockOrientation(cell RockCell, orientation Orientation) RockCell {

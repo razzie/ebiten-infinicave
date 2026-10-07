@@ -24,11 +24,13 @@ func (g *Scene) drawGridFaces(dst *ebiten.Image, mesh render.TriangleMesh, top f
 	if len(mesh.Indices) == 0 {
 		return
 	}
+	light := terrain.RockLightDirection(g.orientation)
 	dst.DrawTrianglesShader32(mesh.Vertices, mesh.Indices, g.material, &ebiten.DrawTrianglesShaderOptions{
 		AntiAlias: true,
 		Uniforms: map[string]any{
 			"Texture": float32(g.texture),
 			"Offset":  []float32{317, float32(top*render.RasterPixelsPerUnit) + 791},
+			"Light":   []float32{float32(light.X), float32(light.Y), float32(light.Z)},
 		},
 	})
 }

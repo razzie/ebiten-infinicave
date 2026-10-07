@@ -204,7 +204,11 @@ func testWorldSectionSeam(t *testing.T, orientation Orientation) {
 		}
 		return result
 	}
-	for i, pair := range [][2]RockGrid{{a.Background, b.Background}, {a.Foreground, b.Foreground}} {
+	for i, pair := range [][2]RockGrid{
+		{a.Background, b.Background}, {a.Foreground, b.Foreground},
+		{ShadeRockFaces(a.Foreground, ExposedRockEdges(a.Foreground)), ShadeRockFaces(b.Foreground, ExposedRockEdges(b.Foreground))},
+		{ShadeRockFaces(a.Background, nil), ShadeRockFaces(b.Background, nil)},
+	} {
 		left, right := collect(pair[0], SectionTop(0)), collect(pair[1], SectionTop(1))
 		if len(left) == 0 || len(left) != len(right) {
 			t.Fatalf("layer %d seam has different faces: %d/%d", i, len(left), len(right))
@@ -212,10 +216,10 @@ func testWorldSectionSeam(t *testing.T, orientation Orientation) {
 		for key, x := range left {
 			y, ok := right[key]
 			if !ok || x.color != y.color || x.seed != y.seed || len(x.polygon) != len(y.polygon) {
-				t.Fatalf("layer %d: mismatched face at %v", i, key)
+				t.Fatalf("layer %d: mismatched face at %v: found=%v color %v/%v normal %v/%v shadow %v/%v ambient %v/%v", i, key, ok, x.color, y.color, x.normal, y.normal, x.shadow, y.shadow, x.ambient, y.ambient)
 			}
 			if math.Abs(x.shadow-y.shadow) > 1e-8 || math.Abs(x.ambient-y.ambient) > 1e-8 || math.Abs(x.z-y.z) > 1e-11 || math.Abs(x.normal.X-y.normal.X)+math.Abs(x.normal.Y-y.normal.Y)+math.Abs(x.normal.Z-y.normal.Z) > 1e-8 {
-				t.Fatalf("layer %d: height, normal, or lighting seam at %v", i, key)
+				t.Fatalf("layer %d: height, normal, or lighting seam at %v: normal %v/%v shadow %v/%v ambient %v/%v", i, key, x.normal, y.normal, x.shadow, y.shadow, x.ambient, y.ambient)
 			}
 			for j, p := range x.polygon {
 				if p.Sub(y.polygon[j]).Len() > 1e-9 {

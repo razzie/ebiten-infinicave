@@ -101,7 +101,16 @@ func appendRockBevels(vertices []ebiten.Vertex, indices []uint32, grid terrain.R
 	for _, edge := range edges {
 		c := grid[edge.Cell]
 		inward := edge.B.Sub(edge.A).Perp().Norm()
-		width := math.Min(.00045, edge.B.Sub(edge.A).Len()*.06)
+		world := terrain.RockMaterialPoint(c, edge.A.Add(edge.B).Mul(.5))
+		key := terrain.CollisionVertexKey(world)
+		chip := terrain.SiteRandom(0x626576656c, key[0], key[1], 0)
+		width := math.Min(.00025+.00055*chip, edge.B.Sub(edge.A).Len()*.06)
+		lightDirection := terrain.RockLightDirection(terrain.RockOrientation(c))
+		edgeLight := math.Max(0, inward.Mul(-1).Dot((geom.V{X: lightDirection.X, Y: lightDirection.Y}).Norm()))
+		facing := geom.Smoothstep(.02, .85, edgeLight)
+		if view == ViewShaded {
+			width = math.Min((.00065+.00115*chip)*(.6+.4*facing), edge.B.Sub(edge.A).Len()*.1)
+		}
 		a, b := edge.A.Add(inward.Mul(width)), edge.B.Add(inward.Mul(width))
 		if !geom.InsidePolygon(geom.LerpVector(a, b, .5), c.Polygon) {
 			continue
@@ -110,13 +119,13 @@ func appendRockBevels(vertices []ebiten.Vertex, indices []uint32, grid terrain.R
 		clr := terrain.RockSurfaceColor(normal, c.Shadow, c.Ambient, terrain.RockOrientation(c))
 		clr = rockViewColor(terrain.RockCell{Color: clr, Raised: true}, view)
 		if view == ViewShaded {
-			// Color the existing bevel with warm grazing light. Shadowed edges
-			// retain their material tone, so the rim never becomes an outline.
+			// A broader pale rim catches the upper-left light on exposed tops
+			// and side facets. Occluded and light-opposing edges stay subdued.
 			light := terrain.SurfaceLight(normal, terrain.RockOrientation(c))
-			warmth := .72 * light * light * c.Shadow
+			warmth := .8 * facing * light * c.Shadow * (.5 + .5*chip)
 			clr.R = uint8(math.Round(geom.Lerp(float64(clr.R), 255, warmth)))
-			clr.G = uint8(math.Round(geom.Lerp(float64(clr.G), 199, warmth)))
-			clr.B = uint8(math.Round(geom.Lerp(float64(clr.B), 112, warmth)))
+			clr.G = uint8(math.Round(geom.Lerp(float64(clr.G), 234, warmth)))
+			clr.B = uint8(math.Round(geom.Lerp(float64(clr.B), 193, warmth)))
 		}
 		vertices, indices = appendRockQuad(vertices, indices, [4]geom.V{edge.A, edge.B, b, a}, clr)
 	}

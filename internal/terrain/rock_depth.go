@@ -59,13 +59,15 @@ func newRockDepth(grids ...RockGrid) *rockDepth {
 				crossings = crossings[:0]
 				for j, a := range c.Polygon {
 					b := c.Polygon[(j+1)%len(c.Polygon)]
-					if (a.Y <= py && b.Y > py) || (b.Y <= py && a.Y > py) {
+					// Shared edges on a scan line belong to the same face in
+					// every padded window, despite translation roundoff.
+					if (a.Y <= py+1e-10 && b.Y > py+1e-10) || (b.Y <= py+1e-10 && a.Y > py+1e-10) {
 						crossings = append(crossings, a.X+(b.X-a.X)*(py-a.Y)/(b.Y-a.Y))
 					}
 				}
 				sort.Float64s(crossings)
 				for j := 0; j+1 < len(crossings); j += 2 {
-					for x := max(0, int(math.Ceil(crossings[j]/rockDepthStep-.5))); x < min(rockDepthWidth, int(math.Ceil(crossings[j+1]/rockDepthStep-.5))); x++ {
+					for x := max(0, int(math.Ceil(crossings[j]/rockDepthStep-.5-1e-9))); x < min(rockDepthWidth, int(math.Ceil(crossings[j+1]/rockDepthStep-.5-1e-9))); x++ {
 						p := geom.V{X: (float64(x) + .5) * rockDepthStep, Y: py}
 						index := y*rockDepthWidth + x
 						d.heights[index] = math.Max(d.heights[index], RockDepthAt(c, p))
@@ -81,7 +83,11 @@ func (d *rockDepth) at(p geom.V) float64 {
 	if p.X < 0 || p.X >= generationWidth || p.Y < GenerationMinY || p.Y >= generationMaxY {
 		return -.016
 	}
-	return d.heights[int((p.Y-GenerationMinY)/rockDepthStep)*rockDepthWidth+int(p.X/rockDepthStep)]
+	// Equivalent padded windows can differ by a few floating-point bits at
+	// a texel boundary. Resolve those ties identically before indexing.
+	x := min(rockDepthWidth-1, int(math.Floor(p.X/rockDepthStep+1e-9)))
+	y := min(rockDepthHeight-1, int(math.Floor((p.Y-GenerationMinY)/rockDepthStep+1e-9)))
+	return d.heights[y*rockDepthWidth+x]
 }
 
 func (d *rockDepth) visibility(p geom.V, z float64) float64 {

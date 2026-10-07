@@ -12,6 +12,12 @@ const foregroundEdgeFadeWidth = .140
 // All terrain lighting, including exposed walls, uses this one light.
 var rockLight = (geom.V3{X: -.28, Y: -.86, Z: .65}).Norm()
 
+// RockLightDirection expresses the shared light in the section's render frame.
+func RockLightDirection(orientation Orientation) geom.V3 {
+	p := InternalPoint(orientation, geom.V{X: rockLight.X, Y: rockLight.Y})
+	return geom.V3{X: p.X, Y: p.Y, Z: rockLight.Z}
+}
+
 // The guide is the exposed lip. Just inside it the bevel rises to a crest,
 // then a much wider flank descends toward the surrounding recessed terrain.
 func ridgeProfile(distance, width, height, bevel float64) float64 {
@@ -100,6 +106,7 @@ func shadeRockGrids(background, foreground RockGrid, noise *Perlin, orientation 
 	for _, grid := range []RockGrid{background, foreground} {
 		for i := range grid {
 			grid[i].orientation = mode
+			grid[i].worldTop = noise.OffsetY
 		}
 	}
 	depth := newRockDepth(background, foreground)

@@ -3,6 +3,7 @@ package main
 
 var Texture float
 var Offset vec2
+var Light vec3
 
 func noise(p vec2) float {
 	q := fract(vec3(p.x, p.y, p.x) * .1031)
@@ -19,6 +20,10 @@ func smoothNoise(p vec2) float {
 	return mix(a, b, f.y)
 }
 
+func mineralHeight(p vec2) float {
+	return smoothNoise(p/2.8)*.7 + smoothNoise(p/1.15)*.3
+}
+
 // Only cell faces pass through this shader; outlines are drawn afterward.
 // Source coordinates anchor the texture to the artwork.
 // custom.y is continuous face tilt; custom.zw is the face normal in screen space.
@@ -30,9 +35,9 @@ func Fragment(dst vec4, src vec2, color vec4, custom vec4) vec4 {
 
 	// One continuous plane per rock. The triangles filling a concave or
 	// merged face must not introduce their own wedge-shaped tonal seams.
-	mineral := (smoothNoise(p/83.0)-.5)*.045
-	mineral += (smoothNoise(p/21.0)-.5)*.045
-	mineral += (smoothNoise(p/5.0)-.5)*.025
+	mineral := (smoothNoise(p/83.0)-.5)*.035
+	mineral += (smoothNoise(p/21.0)-.5)*.025
+	mineral += (smoothNoise(p/5.0)-.5)*.014
 	// Faint mineral strokes run along the facet, with broad warping to avoid
 	// repetitive stripes. Normal channels are constant across a whole face.
 	n := custom.zw
@@ -40,15 +45,24 @@ func Fragment(dst vec4, src vec2, color vec4, custom vec4) vec4 {
 	t := vec2(-n.y, n.x)
 	warp := smoothNoise(p/57.0)*3.0
 	strokes := smoothNoise(vec2(dot(p,t)/63.0, dot(p,n)/8.0 + warp)) - .5
-	mineral += strokes*.028
-	plane := custom.y*.012
+	mineral += strokes*.018
+	plane := custom.y*.006
 	rgb *= 1.0 + (mineral+plane)*Texture*visible
+
+	// Shallow pits respond to the same light as the polygon. Perturbations
+	// stay much smaller than its normal and never reshape the flat facet.
+	base := vec3(custom.zw, sqrt(max(.0025, 1.0-dot(custom.zw, custom.zw))))
+	gradient := vec2(mineralHeight(p+vec2(.6,0))-mineralHeight(p-vec2(.6,0)),
+		mineralHeight(p+vec2(0,.6))-mineralHeight(p-vec2(0,.6)))
+	bump := normalize(base-vec3(gradient*.18, 0))
+	microLight := max(0.0, dot(bump,Light))-max(0.0, dot(base,Light))
+	rgb *= 1.0 + microLight*Texture*.30*visible
 
 	// Fine matte grain stays static and fades out in the black pockets.
 	grain := noise(floor(p)) - .5
 	pores := smoothstep(.68, .86, smoothNoise(p/1.8))
-	rgb += vec3(grain) * (.002+luminance*.006) * Texture * visible
-	rgb *= 1.0 - pores*.008*Texture*visible
+	rgb += vec3(grain) * (.0015+luminance*.005) * Texture * visible
+	rgb *= 1.0 - pores*.006*Texture*visible
 
 	// Shader output uses premultiplied alpha for the transparent guide layer.
 	return vec4(clamp(rgb, vec3(0), vec3(1)) * color.a, color.a)

@@ -96,26 +96,36 @@ func PrepareGridWithTopology(grid terrain.RockGrid, view View, topology *terrain
 	vertices := make([]ebiten.Vertex, 0, len(grid)*18)
 	indices := make([]uint32, 0, len(grid)*18)
 	var boundary []terrain.RockEdge
-	if len(grid) > 0 && grid[0].Raised && (view == ViewShaded || view == ViewClay) {
+	raised := len(grid) > 0 && grid[0].Raised
+	if raised {
 		if topology != nil {
 			boundary = topology.Boundary
 		} else {
 			boundary = terrain.ExposedRockEdges(grid)
 		}
-		vertices, indices = appendRockWalls(vertices, indices, grid, boundary, view)
+	}
+	grid = terrain.ShadeRockFaces(grid, boundary)
+	if raised {
+		if view == ViewShaded || view == ViewClay {
+			vertices, indices = appendRockWalls(vertices, indices, grid, boundary, view)
+		}
 	}
 	type cellEdge struct {
 		a, b  geom.V
 		alpha uint8
+		cell  int
 	}
 	edges := make(map[[4]int64]cellEdge)
 	hiddenEdges := make(map[[4]int64]bool)
-	for _, cell := range grid {
+	for cellIndex, cell := range grid {
 		s, clr, poly := cell.Center, rockViewColor(cell, view), cell.Polygon
 		if clr.A == 0 {
 			continue
 		}
 		vertices, indices = appendCellMesh(vertices, indices, poly, s, clr, cell.Normal)
+		if raised {
+			continue // Foreground seams are selected from actual shared relief.
+		}
 		for j, a := range poly {
 			b := poly[(j+1)%len(poly)]
 			key := geom.EdgeKey(a, b)
@@ -123,17 +133,27 @@ func PrepareGridWithTopology(grid terrain.RockGrid, view View, topology *terrain
 			if clr.A == 255 && clr.R <= 3 && clr.G <= 3 && clr.B <= 3 {
 				hiddenEdges[key] = true
 			}
-			alpha := uint8(math.Round((96 + 28*terrain.SurfaceLight(cell.Normal, terrain.RockOrientation(cell))) * float64(clr.A) / 255))
+			// Background silhouettes are quiet; shared joins receive a seam
+			// only where neighboring planes form a recess or a depth step.
+			alpha := uint8(math.Round((18 + 20*terrain.SurfaceLight(cell.Normal, terrain.RockOrientation(cell))) * float64(clr.A) / 255))
+			if previous, shared := edges[key]; shared {
+				alpha = uint8(math.Round(40 * rockCreviceStrength(grid[previous.cell], cell, a.Add(b).Mul(.5))))
+			}
 			if view != ViewShaded {
 				alpha = 0
 			}
-			if previous, ok := edges[key]; !ok || alpha > previous.alpha {
-				edges[key] = cellEdge{a, b, alpha}
-			}
+			edges[key] = cellEdge{a, b, alpha, cellIndex}
 		}
 	}
 
-	vertices, indices = appendRockBevels(vertices, indices, grid, boundary, view)
+	if raised && view == ViewShaded {
+		for _, seam := range rockCrevices(grid) {
+			edges[geom.EdgeKey(seam.a, seam.b)] = cellEdge{a: seam.a, b: seam.b, alpha: seam.alpha}
+		}
+	}
+	if view == ViewShaded || view == ViewClay {
+		vertices, indices = appendRockBevels(vertices, indices, grid, boundary, view)
+	}
 	if topology != nil && len(topology.Cuts) > 0 && (view == ViewShaded || view == ViewClay) {
 		vertices, indices = AppendCarveRims(vertices, indices, topology, view)
 	}
@@ -188,9 +208,13 @@ func PrepareGridWithTopology(grid terrain.RockGrid, view View, topology *terrain
 			}})
 			vs, is := stroke.AppendVerticesAndIndicesForFilling(nil, nil)
 			a := float32(alpha) / 255
+			r, g, b := float32(18), float32(18), float32(17)
+			if !raised {
+				r, g, b = 3, 5, 6
+			}
 			for i := range vs {
 				vs[i].SrcX, vs[i].SrcY = .5, .5
-				vs[i].ColorR, vs[i].ColorG, vs[i].ColorB, vs[i].ColorA = 18.0/255*a, 18.0/255*a, 17.0/255*a, a
+				vs[i].ColorR, vs[i].ColorG, vs[i].ColorB, vs[i].ColorA = r/255*a, g/255*a, b/255*a, a
 			}
 			indices := make([]uint32, len(is))
 			for i, index := range is {
