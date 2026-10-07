@@ -68,7 +68,7 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 		g.carving = carveGesture{}
 		g.screenWidth, g.screenHeight = width, height
 	}
-	sceneHeight := float64(height) / float64(width) * infinicave.Width
+	sceneHeight := float64(height) / float64(min(width, height)) * infinicave.Width
 	if g.camera.Height == 0 {
 		g.camera.Y, g.camera.Target = -sceneHeight, -sceneHeight
 	}
@@ -116,4 +116,13 @@ func (g *Game) updateCamera() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyHome) || inpututil.IsKeyJustPressed(ebiten.KeyEnd) {
 		g.camera.glideTo(g.camera.floor())
 	}
+}
+
+func (g *Game) renderPixels() int { return max(1, min(g.screenWidth, g.screenHeight)) }
+
+func (g *Game) renderOffsetX() float64 { return float64(g.screenWidth-g.renderPixels()) / 2 }
+
+func (g *Game) worldPoint(cursor infinicave.V) infinicave.V {
+	cursor.X -= g.renderOffsetX()
+	return viewerWorldPoint(cursor, g.camera.Y, g.renderPixels())
 }

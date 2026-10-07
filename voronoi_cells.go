@@ -47,14 +47,15 @@ func parallelFor(n int, fn func(i int)) {
 
 type siteGrid struct {
 	pts        []V
+	minX, maxX float64
 	size       float64
 	cols, rows int
 	buckets    [][]int32
 }
 
-func newSiteGrid(pts []V) *siteGrid {
-	g := &siteGrid{pts: pts, size: .024}
-	g.cols, g.rows = int(generationWidth/g.size)+1, int(generationHeight/g.size)+1
+func newSiteGridInRange(pts []V, minX, maxX float64) *siteGrid {
+	g := &siteGrid{pts: pts, size: .024, minX: minX, maxX: maxX}
+	g.cols, g.rows = int((maxX-minX)/g.size)+1, int(generationHeight/g.size)+1
 	g.buckets = make([][]int32, g.cols*g.rows)
 	for i, p := range pts {
 		cx, cy := g.cellOf(p)
@@ -64,14 +65,14 @@ func newSiteGrid(pts []V) *siteGrid {
 }
 
 func (g *siteGrid) cellOf(p V) (int, int) {
-	return min(max(int(p.X/g.size), 0), g.cols-1), min(max(int((p.Y-generationMinY)/g.size), 0), g.rows-1)
+	return min(max(int((p.X-g.minX)/g.size), 0), g.cols-1), min(max(int((p.Y-generationMinY)/g.size), 0), g.rows-1)
 }
 
 // A site farther than twice the cell's radius cannot cut it, so rings of
 // buckets are clipped nearest first until the next ring is out of reach.
 func (g *siteGrid) cell(i int) []V {
 	a := g.pts[i]
-	poly := []V{{0, generationMinY}, {generationWidth, generationMinY}, {generationWidth, generationMaxY}, {0, generationMaxY}}
+	poly := []V{{g.minX, generationMinY}, {g.maxX, generationMinY}, {g.maxX, generationMaxY}, {g.minX, generationMaxY}}
 	cx, cy := g.cellOf(a)
 	var ring []int32
 	reach2 := math.Inf(1)
@@ -128,7 +129,7 @@ func (g *siteGrid) cell(i int) []V {
 		}
 	}
 	sort.Slice(ring, func(p, q int) bool { return ring[p] < ring[q] })
-	poly = []V{{0, generationMinY}, {generationWidth, generationMinY}, {generationWidth, generationMaxY}, {0, generationMaxY}}
+	poly = []V{{g.minX, generationMinY}, {g.maxX, generationMinY}, {g.maxX, generationMaxY}, {g.minX, generationMaxY}}
 	for _, j := range ring {
 		b := g.pts[j]
 		poly = clipHalfPlane(poly, b.Sub(a), 0.5*(b.Len2()-a.Len2()))
@@ -148,7 +149,11 @@ func abs(x int) int {
 
 // voronoiCells computes every cell in parallel; element i equals voronoiCell(i, pts).
 func voronoiCells(pts []V) [][]V {
-	grid := newSiteGrid(pts)
+	return voronoiCellsInRange(pts, 0, generationWidth)
+}
+
+func voronoiCellsInRange(pts []V, minX, maxX float64) [][]V {
+	grid := newSiteGridInRange(pts, minX, maxX)
 	cells := make([][]V, len(pts))
 	parallelFor(len(pts), func(i int) { cells[i] = grid.cell(i) })
 	return cells

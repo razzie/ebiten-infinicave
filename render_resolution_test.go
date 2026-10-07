@@ -33,7 +33,7 @@ func resolutionTestScene(t *testing.T) *Scene {
 	for id := int64(0); id < 5; id++ {
 		mesh := resolutionTestMesh(id)
 		g.world.sections[id] = &worldSection{mesh: &mesh, geometry: mesh.geometry,
-			terrain: newSectionImageAt(1, 1000), foreground: newSectionImageAt(1, 1000), pixels: 1000}
+			terrain: newBackgroundImageAt(1000), foreground: newSectionImageAt(1, 1000), pixels: 1000}
 	}
 	t.Cleanup(g.Close)
 	return g
@@ -61,7 +61,7 @@ func TestResizeUsesNativeImagesAndDefersOffscreenSections(t *testing.T) {
 	}
 	g.SetRenderWidth(1920)
 	finishResolutionRefresh(t, g, viewport)
-	if w.sections[0].terrain.Bounds() != image.Rect(0, 0, 1920, 1920) || w.sections[0].foreground.Bounds() != image.Rect(0, 0, 1920, 1920) {
+	if w.sections[0].terrain.Bounds() != image.Rect(0, 0, 3840, 1920) || w.sections[0].foreground.Bounds() != image.Rect(0, 0, 1920, 1920) {
 		t.Fatal("visible terrain did not use native raster dimensions")
 	}
 	if w.sections[1].terrain != before || w.sections[1].renderWidth() != 1000 {
@@ -74,7 +74,7 @@ func TestResizeUsesNativeImagesAndDefersOffscreenSections(t *testing.T) {
 		t.Fatal("resize invalidated formation IDs")
 	}
 	finishResolutionRefresh(t, g, Viewport{Y: -1.8, Height: .8})
-	if w.sections[1].renderWidth() != 1920 || w.sections[1].terrain.Bounds().Dx() != 1920 {
+	if w.sections[1].renderWidth() != 1920 || w.sections[1].terrain.Bounds().Dx() != 3840 {
 		t.Fatal("scrolling did not refresh newly visible terrain")
 	}
 }
@@ -94,7 +94,7 @@ func TestResizeKeepsCutsAndCoalescesPartialUploads(t *testing.T) {
 	}
 	g.SetRenderWidth(1920)
 	finishResolutionRefresh(t, g, viewport)
-	if g.world.sections[0].geometry != geometry || len(g.world.cuts) != 1 || g.world.sections[0].terrain.Bounds().Dx() != 1920 {
+	if g.world.sections[0].geometry != geometry || len(g.world.cuts) != 1 || g.world.sections[0].terrain.Bounds().Dx() != 3840 {
 		t.Fatal("rapid resize lost cuts or retained an obsolete resolution")
 	}
 	hit, err := g.Query(Ray{Origin: V{.5, -.5}}, QueryOptions{Targets: TargetRock})
@@ -161,10 +161,13 @@ func TestNativeMeshScalingRetainsMaterialCoordinatesAndCropOrigin(t *testing.T) 
 	base.vines = []triangleMesh{{vertices: []ebiten.Vertex{{DstX: 2.25, DstY: 3.5, SrcX: .5, SrcY: .5}}, indices: []uint32{0, 0, 0}}}
 	base.vinesBounds = image.Rect(101, 1003, 110, 1020)
 	saved := append([]ebiten.Vertex(nil), base.background.faces.vertices...)
-	for _, pixels := range []int{500, 1000, 1920} {
+	for _, pixels := range []int{500, 501, 1000, 1920} {
 		scaled := scaleSectionMesh(base, pixels)
 		for i, vertex := range base.background.faces.vertices {
 			native := scaled.background.faces.vertices[i]
+			if math.Abs(float64(native.DstX)-(float64(vertex.DstX)*float64(pixels)/1000-float64(backgroundRasterBounds(pixels).Min.X))) > .001 {
+				t.Fatal("background scaling lost its horizontal raster origin")
+			}
 			if math.Abs(float64(native.DstY)-(float64(vertex.DstY)*float64(pixels)/1000-float64(pixels))) > .001 || native.SrcX != vertex.SrcX || native.SrcY != vertex.SrcY {
 				t.Fatal("terrain scaling lost owned-band alignment or material coordinates")
 			}

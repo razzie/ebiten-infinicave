@@ -22,8 +22,12 @@ type RockCell struct {
 type RockGrid []RockCell
 
 func newRockGrid(seeds []V, colorAt func(V) color.NRGBA) RockGrid {
+	return newRockGridInRange(seeds, colorAt, 0, generationWidth)
+}
+
+func newRockGridInRange(seeds []V, colorAt func(V) color.NRGBA, minX, maxX float64) RockGrid {
+	cells := voronoiCellsInRange(seeds, minX, maxX)
 	grid := make(RockGrid, 0, len(seeds))
-	cells := voronoiCells(seeds)
 	for i, p := range seeds {
 		clr := colorAt(p)
 		if clr.A != 0 {

@@ -26,8 +26,8 @@ func statsOf(s sectionData) sectionStats {
 // Counts use background material without baked foreground shadow darkening.
 func TestSectionStatsStable(t *testing.T) {
 	want := map[int64]sectionStats{
-		1:  {4898, 2002, 112, 1.0971447622},
-		42: {4906, 1970, 108, .9921188598},
+		1:  {9710, 2002, 121, 1.0971447622},
+		42: {9651, 1970, 108, .9921188598},
 	}
 	for seed, w := range want {
 		got := statsOf(buildSection(seed, 0))

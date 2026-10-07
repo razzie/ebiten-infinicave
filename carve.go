@@ -360,7 +360,7 @@ func (g *Scene) redrawCarvedSection(section *worldSection) {
 
 func (g *Scene) drawCarvedForeground(dst *ebiten.Image, mesh gridMesh, top float64) {
 	pixels := dst.Bounds().Dx()
-	mesh = scaleGridMesh(mesh, pixels)
+	mesh = scaleGridMesh(mesh, pixels, 0)
 	dst.Clear()
 	g.drawGridFaces(dst, mesh.faces, top-SectionHeight)
 	if g.world.white == nil {

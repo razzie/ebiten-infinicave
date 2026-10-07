@@ -98,13 +98,17 @@ func checkSectionUnits(t *testing.T, section infinicave.Section) {
 		t.Fatal("sections must be unit squares")
 	}
 	lo, hi := infinicave.V{X: math.Inf(1), Y: math.Inf(1)}, infinicave.V{X: math.Inf(-1), Y: math.Inf(-1)}
-	for _, grid := range []infinicave.RockGrid{section.Background, section.Foreground} {
+	for layer, grid := range []infinicave.RockGrid{section.Background, section.Foreground} {
+		minX, maxX := 0.0, 1.0
+		if layer == 0 {
+			minX, maxX = -.5, 1.5
+		}
 		for _, cell := range grid {
 			if math.Abs(cell.Z) > 1 {
 				t.Fatalf("rock height is outside scene scale: %v", cell.Z)
 			}
 			for _, p := range cell.Polygon {
-				if p.X < -1e-9 || p.X > 1+1e-9 || p.Y < -1-1e-9 || p.Y > 2+1e-9 {
+				if p.X < minX-1e-9 || p.X > maxX+1e-9 || p.Y < -1-1e-9 || p.Y > 2+1e-9 {
 					t.Fatalf("rock vertex is outside the padded unit section: %v", p)
 				}
 				lo.X, lo.Y = min(lo.X, p.X), min(lo.Y, p.Y)
@@ -112,7 +116,7 @@ func checkSectionUnits(t *testing.T, section infinicave.Section) {
 			}
 		}
 	}
-	if lo != (infinicave.V{X: 0, Y: -1}) || hi != (infinicave.V{X: 1, Y: 2}) {
+	if lo != (infinicave.V{X: -.5, Y: -1}) || hi != (infinicave.V{X: 1.5, Y: 2}) {
 		t.Fatalf("incorrect padding bounds: %v to %v", lo, hi)
 	}
 	for _, guide := range section.Guides {

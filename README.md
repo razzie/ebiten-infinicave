@@ -26,10 +26,10 @@ defer scene.Close()
 
 Keep `scene` in your own `ebiten.Game`. In `Update`, advance your camera and call
 `scene.Update(viewport)` once per tick. In `Draw`, call `scene.Draw(screen, viewport)`.
-For example, a stationary view of the bottom 0.8 scene units uses:
+For example, a stationary view of the bottom square section uses:
 
 ```go
-viewport := infinicave.Viewport{Y: -0.8, Height: 0.8}
+viewport := infinicave.Viewport{Y: -1, Height: 1}
 ready := scene.Update(viewport) // false while required sections are loading
 scene.Draw(screen, viewport)
 // Add your own loading UI when !ready.
@@ -46,13 +46,17 @@ upward. Section `id` owns the world band from Y = `id-1` to Y = `id`.
 prefetching. Y must be finite and no greater than `-viewport.Height`; height must
 be finite and positive. Invalid viewports do no work and report not ready.
 
-Rendering scales scene units uniformly to the destination image's width. Use a
-`Layout` with the same aspect ratio as the viewport: for example, a 1000 × 800
-image for a viewport height of 0.8, or a 500 × 500 image for a single unit square.
+Rendering uses `min(width, height)` pixels per scene unit. Landscape targets
+show a centered 1 × 1 cave; portrait targets retain their full width. Set
+`Viewport.Height` to `height / min(width, height)`: for example, a 1000 × 800
+image uses height 1, and a 500 × 800 image uses height 1.6. Background Voronoi
+cells and fog extend from X = −0.5 to 1.5, fading smoothly across the side
+margins. Bats cross this extended area and fade near its edges. Hover and
+carving coordinates follow the centered cave.
 Generation, spatial fields, and collision calculations use scene units throughout.
 Only mesh preparation and rendering convert coordinates to pixels. Set
-`scene.SetRenderWidth(nativeWidth)` before `Update` to rasterize cached textures
-at the native screen width; the default is 1000 pixels per scene unit. Resizing
+`scene.SetRenderWidth(min(nativeWidth, nativeHeight))` before `Update` to rasterize cached textures
+at the native cave width; the default is 1000 pixels per scene unit. Resizing
 reuses prepared meshes, queries, and runtime cuts. Sections contributing to the
 viewport refresh first; offscreen images refresh when they become visible.
 

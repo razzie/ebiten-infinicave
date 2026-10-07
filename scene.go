@@ -113,6 +113,7 @@ func (v Viewport) valid() bool {
 type Scene struct {
 	world                *world
 	material             *ebiten.Shader
+	backgroundFade       *ebiten.Shader
 	vineMaterial         *ebiten.Shader
 	fog                  *fogRenderer
 	background           *backgroundRenderer
@@ -140,6 +141,11 @@ func NewScene(config Config) (*Scene, error) {
 	g.material, err = ebiten.NewShader(materialShaderSource)
 	if err != nil {
 		return nil, fmt.Errorf("infinicave: compile rock shader: %w", err)
+	}
+	g.backgroundFade, err = ebiten.NewShader(backgroundFadeShaderSource)
+	if err != nil {
+		g.Close()
+		return nil, fmt.Errorf("infinicave: compile background fade shader: %w", err)
 	}
 	g.vineMaterial, err = ebiten.NewShader(vineShaderSource)
 	if err != nil {
@@ -218,7 +224,7 @@ func (g *Scene) GeometryRevision() uint64 {
 }
 
 // SetRenderWidth sets the number of cached pixels across one scene unit.
-// Pass the native screen width before Update. Resizing retains generation,
+// Pass min(nativeWidth, nativeHeight) before Update. Resizing retains generation,
 // queries, and runtime cuts, and rerasterizes only sections contributing to the
 // viewport. Offscreen sections keep their images until they become visible.
 // Nonpositive widths and calls after Close are ignored. The default is 1000.
@@ -231,8 +237,10 @@ func (g *Scene) SetRenderWidth(pixels int) {
 }
 
 // Draw draws available terrain, fog, vegetation, and enabled bats into dst,
-// scaling uniformly so Width scene units fill its width. Use an aspect ratio of
-// Width:viewport.Height and the same viewport as Update.
+// scaling uniformly at min(dst width, dst height) pixels per scene unit. The
+// cave is centered horizontally in landscape targets. Background and fog extend
+// from X = -0.5 to 1.5 and fade toward those edges. Use viewport.Height = target
+// height / min(target width, target height), and the same viewport as Update.
 // Missing terrain is left untouched; bats may fly across unloaded areas. Draw does
 // not add hover, loading text, or UI, and does nothing for an invalid viewport
 // or a closed Scene.
@@ -284,6 +292,9 @@ func (g *Scene) Close() {
 	}
 	if g.vineMaterial != nil {
 		g.vineMaterial.Deallocate()
+	}
+	if g.backgroundFade != nil {
+		g.backgroundFade.Deallocate()
 	}
 	if g.material != nil {
 		g.material.Deallocate()

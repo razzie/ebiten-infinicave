@@ -171,11 +171,16 @@ func TestWorldWorkerPreparesAllLayers(t *testing.T) {
 
 func TestSectionUploadsPublishTerrainBeforeVegetation(t *testing.T) {
 	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1), results: make(chan sectionMesh, 1), done: make(chan struct{}), working: true}
-	defer w.close()
 	// Empty batches isolate the scheduler; nonempty crop bounds exercise image ownership.
 	bounds := image.Rect(10, 20, 30, 40)
 	w.results <- sectionMesh{id: 0, background: gridMesh{outlines: make([]triangleMesh, uploadDrawsPerTick*2+1)}, vines: make([]triangleMesh, uploadDrawsPerTick*2+1), foregroundVines: make([]triangleMesh, uploadDrawsPerTick*2+1), vinesBounds: bounds, foregroundVinesBounds: bounds, mushroomsBounds: bounds}
-	g := &Scene{world: w, view: ViewShaded}
+	g, err := NewScene(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.world.close()
+	g.world = w
+	defer g.Close()
 	w.receive(g)
 	if w.upload == nil || w.working {
 		t.Fatal("result was not handed off to the upload queue")

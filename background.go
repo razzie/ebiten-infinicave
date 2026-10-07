@@ -11,6 +11,9 @@ import (
 //go:embed blur.kage
 var blurShaderSource []byte
 
+//go:embed background_fade.kage
+var backgroundFadeShaderSource []byte
+
 //go:embed background.kage
 var backgroundShaderSource []byte
 
@@ -56,26 +59,26 @@ func ensureEffectImage(img **ebiten.Image, width, height int) {
 	*img = ebiten.NewImageWithOptions(image.Rect(0, 0, width, height), &ebiten.NewImageOptions{Unmanaged: true})
 }
 
-func (r *backgroundRenderer) draw(dst *ebiten.Image, w *world, y, height float64) {
+func (r *backgroundRenderer) draw(dst *ebiten.Image, w *world, y, height float64, view renderTransform) {
 	width := dst.Bounds().Dx()
 	// Include the Gaussian kernel and the downsampling/reconstruction filters.
 	// Neighboring bands prevent viewport edges from clipping soft shadows.
-	padding := int(math.Ceil(3*math.Max(r.softness, r.shadowSoftness)*float64(width))) + 2
+	padding := int(math.Ceil(3*math.Max(r.softness, r.shadowSoftness)*float64(view.pixels))) + 2
 	fullHeight := dst.Bounds().Dy() + 2*padding
 	ensureEffectImage(&r.background, width, fullHeight)
 	ensureEffectImage(&r.mask, width, fullHeight)
 	r.background.Clear()
 	r.mask.Clear()
-	paddedY := y - float64(padding)/float64(width)
-	paddedHeight := height + 2*float64(padding)/float64(width)
-	w.drawBackground(r.background, paddedY, paddedHeight)
+	paddedY := y - float64(padding)/float64(view.pixels)
+	paddedHeight := height + 2*float64(padding)/float64(view.pixels)
+	w.drawBackground(r.background, paddedY, paddedHeight, view)
 	if r.opacity > 0 {
-		w.drawForegroundRocks(r.mask, paddedY-r.offset.Y, paddedHeight, r.offset.X)
+		w.drawForegroundRocks(r.mask, paddedY-r.offset.Y, paddedHeight, r.offset.X, view)
 	}
-	background := r.backgroundBlur.apply(r.background, r.softness*float64(width), r.blur)
+	background := r.backgroundBlur.apply(r.background, r.softness*float64(view.pixels), r.blur)
 	shadow := r.mask
 	if r.opacity > 0 {
-		shadow = r.shadowBlur.apply(r.mask, r.shadowSoftness*float64(width), r.blur)
+		shadow = r.shadowBlur.apply(r.mask, r.shadowSoftness*float64(view.pixels), r.blur)
 	}
 	op := &ebiten.DrawRectShaderOptions{
 		Images:   [4]*ebiten.Image{background, shadow, r.background},
@@ -138,4 +141,13 @@ func (r *backgroundRenderer) close() {
 			shader.Deallocate()
 		}
 	}
+}
+
+func newBackgroundImageAt(pixels int) *ebiten.Image {
+	bounds := backgroundRasterBounds(pixels)
+	return ebiten.NewImageWithOptions(image.Rect(0, 0, bounds.Dx(), bounds.Dy()), &ebiten.NewImageOptions{Unmanaged: true})
+}
+
+func backgroundRasterBounds(pixels int) image.Rectangle {
+	return scaleRasterBounds(image.Rect(int(backgroundMinX*rasterPixelsPerUnit), 0, int(backgroundMaxX*rasterPixelsPerUnit), rasterPixelsPerUnit), pixels)
 }

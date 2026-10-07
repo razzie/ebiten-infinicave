@@ -84,11 +84,11 @@ func (f *batFlock) step(viewport Viewport, seconds float64) {
 	startY := viewport.Y + viewport.Height*(.2+.6*f.rng.Float64())
 	endY := clampY(startY + (f.rng.Float64()-.5)*span*.5)
 	b := bat{
-		start:    V{X: -batMargin, Y: startY},
-		end:      V{X: Width + batMargin, Y: endY},
+		start:    V{X: backgroundMinX - batMargin, Y: startY},
+		end:      V{X: backgroundMaxX + batMargin, Y: endY},
 		control1: clampY(startY + (f.rng.Float64()-.5)*span*.8),
 		control2: clampY(endY + (f.rng.Float64()-.5)*span*.8),
-		duration: (Width + 2*batMargin) / (.14 + .08*f.rng.Float64()),
+		duration: (backgroundMaxX - backgroundMinX + 2*batMargin) / (.14 + .08*f.rng.Float64()),
 		size:     .012 + .006*f.rng.Float64(),
 		phase:    f.rng.Float64() * 2 * math.Pi,
 		weave:    span * (.015 + .02*f.rng.Float64()),
@@ -101,19 +101,21 @@ func (f *batFlock) step(viewport Viewport, seconds float64) {
 }
 
 func (f *batFlock) draw(dst *ebiten.Image, viewport Viewport) {
-	pixels := dst.Bounds().Dx()
+	view := targetTransform(dst)
+	pixels := view.pixels
 	scale := float64(pixels) / Width
 	cameraY := renderAlignedY(viewport.Y, pixels)
 	options := &vector.DrawPathOptions{AntiAlias: true}
-	options.ColorScale.ScaleWithColor(color.NRGBA{R: 45, G: 35, B: 40, A: 255})
 	for _, b := range f.bats {
 		t := b.age / b.duration
 		position := b.position(t)
-		x, y := position.X*scale, (position.Y-cameraY)*scale
+		x, y := view.offsetX+position.X*scale, (position.Y-cameraY)*scale
 		size := b.size * scale
-		if x+size < 0 || x-size > float64(pixels) || y+size < 0 || y-size > float64(dst.Bounds().Dy()) {
+		if x+size < 0 || x-size > float64(dst.Bounds().Dx()) || y+size < 0 || y-size > float64(dst.Bounds().Dy()) {
 			continue
 		}
+		options.ColorScale.Reset()
+		options.ColorScale.ScaleWithColor(color.NRGBA{R: 45, G: 35, B: 40, A: uint8(math.Round(255 * horizontalFade(position.X)))})
 		flap := float32(math.Sin(b.age*2*math.Pi*6 + b.phase))
 		path := batSilhouette(flap)
 		transform := &vector.AddPathOptions{}

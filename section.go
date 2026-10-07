@@ -7,7 +7,8 @@ import "fmt"
 // the owned square runs from (0, 0) to (1, 1). Add Top to Y to get world
 // coordinates. Padding spans Y = -1 to 2, with WindowTop marking its world
 // start. The owned world band is [Top, Top+SectionHeight). Vegetation may extend
-// into padding and should be drawn once per owning section.
+// into padding and should be drawn once per owning section. Background cells
+// extend horizontally from X = -0.5 to 1.5 for landscape rendering.
 //
 // Each generated Section owns its slices; callers may modify them. Rock grids
 // describe visual faces; Collision contains boundaries for physics integration.

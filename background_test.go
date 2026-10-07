@@ -1,6 +1,7 @@
 package infinicave
 
 import (
+	"math"
 	"math/rand"
 	"reflect"
 	"testing"
@@ -43,5 +44,43 @@ func TestBackgroundConfigurationAndLifecycle(t *testing.T) {
 		}
 		scene.Close()
 		scene.Close()
+	}
+}
+
+func TestExtendedBackgroundVoronoiCoverage(t *testing.T) {
+	seeds := []V{{-.4, -.5}, {-.2, 1.4}, {.3, .4}, {.7, -.4}, {1.2, .3}, {1.4, 1.6}}
+	cells := voronoiCellsInRange(seeds, backgroundMinX, backgroundMaxX)
+	area := 0.0
+	for i, cell := range cells {
+		// Compare the bounded search with clipping against every site.
+		want := []V{{-.5, -1}, {1.5, -1}, {1.5, 2}, {-.5, 2}}
+		for j, other := range seeds {
+			if i != j {
+				want = clipHalfPlane(want, other.Sub(seeds[i]), .5*(other.Len2()-seeds[i].Len2()))
+			}
+		}
+		want = orderPolygon(want)
+		if len(cell) != len(want) {
+			t.Fatalf("cell %d has %d vertices, want %d", i, len(cell), len(want))
+		}
+		for j, p := range cell {
+			if p.Sub(want[j]).Len() > 1e-9 {
+				t.Fatalf("cell %d vertex %d: %v, want %v", i, j, p, want[j])
+			}
+		}
+		area += faceArea(cell)
+	}
+	if math.Abs(area-6) > 1e-9 {
+		t.Fatalf("extended background area %v, want 6", area)
+	}
+}
+
+func TestAmbientHorizontalFade(t *testing.T) {
+	for _, tc := range []struct{ x, alpha float64 }{
+		{-1, 0}, {-.5, 0}, {-.25, .5}, {0, 1}, {.5, 1}, {1, 1}, {1.25, .5}, {1.5, 0}, {2, 0},
+	} {
+		if got := horizontalFade(tc.x); math.Abs(got-tc.alpha) > 1e-12 {
+			t.Fatalf("fade at %v: %v, want %v", tc.x, got, tc.alpha)
+		}
 	}
 }

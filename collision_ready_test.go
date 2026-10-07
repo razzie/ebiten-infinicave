@@ -41,12 +41,17 @@ func TestCollisionReadyDuringUploadIncludesStoredCutsAndOwnsPolygons(t *testing.
 	w := &world{
 		sections: make(map[int64]*worldSection), terrain: make(chan sectionTerrain, 1),
 		jobs: make(chan int64, 1), done: make(chan struct{}), working: true,
-		// Empty draw batches keep an unrelated upload busy without shaders.
-		upload: &sectionUpload{stage: 1, data: sectionMesh{
+		// Empty draw batches keep an unrelated upload busy.
+		upload: &sectionUpload{stage: 1, img: newBackgroundImageAt(1000), data: sectionMesh{
 			background: gridMesh{outlines: make([]triangleMesh, uploadDrawsPerTick*2)},
 		}},
 	}
-	g := &Scene{world: w}
+	g, err := NewScene(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.world.close()
+	g.world = w
 	defer g.Close()
 	cut, _ := (Hole{Shape: HoleCircle, Center: V{.5, -1.5}, Radius: .1}).rockCut()
 	w.cuts = []rockCut{cut}
@@ -77,6 +82,7 @@ func TestCollisionReadyDuringUploadIncludesStoredCutsAndOwnsPolygons(t *testing.
 		t.Fatal("game-thread edits or callback modified worker-owned geometry")
 	}
 	// A runtime edit must update early geometry and report its section for physics.
+	w.upload.img.Deallocate()
 	w.upload = nil
 	result, err := g.CarveCircle(V{.3, -1.3}, .03)
 	if err != nil || !reflect.DeepEqual(result.SectionIDs, []int64{-1}) {

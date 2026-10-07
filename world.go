@@ -101,16 +101,20 @@ func worldGuides(seed, id int64) []Guide {
 // Jittered world-space sites give neighboring generation windows exactly the
 // same rocks in their overlap, independent of load order or cache eviction.
 func worldSeeds(seed int64, top float64, noise *Perlin) []V {
+	return worldSeedsInRange(seed, top, noise, 0, generationWidth)
+}
+
+func worldSeedsInRange(seed int64, top float64, noise *Perlin, minX, maxX float64) []V {
 	const step = .022
 	first := int64(math.Floor((top + generationMinY) / step))
 	last := int64(math.Ceil((top + generationMaxY) / step))
 	rows := make([][]V, last-first)
 	parallelFor(len(rows), func(n int) {
 		row := first + int64(n)
-		for col := int64(0); float64(col)*step < generationWidth; col++ {
+		for col := int64(math.Floor(minX / step)); float64(col)*step < maxX; col++ {
 			p := V{(float64(col)+.5)*step + (siteRandom(seed, row, col, 0)-.5)*step*.85,
 				(float64(row)+.5)*step + (siteRandom(seed, row, col, 1)-.5)*step*.85 - top}
-			if p.X <= .001 || p.X >= generationWidth-.001 || p.Y <= generationMinY+.001 || p.Y >= generationMaxY-.001 {
+			if p.X <= minX+.001 || p.X >= maxX-.001 || p.Y <= generationMinY+.001 || p.Y >= generationMaxY-.001 {
 				continue
 			}
 			spacing := desiredSpacing(p, noise)
@@ -144,10 +148,10 @@ func buildSectionCached(seed, id int64, loadSection SectionLoader, guideCache *g
 	} else {
 		guides = guideCache.window(id)
 	}
-	backgroundSeeds := worldSeeds(seed^0x62617365, top, backgroundNoise)
+	backgroundSeeds := worldSeedsInRange(seed^0x62617365, top, backgroundNoise, backgroundMinX, backgroundMaxX)
 	seeds := artisticRockSeeds(worldSeeds(seed, top, noise), guides, seed, top)
 	branches := newBranchField(generateBranches(guides, noise, rand.New(rand.NewSource(seed))))
-	background := newRockGrid(backgroundSeeds, func(V) color.NRGBA { return color.NRGBA{A: 255} })
+	background := newRockGridInRange(backgroundSeeds, func(V) color.NRGBA { return color.NRGBA{A: 255} }, backgroundMinX, backgroundMaxX)
 	foreground := guideRockFaces(seeds, guides)
 	shapeRockGrid(background, nil, backgroundNoise)
 	shapeReliefGrid(foreground, guides, noise, branches)
@@ -330,13 +334,22 @@ func (w *world) receive(g *Scene) {
 	}
 	switch u.stage {
 	case 0:
-		u.img = newSectionImageAt(sectionHeight, u.pixels)
+		u.img = newBackgroundImageAt(u.pixels)
 		u.img.Fill(color.Black)
 		g.drawGridFaces(u.img, data.background.faces, top)
 	case 1:
 		if !w.uploadMeshes(u.img, data.background.outlines) {
 			return
 		}
+		// Fade the complete layer, including black pockets and outlines, once
+		// per raster upload. Foreground and collision retain the original width.
+		faded := newBackgroundImageAt(u.pixels)
+		faded.DrawRectShader(u.img.Bounds().Dx(), u.img.Bounds().Dy(), g.backgroundFade, &ebiten.DrawRectShaderOptions{
+			Images:   [4]*ebiten.Image{u.img},
+			Uniforms: map[string]any{"Pixels": float32(u.pixels), "MinX": float32(float64(backgroundRasterBounds(u.pixels).Min.X) / float64(u.pixels))},
+		})
+		u.img.Deallocate()
+		u.img = faded
 	case 2:
 		u.foreground = newSectionImageAt(sectionHeight, u.pixels)
 		g.drawGridFaces(u.foreground, data.foreground.faces, top)
@@ -525,79 +538,83 @@ func (w *world) prune(y float64, height float64, velocity float64) {
 	}
 }
 
-func (w *world) drawBackground(dst *ebiten.Image, y, height float64) {
+func (w *world) drawBackground(dst *ebiten.Image, y, height float64, view renderTransform) {
 	low, high := visibleSections(y, height)
 	for id := low; id <= high; id++ {
 		if section := w.sections[id]; section != nil {
 			op := &ebiten.DrawImageOptions{}
 			pixels := section.renderWidth()
-			scale := float64(dst.Bounds().Dx()) / float64(pixels)
-			op.GeoM.Translate(0, (sectionTop(id)-y)*float64(pixels))
+			scale := float64(view.pixels) / float64(pixels)
+			op.GeoM.Translate(float64(backgroundRasterBounds(pixels).Min.X), (sectionTop(id)-y)*float64(pixels))
 			op.GeoM.Scale(scale, scale)
+			op.GeoM.Translate(view.offsetX, 0)
 			dst.DrawImage(section.terrain, op)
 		}
 	}
 	// A vine is drawn once in world coordinates, even while crossing a seam.
 	for id := max(0, low-1); id <= high+1; id++ {
 		if section := w.sections[id]; section != nil {
-			drawVegetation(dst, section.vines, section.vinesBounds, sectionWindowTop(id), y, section.renderWidth())
+			drawVegetation(dst, section.vines, section.vinesBounds, sectionWindowTop(id), y, section.renderWidth(), view)
 		}
 	}
 }
 
 func (w *world) draw(dst *ebiten.Image, y, height float64, fog *fogRenderer, background *backgroundRenderer) {
-	y = renderAlignedY(y, w.renderWidth())
+	view := targetTransform(dst)
+	y = renderAlignedY(y, view.pixels)
 	if background != nil {
-		background.draw(dst, w, y, height)
+		background.draw(dst, w, y, height, view)
 	} else {
-		w.drawBackground(dst, y, height)
+		w.drawBackground(dst, y, height, view)
 	}
 	low, high := visibleSections(y, height)
 	if fog != nil {
 		for id := low; id <= high; id++ {
 			if section := w.sections[id]; section != nil && section.terrain != nil {
-				fog.drawSection(dst, sectionTop(id), y)
+				fog.drawSection(dst, sectionTop(id), y, view)
 			}
 		}
 	}
 	for id := max(0, low-1); id <= high+1; id++ {
 		if section := w.sections[id]; section != nil {
-			drawVegetation(dst, section.mushrooms, section.mushroomsBounds, sectionWindowTop(id), y, section.renderWidth())
+			drawVegetation(dst, section.mushrooms, section.mushroomsBounds, sectionWindowTop(id), y, section.renderWidth(), view)
 		}
 	}
-	w.drawForegroundRocks(dst, y, height, 0)
+	w.drawForegroundRocks(dst, y, height, 0, view)
 	// Keep complete foreground stems in their owner's padded window.
 	for id := max(0, low-1); id <= high+1; id++ {
 		if section := w.sections[id]; section != nil {
-			drawVegetation(dst, section.foregroundVines, section.foregroundVinesBounds, sectionWindowTop(id), y, section.renderWidth())
+			drawVegetation(dst, section.foregroundVines, section.foregroundVinesBounds, sectionWindowTop(id), y, section.renderWidth(), view)
 		}
 	}
 }
 
 // The same current images supply both visible rock and the shadow silhouette.
 // Runtime cuts redraw these images immediately, so no shadow cache goes stale.
-func (w *world) drawForegroundRocks(dst *ebiten.Image, y, height, offsetX float64) {
+func (w *world) drawForegroundRocks(dst *ebiten.Image, y, height, offsetX float64, view renderTransform) {
 	low, high := visibleSections(y, height)
 	for id := low; id <= high; id++ {
 		if section := w.sections[id]; section != nil && section.foreground != nil {
 			op := &ebiten.DrawImageOptions{}
 			pixels := section.renderWidth()
-			scale := float64(dst.Bounds().Dx()) / float64(pixels)
+			scale := float64(view.pixels) / float64(pixels)
 			op.GeoM.Translate(offsetX*float64(pixels), (sectionTop(id)-y)*float64(pixels))
 			op.GeoM.Scale(scale, scale)
+			op.GeoM.Translate(view.offsetX, 0)
 			dst.DrawImage(section.foreground, op)
 		}
 	}
 }
 
-func drawVegetation(dst, layer *ebiten.Image, bounds image.Rectangle, top, y float64, pixels int) {
+func drawVegetation(dst, layer *ebiten.Image, bounds image.Rectangle, top, y float64, pixels int, view renderTransform) {
 	if layer == nil {
 		return
 	}
 	op := &ebiten.DrawImageOptions{}
 	op.GeoM.Translate(float64(bounds.Min.X), (top-y)*float64(pixels)+float64(bounds.Min.Y))
-	scale := float64(dst.Bounds().Dx()) / float64(pixels)
+	scale := float64(view.pixels) / float64(pixels)
 	op.GeoM.Scale(scale, scale)
+	op.GeoM.Translate(view.offsetX, 0)
 	dst.DrawImage(layer, op)
 }
 

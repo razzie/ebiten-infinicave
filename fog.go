@@ -33,13 +33,14 @@ func (r *fogRenderer) update() {
 // Only cover loaded section bands, preserving untouched gaps and the floor.
 // Source coordinates and the section's world offset keep the noise continuous
 // across seams, camera movement, resizing, and separate Draw calls in one tick.
-func (r *fogRenderer) drawSection(dst *ebiten.Image, top, cameraY float64) {
-	pixels := dst.Bounds().Dx()
+func (r *fogRenderer) drawSection(dst *ebiten.Image, top, cameraY float64, view renderTransform) {
+	pixels := view.pixels
 	op := &ebiten.DrawRectShaderOptions{Uniforms: map[string]any{
 		"Pixels": float32(pixels),
+		"MinX":   float32(backgroundMinX),
 		"Top":    float32(top),
 		"Time":   float32(r.time),
 	}}
-	op.GeoM.Translate(0, (top-cameraY)*float64(pixels))
-	dst.DrawRectShader(pixels, pixels, r.shader, op)
+	op.GeoM.Translate(view.offsetX+backgroundMinX*float64(pixels), (top-cameraY)*float64(pixels))
+	dst.DrawRectShader(2*pixels, pixels, r.shader, op)
 }

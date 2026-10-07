@@ -54,12 +54,12 @@ func scaleTriangleMesh(mesh triangleMesh, scale float64, offset image.Point) tri
 }
 
 // Render the owned band directly; padded CPU geometry is clipped by the image.
-func scaleGridMesh(mesh gridMesh, pixels int) gridMesh {
+func scaleGridMesh(mesh gridMesh, pixels, offsetX int) gridMesh {
 	scale := float64(pixels) / rasterPixelsPerUnit
-	mesh.faces = scaleTriangleMesh(mesh.faces, scale, image.Pt(0, -pixels))
+	mesh.faces = scaleTriangleMesh(mesh.faces, scale, image.Pt(offsetX, -pixels))
 	mesh.outlines = append([]triangleMesh(nil), mesh.outlines...)
 	for i, outline := range mesh.outlines {
-		mesh.outlines[i] = scaleTriangleMesh(outline, scale, image.Pt(0, -pixels))
+		mesh.outlines[i] = scaleTriangleMesh(outline, scale, image.Pt(offsetX, -pixels))
 	}
 	return mesh
 }
@@ -84,11 +84,33 @@ func scaleVegetationMeshes(meshes []triangleMesh, bounds image.Rectangle, pixels
 }
 
 func scaleSectionMesh(mesh sectionMesh, pixels int) sectionMesh {
-	mesh.background = scaleGridMesh(mesh.background, pixels)
-	mesh.foreground = scaleGridMesh(mesh.foreground, pixels)
+	mesh.background = scaleGridMesh(mesh.background, pixels, -backgroundRasterBounds(pixels).Min.X)
+	mesh.foreground = scaleGridMesh(mesh.foreground, pixels, 0)
 	mesh.vines, mesh.vinesBounds = scaleVegetationMeshes(mesh.vines, mesh.vinesBounds, pixels)
 	mesh.foregroundVines, mesh.foregroundVinesBounds = scaleVegetationMeshes(mesh.foregroundVines, mesh.foregroundVinesBounds, pixels)
 	mushrooms, bounds := scaleVegetationMeshes([]triangleMesh{mesh.mushrooms}, mesh.mushroomsBounds, pixels)
 	mesh.mushrooms, mesh.mushroomsBounds = mushrooms[0], bounds
 	return mesh
+}
+
+// The cave occupies a centered square in landscape targets. Portrait targets
+// retain their full width. Effects pass this transform through padded buffers.
+type renderTransform struct {
+	pixels  int
+	offsetX float64
+}
+
+func targetTransform(dst *ebiten.Image) renderTransform {
+	size := dst.Bounds().Size()
+	pixels := min(size.X, size.Y)
+	return renderTransform{pixels: pixels, offsetX: float64(size.X-pixels) / 2}
+}
+
+const (
+	backgroundMinX = -.5
+	backgroundMaxX = 1.5
+)
+
+func horizontalFade(x float64) float64 {
+	return smoothstep(backgroundMinX, 0, x) * (1 - smoothstep(Width, backgroundMaxX, x))
 }

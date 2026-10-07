@@ -1,0 +1,11 @@
+//kage:unit pixels
+package main
+
+var Pixels float
+var MinX float
+
+func Fragment(dst vec4, src vec2, color vec4) vec4 {
+	x := (src.x-imageSrc0Origin().x)/Pixels + MinX
+	fade := smoothstep(-.5, 0, x) * (1-smoothstep(1, 1.5, x))
+	return imageSrc0At(src) * fade
+}

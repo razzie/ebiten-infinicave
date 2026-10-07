@@ -61,7 +61,7 @@ func (g *Game) updateCarving() {
 	cursor := infinicave.V{X: x, Y: y}
 	cancel := inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) || !ebiten.IsFocused()
 	wasActive := g.carving.active
-	commit := g.carving.advance(cursor, viewerWorldPoint(cursor, g.camera.Y, g.screenWidth),
+	commit := g.carving.advance(cursor, g.worldPoint(cursor),
 		inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft),
 		inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft), cancel, 1/float64(ebiten.TPS()))
 	if cancel && wasActive {
@@ -109,10 +109,10 @@ func (g *Game) drawCarving(screen *ebiten.Image) {
 	if !c.active {
 		return
 	}
-	scale := float64(screen.Bounds().Dx()) / infinicave.Width
-	cameraY := viewerCameraY(g.camera.Y, screen.Bounds().Dx())
+	scale := float64(g.renderPixels()) / infinicave.Width
+	cameraY := viewerCameraY(g.camera.Y, g.renderPixels())
 	pixel := func(p infinicave.V) (float32, float32) {
-		return float32(p.X * scale), float32((p.Y - cameraY) * scale)
+		return float32(g.renderOffsetX() + p.X*scale), float32((p.Y - cameraY) * scale)
 	}
 	x, y := pixel(c.origin)
 	clr := color.NRGBA{R: 255, G: 185, B: 95, A: 210}

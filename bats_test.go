@@ -88,12 +88,12 @@ func TestBatsArriveOccasionallyFromBothSides(t *testing.T) {
 			}
 			if b.start.X < 0 {
 				left = true
-				if b.start.X+b.size >= 0 || b.end.X-b.size <= Width {
+				if b.start.X+b.size >= backgroundMinX || b.end.X-b.size <= backgroundMaxX {
 					t.Fatal("left arrival must start and end offscreen on opposite sides")
 				}
 			} else {
 				right = true
-				if b.start.X-b.size <= Width || b.end.X+b.size >= 0 {
+				if b.start.X-b.size <= backgroundMaxX || b.end.X+b.size >= backgroundMinX {
 					t.Fatal("right arrival must start and end offscreen on opposite sides")
 				}
 			}
@@ -140,7 +140,8 @@ func TestBatRoutesCurveAndCrossWithoutFollowingCamera(t *testing.T) {
 	if !reflect.DeepEqual(flock.bats, scrolled.bats) {
 		t.Fatal("scrolling changed an existing flight path")
 	}
-	flock.step(viewport, 8)
+	flock.next = 100
+	flock.step(viewport, b.duration)
 	if len(flock.bats) != 0 {
 		t.Fatal("bats were retained after exiting the opposite side")
 	}

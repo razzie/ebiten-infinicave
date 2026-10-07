@@ -171,17 +171,17 @@ func (g *Game) drawHover(screen *ebiten.Image) {
 		return
 	}
 	x, y := ebiten.CursorPositionF()
-	pixels := screen.Bounds().Dx()
+	pixels := g.renderPixels()
 	scale := float64(infinicave.Width) / float64(pixels)
 	viewport := g.viewport()
 	cameraY := viewerCameraY(viewport.Y, pixels)
 	low := max(0, int64(math.Floor(-(cameraY+viewport.Height)/infinicave.SectionHeight)))
 	high := max(low, int64(math.Ceil(-cameraY/infinicave.SectionHeight))-1)
-	target := hoverAt(g.scene, infinicave.V{X: x * scale, Y: y * scale}, viewport, pixels)
+	target := hoverAt(g.scene, infinicave.V{X: (x - g.renderOffsetX()) * scale, Y: y * scale}, viewport, pixels)
 	r.selectTarget(target, g.scene, pixels, low, high)
 	if r.image != nil {
 		op := &ebiten.DrawImageOptions{}
-		op.GeoM.Translate(r.origin.X*float64(pixels), (r.origin.Y-cameraY)*float64(pixels))
+		op.GeoM.Translate(g.renderOffsetX()+r.origin.X*float64(pixels), (r.origin.Y-cameraY)*float64(pixels))
 		screen.DrawImage(r.image, op)
 	}
 }

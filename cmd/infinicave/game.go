@@ -53,7 +53,7 @@ func (g *Game) Update() error {
 		g.carveStatus = ""
 		g.regenerate = false
 	}
-	g.scene.SetRenderWidth(g.screenWidth)
+	g.scene.SetRenderWidth(g.renderPixels())
 	g.updateCamera()
 	g.camera.step()
 	g.loading = !g.scene.Update(g.viewport())
