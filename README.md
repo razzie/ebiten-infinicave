@@ -1,5 +1,7 @@
 # ebiten-infinicave
 
+![Infinicave: faceted rock formations with vines and mushrooms](infinicave.png)
+
 A Go library for an infinite procedural cavern with faceted rock, branching vines, and mushrooms, rendered with Ebitengine. Choose a fixed vertical or horizontal scrolling orientation: the world grows upward from a bottom edge or rightward from a left edge. Terrain is generated in the background and nearby sections are cached; returning to an evicted area regenerates the same rocks and vines from its seed and orientation.
 
 The root package is `infinicave`; the interactive viewer and PNG exporter live in
@@ -430,6 +432,10 @@ Rock mesh preparation refines the surface with small correlated facet tilts, a b
 Background rock uses the same correlated facet detail with restrained directional lighting, shallow contact darkening, and faint dark seams at recessed joins. Its cool charcoal palette and exact black pockets stay subdued beneath the foreground. Neighbor probes include the extended side margins, and foreground cast shadows remain dynamic. Mineral detail follows the shared texture setting; pale crest highlights belong to the foreground platforms.
 
 Run with `go run ./cmd/infinicave` (Go 1.27 and a graphical desktop). Use `-seed 42` for a reproducible world.
+
+Windows builds of `./cmd/infinicave` include `infinicave.png` as the executable
+icon. The generated resources for amd64, 386, and arm64 are checked in; after
+changing the PNG, regenerate them with `go generate ./cmd/infinicave`.
 
 The viewer's `-mode portrait` default scrolls vertically in a 9:16 window whose
 height is 80% of the display. `-mode landscape` scrolls horizontally in a 16:9
