@@ -19,6 +19,7 @@ type worldQueryIndex struct {
 	aliases                   map[uint64]uint64
 	formations                map[uint64]Formation
 	formationEdges            map[uint64][]rockEdge
+	formationBlocks           map[uint64][]queryBlock
 	guides                    map[uint64]GuideGeometry
 	sections                  []int64 // internal nonnegative IDs, ascending
 }
@@ -86,6 +87,39 @@ type queryBlock struct {
 	faces    []int
 }
 
+// Match the immutable face slices, rather than geometry pointers: vegetation
+// edits and neighboring cuts can replace a section without changing this union.
+func sameQueryBlocks(old, current []queryBlock) bool {
+	if len(old) != len(current) {
+		return false
+	}
+	for i, b := range current {
+		a := old[i]
+		if a.section != b.section || len(a.faces) != len(b.faces) {
+			return false
+		}
+		for j, face := range a.faces {
+			p, q := a.geometry.faces[face].poly, b.geometry.faces[b.faces[j]].poly
+			if len(p) != len(q) || &p[0] != &q[0] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func queryFaceComplete(w *world, face terrainFace, top float64) bool {
+	lo, hi := face.min.Y+top, math.Min(0, face.max.Y+top)
+	first := max(0, int64(math.Floor(-hi+queryEpsilon)))
+	last := int64(math.Ceil(-lo-queryEpsilon)) - 1
+	for owner := first; owner <= last; owner++ {
+		if s := w.sections[owner]; s == nil || s.geometry == nil {
+			return false
+		}
+	}
+	return true
+}
+
 func (q *worldQueryIndex) rebuild(w *world) {
 	q.sections = nil
 	for id, section := range w.sections {
@@ -144,9 +178,31 @@ func (q *worldQueryIndex) rebuild(w *world) {
 	}
 	formations := make(map[uint64]Formation)
 	formationEdges := make(map[uint64][]rockEdge)
+	formationBlocks := make(map[uint64][]queryBlock)
 	faceIDs := make(map[[2]int64]uint64)
 	aliases := make(map[uint64]uint64)
 	for _, r := range roots {
+		nodes := groups[r]
+		sources := make([]queryBlock, len(nodes))
+		for i, node := range nodes {
+			sources[i] = blocks[node]
+		}
+		first := sources[0]
+		cachedID := q.faceIDs[first.geometry.faces[first.faces[0]].key]
+		if cachedID != 0 && sameQueryBlocks(q.formationBlocks[cachedID], sources) {
+			f := q.formations[cachedID]
+			f.Complete = true
+			for _, block := range sources {
+				for _, i := range block.faces {
+					face := block.geometry.faces[i]
+					faceIDs[face.key] = cachedID
+					f.Complete = f.Complete && queryFaceComplete(w, face, block.geometry.top)
+				}
+			}
+			formations[cachedID], formationEdges[cachedID] = f, q.formationEdges[cachedID]
+			formationBlocks[cachedID], aliases[cachedID] = sources, cachedID
+			continue
+		}
 		id := uint64(0)
 		previous := make(map[uint64]bool)
 		var keys [][2]int64
@@ -167,14 +223,7 @@ func (q *worldQueryIndex) rebuild(w *world) {
 				}
 				// Padding discovers connections and missing continuation, but
 				// only the owned band contributes geometry to the union.
-				lo, hi := face.min.Y+h.top, math.Min(0, face.max.Y+h.top)
-				first := max(0, int64(math.Floor(-hi+queryEpsilon)))
-				last := int64(math.Ceil(-lo-queryEpsilon)) - 1
-				for owner := first; owner <= last; owner++ {
-					if s := w.sections[owner]; s == nil || s.geometry == nil {
-						complete = false
-					}
-				}
+				complete = complete && queryFaceComplete(w, face, h.top)
 				poly := clipHalfPlane(face.poly, V{0, -1}, 0)
 				poly = clipHalfPlane(poly, V{0, 1}, SectionHeight)
 				if len(poly) < 3 || math.Abs(faceArea(poly)) < 1e-15 {
@@ -223,6 +272,7 @@ func (q *worldQueryIndex) rebuild(w *world) {
 			f.Max = V{math.Max(f.Max.X, hi.X), math.Max(f.Max.Y, hi.Y)}
 		}
 		formations[id], formationEdges[id] = f, edges
+		formationBlocks[id] = sources
 	}
 	// Carry forward aliases from earlier merges only while their target is
 	// still represented. This also prevents expired IDs from reviving later.
@@ -260,6 +310,7 @@ func (q *worldQueryIndex) rebuild(w *world) {
 		}
 	}
 	q.faceIDs, q.aliases, q.formations, q.formationEdges = faceIDs, aliases, formations, formationEdges
+	q.formationBlocks = formationBlocks
 	q.guideIDs, q.guides = guideIDs, guides
 	q.revision, q.ready = w.revision, true
 }

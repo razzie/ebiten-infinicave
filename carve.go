@@ -293,7 +293,7 @@ func (cut rockCut) geometry(id int64, old *terrainGeometry, tolerance float64) (
 		return old, nil, false
 	}
 	cuts := append(append([]rockCut(nil), old.cuts...), cut)
-	topology := carvedTopology(grid, cuts, old.top)
+	topology := carveTopology(old.topology, grid, parents, cuts, old.top)
 	updated := prepareTerrainGeometry(sectionData{id: id, guides: old.guides, foregroundTopology: topology}, tolerance)
 	updated.vegetation = old.vegetation
 	return updated, parents, true
@@ -305,12 +305,25 @@ func (cut rockCut) grid(source RockGrid, top float64) (RockGrid, []int, bool) {
 	changed := false
 	hole := cut.localPolygon(top)
 	for i, cell := range source {
-		pieces := [][]V{cell.Polygon}
-		if cut.intersects(cell.Polygon, top) {
-			pieces = subtractRockCut(cell.Polygon, hole)
+		if !cut.intersects(cell.Polygon, top) {
+			if changed {
+				grid = append(grid, cell)
+				parents = append(parents, i)
+			}
+			continue
+		}
+		if !changed {
+			// Most cached sections miss a small cut entirely. Allocate only
+			// when it removes area, and copy the untouched prefix once.
+			grid = make(RockGrid, i, len(source)+8)
+			copy(grid, source[:i])
+			parents = make([]int, i, len(source)+8)
+			for j := range parents {
+				parents[j] = j
+			}
 			changed = true
 		}
-		for _, poly := range pieces {
+		for _, poly := range subtractRockCut(cell.Polygon, hole) {
 			fragment := cell
 			fragment.Polygon = poly
 			if !insideFace(fragment.Center, poly) {
@@ -321,12 +334,15 @@ func (cut rockCut) grid(source RockGrid, top float64) (RockGrid, []int, bool) {
 			parents = append(parents, i)
 		}
 	}
+	if !changed {
+		return source, nil, false
+	}
 	return grid, parents, changed
 }
 
 func carvedTopology(grid RockGrid, cuts []rockCut, top float64) *rockTopology {
 	t := &rockTopology{grid: grid, neighbors: rockNeighbors(grid), cuts: cuts, top: top}
-	t.boundary = rockBoundaryEdges(grid, t.neighbors, false)
+	t.prepareBoundary()
 	return t
 }
 
@@ -334,7 +350,7 @@ func (g *Scene) redrawCarvedSection(section *worldSection) {
 	if section.foreground == nil { // CPU-only geometry consumers/tests
 		return
 	}
-	mesh := prepareGridWithTopology(nil, g.view, carvedTopology(section.geometry.grid, section.geometry.cuts, section.geometry.top))
+	mesh := prepareGridWithTopology(nil, g.view, section.geometry.topology)
 	if section.mesh != nil {
 		section.mesh.foreground = mesh
 		section.mesh.geometry = section.geometry
@@ -367,7 +383,7 @@ func (g *Scene) applyStoredCuts(mesh *sectionMesh) {
 		plantsChanged = plantsChanged || plantsEdited
 	}
 	if changed {
-		mesh.foreground = prepareGridWithTopology(nil, g.view, carvedTopology(mesh.geometry.grid, mesh.geometry.cuts, mesh.geometry.top))
+		mesh.foreground = prepareGridWithTopology(nil, g.view, mesh.geometry.topology)
 	}
 	if plantsChanged {
 		g.prepareCarvedVegetation(mesh)
@@ -395,7 +411,7 @@ func (g *Scene) carveUpload(cut rockCut) {
 	}()
 	u.data.geometry = geometry
 	if changed {
-		u.data.foreground = prepareGridWithTopology(nil, g.view, carvedTopology(geometry.grid, geometry.cuts, geometry.top))
+		u.data.foreground = prepareGridWithTopology(nil, g.view, geometry.topology)
 	}
 	if plantsChanged {
 		g.prepareCarvedVegetation(&u.data)

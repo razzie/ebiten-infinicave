@@ -16,18 +16,33 @@ type rockEdge struct {
 // The final inset grid is immutable through mesh/collision preparation. Share
 // its adjacency and boundary instead of rediscovering partial edges per layer.
 type rockTopology struct {
-	grid      RockGrid
-	neighbors [][]int
-	boundary  []rockEdge
-	cuts      []rockCut
-	top       float64
+	grid        RockGrid
+	neighbors   [][]int
+	boundary    []rockEdge
+	allBoundary []rockEdge // includes generation-window edges for collision
+	cuts        []rockCut
+	top         float64
 }
 
 func newRockTopology(grid RockGrid) *rockTopology {
 	t := &rockTopology{grid: insetForegroundGrid(grid)}
 	t.neighbors = rockNeighbors(t.grid)
-	t.boundary = rockBoundaryEdges(t.grid, t.neighbors, false)
+	t.prepareBoundary()
 	return t
+}
+
+func (t *rockTopology) prepareBoundary() {
+	t.allBoundary = rockBoundaryEdges(t.grid, t.neighbors, true)
+	for _, edge := range t.allBoundary {
+		if !rockWindowEdge(edge.A, edge.B) {
+			t.boundary = append(t.boundary, edge)
+		}
+	}
+}
+
+func rockWindowEdge(a, b V) bool {
+	return (a.X == b.X && (a.X == 0 || a.X == generationWidth)) ||
+		(a.Y == b.Y && (a.Y == generationMinY || a.Y == generationMaxY))
 }
 
 // Subdivide partial shared edges before cancellation, so merged guide faces
@@ -50,7 +65,7 @@ func rockBoundaryEdges(grid RockGrid, neighbors [][]int, includeWindow bool) []r
 				continue
 			}
 			// Generation-window cuts have no physical thickness.
-			if !includeWindow && ((a.X == b.X && (a.X == 0 || a.X == generationWidth)) || (a.Y == b.Y && (a.Y == generationMinY || a.Y == generationMaxY))) {
+			if !includeWindow && rockWindowEdge(a, b) {
 				continue
 			}
 			ts := []float64{0, 1}

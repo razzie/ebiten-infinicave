@@ -90,10 +90,10 @@ func collisionVertexKey(p V) [2]int64 {
 
 // Internal face edges cancel, including partial shared edges. Tracing per
 // connected block keeps corner contacts from joining unrelated formations.
-func prepareCollisionGeometry(id int64, grid RockGrid, neighbors [][]int, h *terrainGeometry, tolerance float64) CollisionGeometry {
+func prepareCollisionGeometry(id int64, grid RockGrid, boundary []rockEdge, h *terrainGeometry, tolerance float64) CollisionGeometry {
 	geometry := CollisionGeometry{ID: -id, Top: sectionTop(id)}
 	byBlock := make([][]rockEdge, len(h.blocks))
-	for _, edge := range rockBoundaryEdges(grid, neighbors, true) {
+	for _, edge := range boundary {
 		block := h.faces[edge.Cell].block
 		byBlock[block] = append(byBlock[block], edge)
 	}

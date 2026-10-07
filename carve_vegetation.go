@@ -34,7 +34,7 @@ func (cut rockCut) vegetation(source vegetationGeometry, ground RockGrid, top fl
 	for _, group := range source.mushrooms {
 		var kept []Mushroom
 		for _, mushroom := range group.Mushrooms {
-			if mushroomSupported(mushroom, groundFaces) {
+			if !cut.affectsMushroomSupport(mushroom, top) || mushroomSupported(mushroom, groundFaces) {
 				kept = append(kept, mushroom)
 			} else {
 				removed = true
@@ -56,6 +56,20 @@ func (cut rockCut) vegetation(source vegetationGeometry, ground RockGrid, top fl
 		updated.cuts = append(append([]rockCut(nil), source.cuts...), cut)
 	}
 	return updated, removed || backHit || frontHit
+}
+
+// Only a cut near the buried root/anchor can remove existing support. Caps and
+// distant mushrooms need no search through every remaining terrain face.
+func (cut rockCut) affectsMushroomSupport(m Mushroom, top float64) bool {
+	root := m.Anchor
+	if len(m.Stem) > 0 {
+		root = m.Stem[0]
+	}
+	const contact = .002 // same allowance as mushroomSupported
+	return math.Max(root.X, m.Anchor.X)+contact >= cut.min.X &&
+		math.Min(root.X, m.Anchor.X)-contact <= cut.max.X &&
+		math.Max(root.Y, m.Anchor.Y)+top+contact >= cut.min.Y &&
+		math.Min(root.Y, m.Anchor.Y)+top-contact <= cut.max.Y
 }
 
 func (cut rockCut) plants(old *terrainGeometry) (*terrainGeometry, bool) {

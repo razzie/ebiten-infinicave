@@ -12,7 +12,8 @@ type terrainFace struct {
 // Retain the same clipped faces used for rendering and derive collision
 // boundaries from their union for collisions, queries, and terrain edits.
 type terrainGeometry struct {
-	grid       RockGrid // final inset faces, retained for terrain edits
+	grid       RockGrid      // final inset faces, retained for terrain edits
+	topology   *rockTopology // immutable adjacency and boundaries shared with rendering
 	cuts       []rockCut
 	vegetation vegetationGeometry
 	faces      []terrainFace
@@ -54,8 +55,11 @@ func prepareTerrainGeometry(data sectionData, tolerance float64) *terrainGeometr
 	neighbors := source.neighbors
 	if len(grid) != len(source.grid) {
 		neighbors = rockNeighbors(grid)
+		source = &rockTopology{grid: grid, neighbors: neighbors, cuts: source.cuts, top: source.top}
+		source.prepareBoundary()
 	}
 	h.grid = grid
+	h.topology = source
 	for i := range h.faces {
 		if h.faces[i].block >= 0 {
 			continue
@@ -73,6 +77,6 @@ func prepareTerrainGeometry(data sectionData, tolerance float64) *terrainGeometr
 		}
 		h.blocks = append(h.blocks, queue)
 	}
-	h.collision = prepareCollisionGeometry(data.id, grid, neighbors, h, tolerance)
+	h.collision = prepareCollisionGeometry(data.id, grid, source.allBoundary, h, tolerance)
 	return h
 }
