@@ -47,7 +47,7 @@ func AppendCarveRims(vertices []ebiten.Vertex, indices []uint32, topology *terra
 			// wall gets a thin reflected edge and otherwise falls into shade.
 			depth := .003 + .004*light + .002*variation
 			shadow := color.NRGBA{R: uint8(15 + 17*light), G: uint8(11 + 12*light), B: uint8(8 + 8*light), A: 245}
-			shadow = rockViewColor(terrain.RockCell{Color: shadow}, view)
+			shadow = rockViewColor(terrain.RockCell{Color: shadow, Raised: true}, view)
 			vertices, indices = appendRockQuad(vertices, indices,
 				[4]geom.V{a, b, b.Add(outward.Mul(depth)), a.Add(outward.Mul(depth * (.7 + .3*variation)))}, shadow)
 			width := .0025 + .0045*variation
@@ -63,7 +63,7 @@ func AppendCarveRims(vertices []ebiten.Vertex, indices []uint32, topology *terra
 				G: uint8(geom.Clamp(math.Max(29+23*light, float64(cell.Color.G)*strength+12), 0, 255)),
 				B: uint8(geom.Clamp(math.Max(18+15*light, float64(cell.Color.B)*strength+3), 0, 255)), A: 255,
 			}
-			lip = rockViewColor(terrain.RockCell{Color: lip}, view)
+			lip = rockViewColor(terrain.RockCell{Color: lip, Raised: true}, view)
 			vertices, indices = appendRockQuad(vertices, indices, [4]geom.V{a, b, lipB, lipA}, lip)
 		}
 	}

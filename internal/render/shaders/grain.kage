@@ -30,9 +30,9 @@ func Fragment(dst vec4, src vec2, color vec4, custom vec4) vec4 {
 
 	// One continuous plane per rock. The triangles filling a concave or
 	// merged face must not introduce their own wedge-shaped tonal seams.
-	mineral := (smoothNoise(p/83.0)-.5)*.055
-	mineral += (smoothNoise(p/21.0)-.5)*.035
-	mineral += (smoothNoise(p/5.0)-.5)*.012
+	mineral := (smoothNoise(p/83.0)-.5)*.045
+	mineral += (smoothNoise(p/21.0)-.5)*.045
+	mineral += (smoothNoise(p/5.0)-.5)*.025
 	// Faint mineral strokes run along the facet, with broad warping to avoid
 	// repetitive stripes. Normal channels are constant across a whole face.
 	n := custom.zw
@@ -46,7 +46,9 @@ func Fragment(dst vec4, src vec2, color vec4, custom vec4) vec4 {
 
 	// Fine matte grain stays static and fades out in the black pockets.
 	grain := noise(floor(p)) - .5
-	rgb += vec3(grain) * (.004+luminance*.009) * Texture * visible
+	pores := smoothstep(.68, .86, smoothNoise(p/1.8))
+	rgb += vec3(grain) * (.002+luminance*.006) * Texture * visible
+	rgb *= 1.0 - pores*.008*Texture*visible
 
 	// Shader output uses premultiplied alpha for the transparent guide layer.
 	return vec4(clamp(rgb, vec3(0), vec3(1)) * color.a, color.a)

@@ -32,9 +32,9 @@ type mushroomGround struct {
 }
 
 var MushroomColors = [...]color.NRGBA{
-	{132, 57, 42, 255},
-	{171, 111, 58, 255},
-	{160, 139, 91, 255},
+	{239, 100, 30, 255},
+	{250, 165, 40, 255},
+	{249, 192, 70, 255},
 }
 
 func MushroomsForGuides(guides []Guide, foreground RockGrid, orientation ...Orientation) []MushroomGroup {

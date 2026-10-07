@@ -39,7 +39,7 @@ func appendRockWalls(vertices []ebiten.Vertex, indices []uint32, grid terrain.Ro
 		b := edge.B.Add(view.Mul(zb))
 		normal := (geom.V3{X: outward.X, Y: outward.Y, Z: .1}).Norm()
 		clr := terrain.RockSurfaceColor(normal, c.Shadow*.65, c.Ambient*.55, terrain.RockOrientation(c))
-		clr = rockViewColor(terrain.RockCell{Color: clr}, viewMode)
+		clr = rockViewColor(terrain.RockCell{Color: clr, Raised: true}, viewMode)
 		vertices, indices = appendRockQuad(vertices, indices, [4]geom.V{edge.A, edge.B, b, a}, clr)
 	}
 	return vertices, indices
@@ -60,7 +60,39 @@ func rockViewColor(c terrain.RockCell, view View) color.NRGBA {
 		v := uint8(math.Round(.30*float64(c.Color.R) + .59*float64(c.Color.G) + .11*float64(c.Color.B)))
 		return color.NRGBA{v, v, v, c.Color.A}
 	}
-	return c.Color
+	return rockMaterialColor(c.Color, c.Raised)
+}
+
+// Grade only the rendered material. Terrain colors also steer vine growth,
+// so changing their palette during generation would change seeded geometry.
+func rockMaterialColor(c color.NRGBA, raised bool) color.NRGBA {
+	if !raised {
+		v := (.30*float64(c.R) + .59*float64(c.G) + .11*float64(c.B)) / 31
+		return color.NRGBA{
+			R: uint8(math.Round(math.Min(255, 19*v))),
+			G: uint8(math.Round(math.Min(255, 26*v))),
+			B: uint8(math.Round(math.Min(255, 29*v))), A: c.A,
+		}
+	}
+	stops := [...]struct {
+		red, r, g, b float64
+	}{
+		{0, 0, 0, 0}, {8, 8, 8, 7}, {18, 23, 22, 20},
+		{38, 49, 46, 40}, {120, 151, 139, 116},
+		{165, 229, 210, 172}, {190, 255, 237, 197}, {255, 255, 250, 230},
+	}
+	for i := 1; i < len(stops); i++ {
+		a, b := stops[i-1], stops[i]
+		if float64(c.R) <= b.red {
+			t := (float64(c.R) - a.red) / (b.red - a.red)
+			return color.NRGBA{
+				R: uint8(math.Round(geom.Lerp(a.r, b.r, t))),
+				G: uint8(math.Round(geom.Lerp(a.g, b.g, t))),
+				B: uint8(math.Round(geom.Lerp(a.b, b.b, t))), A: c.A,
+			}
+		}
+	}
+	return c
 }
 
 // A restrained bevel belongs only to an exposed silhouette. Internal cell
@@ -75,7 +107,17 @@ func appendRockBevels(vertices []ebiten.Vertex, indices []uint32, grid terrain.R
 			continue
 		}
 		normal := (geom.V3{X: c.Normal.X - inward.X*.5, Y: c.Normal.Y - inward.Y*.5, Z: c.Normal.Z}).Norm()
-		clr := rockViewColor(terrain.RockCell{Color: terrain.RockSurfaceColor(normal, c.Shadow, c.Ambient, terrain.RockOrientation(c))}, view)
+		clr := terrain.RockSurfaceColor(normal, c.Shadow, c.Ambient, terrain.RockOrientation(c))
+		clr = rockViewColor(terrain.RockCell{Color: clr, Raised: true}, view)
+		if view == ViewShaded {
+			// Color the existing bevel with warm grazing light. Shadowed edges
+			// retain their material tone, so the rim never becomes an outline.
+			light := terrain.SurfaceLight(normal, terrain.RockOrientation(c))
+			warmth := .72 * light * light * c.Shadow
+			clr.R = uint8(math.Round(geom.Lerp(float64(clr.R), 255, warmth)))
+			clr.G = uint8(math.Round(geom.Lerp(float64(clr.G), 199, warmth)))
+			clr.B = uint8(math.Round(geom.Lerp(float64(clr.B), 112, warmth)))
+		}
 		vertices, indices = appendRockQuad(vertices, indices, [4]geom.V{edge.A, edge.B, b, a}, clr)
 	}
 	return vertices, indices

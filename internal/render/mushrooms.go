@@ -2,6 +2,7 @@ package render
 
 import (
 	"image/color"
+	"math"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/razzie/ebiten-infinicave/internal/geom"
@@ -29,11 +30,11 @@ func PrepareMushrooms(groups []terrain.MushroomGroup) TriangleMesh {
 			prev = cur
 		}
 	}
-	fan := func(center geom.V, outline []geom.V, grow float64, c color.NRGBA) {
-		mid := vertex(center, c)
+	fan := func(center geom.V, outline []geom.V, grow float64, shade func(geom.V) color.NRGBA) {
+		mid := vertex(center, shade(center))
 		first := uint32(len(vertices))
 		for _, p := range outline {
-			vertex(p.Add(p.Sub(center).Norm().Mul(grow)), c)
+			vertex(p.Add(p.Sub(center).Norm().Mul(grow)), shade(p))
 		}
 		for i := range outline {
 			indices = append(indices, mid, first+uint32(i), first+uint32((i+1)%len(outline)))
@@ -41,12 +42,28 @@ func PrepareMushrooms(groups []terrain.MushroomGroup) TriangleMesh {
 	}
 	for _, group := range groups {
 		for _, m := range group.Mushrooms {
-			ribbon(m.Stem, m.CapWidth*.19, color.NRGBA{R: 46, G: 37, B: 28, A: 255})
-			ribbon(m.Stem, m.CapWidth*.11, color.NRGBA{R: 216, G: 190, B: 143, A: 255})
+			ribbon(m.Stem, m.CapWidth*.19, color.NRGBA{R: 108, G: 70, B: 32, A: 255})
+			ribbon(m.Stem, m.CapWidth*.11, color.NRGBA{R: 255, G: 233, B: 167, A: 255})
 			outline := terrain.MushroomCapOutline(m)
 			center := m.CapCenter.Add(terrain.InternalPoint(terrain.MushroomOrientation(m), geom.V{X: 0, Y: -m.CapHeight * .4}))
-			fan(center, outline, .001, color.NRGBA{R: 48, G: 36, B: 27, A: 255})
-			fan(center, outline, 0, m.Color)
+			fan(center, outline, .001, func(geom.V) color.NRGBA {
+				return color.NRGBA{R: 115, G: 60, B: 23, A: 255}
+			})
+			fan(center, outline, 0, func(p geom.V) color.NRGBA {
+				// Shade the existing cap fan in world axes, including horizontal
+				// caves. A pale underside and upper-left highlight suggest glow.
+				d := terrain.WorldPoint(terrain.MushroomOrientation(m), p.Sub(m.CapCenter))
+				x := d.X / math.Max(m.CapWidth*.5, 1e-9)
+				y := d.Y / math.Max(m.CapHeight, 1e-9)
+				underside := geom.Smoothstep(-.18, .05, y)
+				highlight := .35 * geom.Clamp(1-math.Hypot((x+.28)*1.2, (y+.65)*1.6), 0, 1)
+				light := math.Max(underside*.88, highlight)
+				return color.NRGBA{
+					R: uint8(math.Round(geom.Lerp(float64(m.Color.R), 255, light))),
+					G: uint8(math.Round(geom.Lerp(float64(m.Color.G), 239, light))),
+					B: uint8(math.Round(geom.Lerp(float64(m.Color.B), 155, light))), A: m.Color.A,
+				}
+			})
 		}
 	}
 	return TriangleMesh{Vertices: vertices, Indices: indices}
