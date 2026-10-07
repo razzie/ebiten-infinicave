@@ -27,7 +27,7 @@ func run() error {
 	shadowX := flag.Float64("shadow-x", defaults.ShadowOffset.X, "rock shadow horizontal offset in scene units (range -1 to 1)")
 	shadowY := flag.Float64("shadow-y", defaults.ShadowOffset.Y, "rock shadow vertical offset in scene units (positive is down, range -1 to 1)")
 	fog := flag.Bool("fog", true, "moving fog between background and foreground layers")
-	bats := flag.Bool("bats", true, "occasional bats flying across the cave (interactive viewer only)")
+	batsPerMinute := flag.Float64("bats-per-minute", defaults.BatsPerMinute, "average bat arrivals per minute (0 disables them, interactive viewer only)")
 	view := flag.String("view", "shaded", "terrain view: shaded, clay, height, normals, shadows")
 	hover := flag.Bool("hover", false, "highlight foreground rocks and guide lines under the mouse")
 	tolerance := flag.Float64("collision-tolerance", 0, "collision polygon simplification tolerance in scene units (one section is 1 by 1)")
@@ -37,7 +37,10 @@ func run() error {
 	config.BackgroundBlur, config.ShadowOpacity, config.ShadowBlur = *backgroundBlur, *shadowOpacity, *shadowBlur
 	config.ShadowOffset = infinicave.V{X: *shadowX, Y: *shadowY}
 	config.Fog = *fog
-	config.Bats = *bats && *output == ""
+	config.BatsPerMinute = *batsPerMinute
+	if *output != "" {
+		config.BatsPerMinute = 0
+	}
 	parsedView, err := infinicave.ParseView(*view)
 	if err != nil {
 		return err

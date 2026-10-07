@@ -34,9 +34,10 @@ type Config struct {
 	// Fog enables moving mist between the background and foreground layers.
 	// Diagnostic views disable fog regardless of this setting.
 	Fog bool
-	// Bats enables occasional animated bats flying across the viewport.
+	// BatsPerMinute is the average number of animated bat arrivals per minute.
+	// It must be finite and nonnegative; zero disables bats.
 	// Bats use world coordinates and are hidden outside ViewShaded.
-	Bats bool
+	BatsPerMinute float64
 	// View selects the material. Diagnostic views disable texture, background
 	// effects, fog, and vegetation.
 	View View
@@ -61,7 +62,7 @@ type Config struct {
 // DefaultConfig returns the viewer's appearance with a deterministic seed of 0.
 func DefaultConfig() Config {
 	return Config{Texture: 8, BackgroundBlur: .002, ShadowOpacity: .65,
-		ShadowBlur: .008, ShadowOffset: V{.018, .025}, Fog: true, Bats: true, View: ViewShaded}
+		ShadowBlur: .008, ShadowOffset: V{.018, .025}, Fog: true, BatsPerMinute: 7.5, View: ViewShaded}
 }
 
 func (c Config) validate() error {
@@ -86,6 +87,9 @@ func (c Config) validate() error {
 	}
 	if math.IsNaN(c.CollisionTolerance) || math.IsInf(c.CollisionTolerance, 0) || c.CollisionTolerance < 0 {
 		return fmt.Errorf("infinicave: collision tolerance must be finite and nonnegative")
+	}
+	if math.IsNaN(c.BatsPerMinute) || math.IsInf(c.BatsPerMinute, 0) || c.BatsPerMinute < 0 {
+		return fmt.Errorf("infinicave: bats per minute must be finite and nonnegative")
 	}
 	return nil
 }
@@ -167,8 +171,8 @@ func NewScene(config Config) (*Scene, error) {
 		}
 	}
 	g.world = newWorld(config.Seed, g.view, g.collisionTolerance, g.loadSection)
-	if config.Bats && g.view == ViewShaded {
-		g.bats = newBatFlock(config.Seed)
+	if config.BatsPerMinute > 0 && g.view == ViewShaded {
+		g.bats = newBatFlock(config.Seed, config.BatsPerMinute)
 	}
 	return g, nil
 }
@@ -267,7 +271,7 @@ func (g *Scene) Reset(seed int64) {
 	g.world = newWorld(seed, g.view, g.collisionTolerance, g.loadSection)
 	g.world.pixels = pixels
 	if g.bats != nil {
-		g.bats = newBatFlock(seed)
+		g.bats = newBatFlock(seed, g.bats.perMinute)
 	}
 }
 

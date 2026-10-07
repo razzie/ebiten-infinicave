@@ -9,9 +9,9 @@ import (
 )
 
 func TestBatsConfigurationAndLifecycle(t *testing.T) {
-	configs := []Config{{}, DefaultConfig(), {Bats: true}}
+	configs := []Config{{}, DefaultConfig(), {BatsPerMinute: .5}, {BatsPerMinute: 30}}
 	for view := ViewClay; view <= ViewShadows; view++ {
-		configs = append(configs, Config{Bats: true, View: view})
+		configs = append(configs, Config{BatsPerMinute: 30, View: view})
 	}
 	for _, config := range configs {
 		scene, err := NewScene(config)
@@ -19,7 +19,7 @@ func TestBatsConfigurationAndLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(scene.Close)
-		if enabled := config.Bats && config.View == ViewShaded; (scene.bats != nil) != enabled {
+		if enabled := config.BatsPerMinute > 0 && config.View == ViewShaded; (scene.bats != nil) != enabled {
 			t.Fatalf("bats enabled incorrectly for config %+v", config)
 		}
 		if scene.bats == nil {
@@ -54,9 +54,9 @@ func TestBatsConfigurationAndLifecycle(t *testing.T) {
 		if scene.bats == nil || len(scene.bats.bats) != 0 {
 			t.Fatal("reset did not clear bats while keeping them enabled")
 		}
-		fresh := newBatFlock(42)
-		if scene.bats.next != fresh.next {
-			t.Fatal("reset did not restart the animation with the new seed")
+		fresh := newBatFlock(42, config.BatsPerMinute)
+		if scene.bats.next != fresh.next || scene.bats.perMinute != config.BatsPerMinute {
+			t.Fatal("reset did not restart the animation with the new seed and configured frequency")
 		}
 		scene.Close()
 		scene.Update(Viewport{Y: -.8, Height: .8})
@@ -67,7 +67,7 @@ func TestBatsConfigurationAndLifecycle(t *testing.T) {
 }
 
 func TestBatsArriveOccasionallyFromBothSides(t *testing.T) {
-	flock := newBatFlock(42)
+	flock := newBatFlock(42, DefaultConfig().BatsPerMinute)
 	viewport := Viewport{Y: -2, Height: 1}
 	left, right, arrivals := false, false, 0
 	for tick := 0; tick < 120*60; tick++ {
@@ -76,7 +76,7 @@ func TestBatsArriveOccasionallyFromBothSides(t *testing.T) {
 			t.Fatal("too many bats on screen at once")
 		}
 		for _, b := range flock.bats {
-			if b.age != 0 {
+			if b.age >= 1.0/60 {
 				continue
 			}
 			arrivals++
@@ -106,7 +106,7 @@ func TestBatsArriveOccasionallyFromBothSides(t *testing.T) {
 
 func TestBatRoutesCurveAndCrossWithoutFollowingCamera(t *testing.T) {
 	viewport := Viewport{Y: -2, Height: 1}
-	flock, scrolled := newBatFlock(42), newBatFlock(42)
+	flock, scrolled := newBatFlock(42, 7.5), newBatFlock(42, 7.5)
 	flock.step(viewport, 6)
 	scrolled.step(viewport, 6)
 	b := flock.bats[0]
@@ -144,5 +144,41 @@ func TestBatRoutesCurveAndCrossWithoutFollowingCamera(t *testing.T) {
 	flock.step(viewport, b.duration)
 	if len(flock.bats) != 0 {
 		t.Fatal("bats were retained after exiting the opposite side")
+	}
+}
+
+func TestBatArrivalFrequency(t *testing.T) {
+	viewport := Viewport{Y: -2, Height: 1}
+	for _, perMinute := range []float64{.5, 7.5, 30, 120} {
+		flock := newBatFlock(42, perMinute)
+		arrivals := 0
+		const minutes = 20
+		for tick := 0; tick < minutes*60*60; tick++ {
+			flock.step(viewport, 1.0/60)
+			for _, b := range flock.bats {
+				if b.age < 1.0/60 {
+					arrivals++
+				}
+			}
+		}
+		if want := perMinute * minutes; math.Abs(float64(arrivals)-want) > math.Max(1, want*.1) {
+			t.Fatalf("frequency %g: got %d arrivals in %d minutes, want about %g", perMinute, arrivals, minutes, want)
+		}
+	}
+}
+
+func TestBatArrivalsWithinOneUpdate(t *testing.T) {
+	viewport := Viewport{Y: -2, Height: 1}
+	flock := newBatFlock(42, 7200)
+	for tick := 0; tick < 60; tick++ {
+		flock.step(viewport, 1.0/60)
+	}
+	if len(flock.bats) < 100 || len(flock.bats) > 140 {
+		t.Fatalf("expected about 120 arrivals in one second, got %d", len(flock.bats))
+	}
+	for _, b := range flock.bats {
+		if b.age < 0 || b.age > 1 {
+			t.Fatalf("incorrect bat age after arrival: %g", b.age)
+		}
 	}
 }

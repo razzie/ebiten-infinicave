@@ -39,15 +39,16 @@ func (b bat) bank(t float64) float64 {
 }
 
 type batFlock struct {
-	rng  *rand.Rand
-	next float64 // seconds until the next arrival
-	bats []bat
+	rng       *rand.Rand
+	perMinute float64
+	next      float64 // seconds until the next arrival
+	bats      []bat
 }
 
-func newBatFlock(seed int64) *batFlock {
+func newBatFlock(seed int64, perMinute float64) *batFlock {
 	// Keep ambient animation independent of terrain generation and its RNG.
-	f := &batFlock{rng: rand.New(rand.NewSource(seed))}
-	f.next = 2 + f.rng.Float64()*3
+	f := &batFlock{rng: rand.New(rand.NewSource(seed)), perMinute: perMinute}
+	f.next = (60 / perMinute) * (.25 + f.rng.Float64()*.375)
 	return f
 }
 
@@ -72,9 +73,14 @@ func (f *batFlock) step(viewport Viewport, seconds float64) {
 	}
 	f.bats = alive
 	f.next -= seconds
-	if f.next > 0 {
-		return
+	for f.next <= 0 {
+		f.spawn(viewport, -f.next)
+		// Preserve elapsed time so rates above the update frequency still work.
+		f.next += (60 / f.perMinute) * (.625 + f.rng.Float64()*.75)
 	}
+}
+
+func (f *batFlock) spawn(viewport Viewport, age float64) {
 	// Limit excursions in tall viewports, with room for the entire silhouette
 	// above the floor and below the top of the view in ordinary window sizes.
 	span := math.Min(viewport.Height, 1)
@@ -84,6 +90,7 @@ func (f *batFlock) step(viewport Viewport, seconds float64) {
 	startY := viewport.Y + viewport.Height*(.2+.6*f.rng.Float64())
 	endY := clampY(startY + (f.rng.Float64()-.5)*span*.5)
 	b := bat{
+		age:      age,
 		start:    V{X: backgroundMinX - batMargin, Y: startY},
 		end:      V{X: backgroundMaxX + batMargin, Y: endY},
 		control1: clampY(startY + (f.rng.Float64()-.5)*span*.8),
@@ -96,8 +103,9 @@ func (f *batFlock) step(viewport Viewport, seconds float64) {
 	if f.rng.Intn(2) == 0 {
 		b.start.X, b.end.X = b.end.X, b.start.X
 	}
-	f.bats = append(f.bats, b)
-	f.next = 5 + f.rng.Float64()*6
+	if b.age < b.duration {
+		f.bats = append(f.bats, b)
+	}
 }
 
 func (f *batFlock) draw(dst *ebiten.Image, viewport Viewport) {

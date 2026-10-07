@@ -177,6 +177,7 @@ func TestPublicSceneConfigurationAndLifecycle(t *testing.T) {
 		{ShadowOffset: infinicave.V{X: math.NaN()}}, {ShadowOffset: infinicave.V{Y: math.Inf(1)}},
 		{View: infinicave.View(-1)}, {View: infinicave.View(999)},
 		{CollisionTolerance: -1}, {CollisionTolerance: math.NaN()}, {CollisionTolerance: math.Inf(1)},
+		{BatsPerMinute: -1}, {BatsPerMinute: math.NaN()}, {BatsPerMinute: math.Inf(1)}, {BatsPerMinute: math.Inf(-1)},
 	} {
 		if scene, err := infinicave.NewScene(config); err == nil {
 			scene.Close()
