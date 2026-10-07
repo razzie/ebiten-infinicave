@@ -173,6 +173,7 @@ func TestPublicSceneConfigurationAndLifecycle(t *testing.T) {
 		{BackgroundBlur: -1}, {BackgroundBlur: .051}, {BackgroundBlur: math.NaN()}, {BackgroundBlur: math.Inf(1)},
 		{ShadowBlur: -1}, {ShadowBlur: .051}, {ShadowBlur: math.NaN()}, {ShadowBlur: math.Inf(1)},
 		{ShadowOpacity: -1}, {ShadowOpacity: 1.01}, {ShadowOpacity: math.NaN()}, {ShadowOpacity: math.Inf(1)},
+		{Fog: -1}, {Fog: math.NaN()}, {Fog: math.Inf(1)}, {Fog: math.Inf(-1)},
 		{ShadowOffset: infinicave.V{X: 1.01}}, {ShadowOffset: infinicave.V{Y: -1.01}},
 		{ShadowOffset: infinicave.V{X: math.NaN()}}, {ShadowOffset: infinicave.V{Y: math.Inf(1)}},
 		{View: infinicave.View(-1)}, {View: infinicave.View(999)},

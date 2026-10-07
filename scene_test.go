@@ -94,9 +94,9 @@ func TestBatsConfigurationAndLifecycle(t *testing.T) {
 }
 
 func TestFogConfigurationAndLifecycle(t *testing.T) {
-	configs := []Config{{}, DefaultConfig(), {Fog: true}}
+	configs := []Config{{}, DefaultConfig(), {Fog: .25}, {Fog: .5}, {Fog: 1}, {Fog: 2}, {Fog: 10}}
 	for view := ViewClay; view <= ViewShadows; view++ {
-		configs = append(configs, Config{Fog: true, View: view})
+		configs = append(configs, Config{Fog: 2, View: view})
 	}
 	for _, config := range configs {
 		scene, err := NewScene(config)
@@ -104,13 +104,16 @@ func TestFogConfigurationAndLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(scene.Close)
-		if enabled := config.Fog && config.View == ViewShaded; (scene.fog != nil) != enabled {
+		if enabled := config.Fog > 0 && config.View == ViewShaded; (scene.fog != nil) != enabled {
 			t.Fatalf("fog enabled incorrectly for config %+v", config)
 		}
 		if scene.fog == nil {
 			continue
 		}
 		fog := scene.fog
+		if fog.Strength != config.Fog {
+			t.Fatalf("fog strength: got %g, want %g", fog.Strength, config.Fog)
+		}
 		scene.Update(Viewport{})
 		if fog.Time != 0 {
 			t.Fatal("invalid viewport advanced fog animation")
@@ -120,8 +123,8 @@ func TestFogConfigurationAndLifecycle(t *testing.T) {
 			t.Fatal("valid update did not advance fog animation while terrain loads")
 		}
 		scene.Reset(42)
-		if scene.fog != fog {
-			t.Fatal("world reset lost the fog renderer")
+		if scene.fog != fog || scene.fog.Strength != config.Fog {
+			t.Fatal("world reset lost the fog renderer or configured strength")
 		}
 		scene.Close()
 		before := fog.Time

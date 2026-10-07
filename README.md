@@ -102,13 +102,13 @@ and releases shaders and cached images; an in-progress CPU generation finishes
 before its worker exits.
 
 `DefaultConfig` uses texture strength 8, background blur 0.002, dynamic shadow
-opacity 0.65, shadow softness 0.008, shadow offset (0.018, 0.025), moving fog, 7.5 bats per minute, shaded rendering,
+opacity 0.65, shadow softness 0.008, shadow offset (0.018, 0.025), fog strength 1, 7.5 bats per minute, shaded rendering,
 seed 0, and exact collision geometry. A zero `Config` is also valid and disables
 texture, background effects, fog, and bats. `View`
 is a typed enum:
 
 ```go
-config.Fog = false // disable the moving mist
+config.Fog = 2 // moving mist strength; 0 disables it, 1 is default, >1 is denser
 config.BatsPerMinute = 7.5 // average bat arrivals per minute; 0 disables them
 config.BackgroundBlur = 0.002 // blur background rock and vines together
 config.ShadowOpacity = 0.65 // dynamic rock shadows; 0 disables them
@@ -131,7 +131,10 @@ The viewer exposes the same settings as `-background-blur`, `-shadow-opacity`,
 Fog drifts over the background rock and vines, behind mushrooms and foreground
 rock and vines. It follows world coordinates across section seams, scrolling,
 and resizing, and advances once per `Scene.Update` so repeated draws share the
-same animation state. Set `Config.Fog` to toggle it when creating a scene.
+same animation state. Set `Config.Fog` to a finite, nonnegative value when creating
+a scene to scale its opacity; 0 disables it, 1 preserves the default appearance,
+and values above 1 produce denser mist. Opacity saturates at 1. The viewer accepts
+the same strength with `-fog` (for example, `-fog 2`).
 `ParseView` converts strings such as `"normals"` for
 command-line tools; library code can use the constants directly.
 
@@ -457,7 +460,7 @@ The viewer renders at the window's native pixel resolution, including on HiDPI d
 
 Hover over a foreground rock for a soft warm highlight and glow over its entire connected block of cells, including across cached section boundaries. Point within 0.006 scene units of a guide to highlight only that guide line instead. Hover effects are disabled by default; use `-hover=true` to enable them. PNG exports never include hover effects.
 
-`go run ./cmd/infinicave -seed 42 -output scene.png` exports the bottom 1000 × 2400 pixels and exits. Adding `-mode landscape` exports the leftmost 2400 × 1000 pixels instead. `-texture 0` disables the surface texture. `-fog=false` disables the moving fog. `-collision-tolerance 0.002` simplifies collision polygons with a 0.002-unit tolerance.
+`go run ./cmd/infinicave -seed 42 -output scene.png` exports the bottom 1000 × 2400 pixels and exits. Adding `-mode landscape` exports the leftmost 2400 × 1000 pixels instead. `-texture 0` disables the surface texture. `-fog 0` disables the moving fog; `-fog 0.5` gives half strength. `-collision-tolerance 0.002` simplifies collision polygons with a 0.002-unit tolerance.
 
 The `-view` options are `shaded` (default), `clay`, `height`, `normals`, and `shadows`. Diagnostic views disable texture, background effects, fog, and vegetation; clay uses neutral gray material with the same lighting and exposed edges.
 

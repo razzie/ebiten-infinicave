@@ -26,9 +26,11 @@ type Config struct {
 	// ShadowOffset projects rock shadows in scene units; positive Y is down.
 	// Each component must be between -1 and 1.
 	ShadowOffset V
-	// Fog enables moving mist between the background and foreground layers.
+	// Fog is moving mist strength between the background and foreground layers.
+	// It must be finite and nonnegative; 0 disables it, 1 is the default strength,
+	// and values above 1 produce denser mist.
 	// Diagnostic views disable fog regardless of this setting.
-	Fog bool
+	Fog float64
 	// BatsPerMinute is the average number of animated bat arrivals per minute.
 	// It must be finite and nonnegative; zero disables bats.
 	// Bats use world coordinates and are hidden outside ViewShaded.
@@ -57,7 +59,7 @@ type Config struct {
 // DefaultConfig returns the viewer's appearance with a deterministic seed of 0.
 func DefaultConfig() Config {
 	return Config{Texture: 8, BackgroundBlur: .002, ShadowOpacity: .65,
-		ShadowBlur: .008, ShadowOffset: V{X: .018, Y: .025}, Fog: true, BatsPerMinute: 7.5, View: ViewShaded}
+		ShadowBlur: .008, ShadowOffset: V{X: .018, Y: .025}, Fog: 2, BatsPerMinute: 7.5, View: ViewShaded}
 }
 
 func (c Config) validate() error {
@@ -77,6 +79,9 @@ func (c Config) validate() error {
 		if math.IsNaN(setting.value) || math.IsInf(setting.value, 0) || setting.value < 0 || setting.value > setting.limit {
 			return fmt.Errorf("infinicave: %s must be between 0 and %g", setting.name, setting.limit)
 		}
+	}
+	if math.IsNaN(c.Fog) || math.IsInf(c.Fog, 0) || c.Fog < 0 {
+		return fmt.Errorf("infinicave: fog strength must be finite and nonnegative")
 	}
 	for _, offset := range []float64{c.ShadowOffset.X, c.ShadowOffset.Y} {
 		if math.IsNaN(offset) || math.IsInf(offset, 0) || math.Abs(offset) > 1 {

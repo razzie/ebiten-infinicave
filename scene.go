@@ -62,8 +62,8 @@ func NewScene(config Config) (*Scene, error) {
 		g.Close()
 		return nil, fmt.Errorf("infinicave: compile vine shader: %w", err)
 	}
-	if config.Fog && g.view == ViewShaded {
-		g.fog, err = render.NewFogRenderer(g.orientation)
+	if config.Fog > 0 && g.view == ViewShaded {
+		g.fog, err = render.NewFogRenderer(config.Fog, g.orientation)
 		if err != nil {
 			g.Close()
 			return nil, fmt.Errorf("infinicave: compile fog shader: %w", err)

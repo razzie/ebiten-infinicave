@@ -1,22 +1,25 @@
 package render
 
 import (
+	"math"
+
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
 type FogRenderer struct {
 	Orientation terrain.Orientation
+	Strength    float64
 	shader      *ebiten.Shader
 	Time        float64
 }
 
-func NewFogRenderer(orientation ...terrain.Orientation) (*FogRenderer, error) {
+func NewFogRenderer(strength float64, orientation ...terrain.Orientation) (*FogRenderer, error) {
 	shader, err := ebiten.NewShader(fogShaderSource)
 	if err != nil {
 		return nil, err
 	}
-	return &FogRenderer{Orientation: terrain.OptionalOrientation(orientation), shader: shader}, nil
+	return &FogRenderer{Orientation: terrain.OptionalOrientation(orientation), Strength: strength, shader: shader}, nil
 }
 
 func (r *FogRenderer) Update() {
@@ -37,6 +40,7 @@ func (r *FogRenderer) DrawSection(dst *ebiten.Image, top, cameraY float64, view 
 		"MinX":       float32(terrain.BackgroundMinX),
 		"Top":        float32(top),
 		"Time":       float32(r.Time),
+		"Strength":   float32(min(r.Strength, math.MaxFloat32)),
 		"Horizontal": float32(r.Orientation),
 	}}
 	op.GeoM.Translate(view.OffsetX+terrain.BackgroundMinX*float64(pixels), (top-cameraY)*float64(pixels))

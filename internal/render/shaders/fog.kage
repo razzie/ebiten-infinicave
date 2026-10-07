@@ -5,6 +5,7 @@ var Pixels float
 var MinX float
 var Top float
 var Time float
+var Strength float
 var Horizontal float
 
 func noise(p vec2) float {
@@ -39,6 +40,7 @@ func Fragment(dst vec4, src vec2, color vec4) vec4 {
 	wisps := smoothNoise((p+warp*.1+vec2(.011, .004)*Time)*vec2(5, 13))
 	alpha := smoothstep(.25, .8, density)*.18 + smoothstep(.5, .85, wisps)*.045
 	alpha *= smoothstep(-.5, 0, across) * (1-smoothstep(1, 1.5, across))
+	alpha = min(alpha*Strength, 1)
 	// Premultiplied alpha preserves the dark background beneath the mist.
 	return vec4(vec3(.32, .36, .37)*alpha, alpha)
 }
