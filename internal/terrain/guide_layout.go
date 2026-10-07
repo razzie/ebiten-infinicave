@@ -8,6 +8,10 @@ import (
 )
 
 const (
+	// Keep the whole exposed lip above the rock contour during edge fading.
+	// Placing a guide closer can erase most of a full-sized formation and
+	// leave just a few disconnected crests.
+	foregroundGuideInset   = foregroundEdgeFadeWidth / 2
 	guideClearance         = .155 // room for a rock flank and an open approach to the next lip
 	guideCoverageRadius    = .115
 	guideCoverageTarget    = .68
@@ -86,6 +90,12 @@ func randomGuide(rng *rand.Rand, center geom.V, crowded bool, orientation ...Ori
 	knots := []geom.V{{}}
 	for s := 0.0; s < length; {
 		step := math.Min(geom.Lerp(0.045, 0.09, rng.Float64()), length-s)
+		// Absorb a short remainder into this segment. A tiny final knot
+		// after a normal-sized one makes Catmull-Rom overshoot and fold the
+		// exposed lip backward, creating small disconnected tip fragments.
+		if length-s-step < .045 {
+			step = length - s
+		}
 		angle += turn * step / 0.1
 		knots = append(knots, knots[len(knots)-1].Add(geom.V{X: math.Cos(angle), Y: math.Sin(angle)}.Mul(step)))
 		turn = geom.Clamp(turn*.75+geom.Lerp(-.55, .55, rng.Float64()), -1.4, 1.4)
@@ -156,7 +166,7 @@ func (layout guideLayout) fill(rng *rand.Rand, guides, obstacles []Guide, margin
 		}
 		center := layout.probes[anchor].Add(geom.V{X: geom.Lerp(-0.04, 0.04, rng.Float64()), Y: geom.Lerp(-0.04, 0.04, rng.Float64())})
 		g := randomGuide(rng, center, attempt > guidePlacementAttempts/3, layout.orientation)
-		if g.Min.X < foregroundScreenInset || g.Max.X > generationWidth-foregroundScreenInset || g.Min.Y < margin || g.Max.Y > generationWidth-margin {
+		if g.Min.X < foregroundGuideInset || g.Max.X > generationWidth-foregroundGuideInset || g.Min.Y < margin || g.Max.Y > generationWidth-margin {
 			continue
 		}
 		valid := guideSelfClear(g)

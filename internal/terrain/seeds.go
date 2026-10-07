@@ -8,8 +8,10 @@ import (
 )
 
 // Site density follows terrain only; guides cut faces without adding sites.
+const maxRockSeedSpacing = .030
+
 func desiredSpacing(p geom.V, noise *Perlin) float64 {
-	return geom.Lerp(.030, .022, geom.Smoothstep(.39, .58, fbm(noise, p)))
+	return geom.Lerp(maxRockSeedSpacing, .022, geom.Smoothstep(.39, .58, fbm(noise, p)))
 }
 
 func generateSeeds(rng *rand.Rand, count int, noise *Perlin) []geom.V {

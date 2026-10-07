@@ -28,10 +28,13 @@ func statsOf(s SectionData) sectionStats {
 // rescaling floats can change steering ties and the resulting offshoots.
 // Counts use background material without baked foreground shadow darkening.
 // Foreground snapshots include the completed-curve horizontal guide bias.
+// Spurs start inside solid ridges and stop before guide shadows or edge fade.
+// Procedural guide lips survive edge fade and omit short final spline knots.
+// Open tips taper before their endpoints; spurs retain a sampled solid width.
 func TestSectionStatsStable(t *testing.T) {
 	want := map[int64]sectionStats{
-		1:  {9710, 1860, 107, .9871250503},
-		42: {9651, 2049, 118, 1.0537253627},
+		1:  {9710, 1544, 142, .7774879788},
+		42: {9651, 1154, 138, .6324142322},
 	}
 	for seed, w := range want {
 		got := statsOf(BuildSection(seed, 0))

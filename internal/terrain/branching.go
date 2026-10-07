@@ -28,8 +28,9 @@ func generateBranches(guides []Guide, noise *Perlin, rng *rand.Rand) []BranchSeg
 			// Stratified roots leave gaps between the spreading shoulders.
 			s := length * (float64(j) + geom.Lerp(.25, .75, rng.Float64())) / float64(count)
 			q, tangent, normal := g.frameAt(s)
-			// The ridge flank reaches 0.07–0.14 scene units from the guide; spurs must emerge from its foot.
-			root := q.Add(normal.Mul(geom.Lerp(0.07, 0.095, rng.Float64())))
+			// Start inside even the narrowest ridge flank. A root beyond its
+			// footprint can create a detached spur before any guide masks it.
+			root := q.Add(normal.Mul(geom.Lerp(0.04, 0.055, rng.Float64())))
 			direction := normal.Add(tangent.Mul(geom.Lerp(-.65, .65, rng.Float64()))).Norm()
 			reach := geom.Lerp(0.17, 0.3, rng.Float64())
 			width := geom.Lerp(0.026, 0.04, rng.Float64())
@@ -37,6 +38,9 @@ func generateBranches(guides []Guide, noise *Perlin, rng *rand.Rand) []BranchSeg
 			forkAt := geom.Lerp(.38, .60, rng.Float64())
 			forked := false
 			p := root
+			if reliefHeight(root, guides[i:i+1], noise, nil) <= rockContourHeight || !branchCanGrow(p, .50, width, guides) {
+				continue
+			}
 			for d := 0.0; d < reach; {
 				next := math.Min(d+0.012, reach)
 				u, v := d/reach, next/reach
@@ -45,10 +49,16 @@ func generateBranches(guides []Guide, noise *Perlin, rng *rand.Rand) []BranchSeg
 				bend := noise.Noise(p.X*9+phase, (p.Y+noise.OffsetY)*9-phase)
 				heading := direction.Add(direction.Perp().Mul(bend * 1.5)).Norm()
 				end := p.Add(heading.Mul(next - d))
+				lightA := .50 * (1 - geom.Smoothstep(.12, 1, u))
+				lightB := .50 * (1 - geom.Smoothstep(.12, 1, v))
+				widthA, widthB := width*geom.Lerp(1, .22, u), width*geom.Lerp(1, .22, v)
+				if !branchCanGrow(end, lightB, widthB, guides) || !branchCanGrow(geom.LerpVector(p, end, .5), (lightA+lightB)*.5, (widthA+widthB)*.5, guides) {
+					break
+				}
 				branches = append(branches, BranchSegment{
 					A: p, B: end,
-					WidthA: width * geom.Lerp(1, .22, u), WidthB: width * geom.Lerp(1, .22, v),
-					LightA: .50 * (1 - geom.Smoothstep(.12, 1, u)), LightB: .50 * (1 - geom.Smoothstep(.12, 1, v)),
+					WidthA: widthA, WidthB: widthB,
+					LightA: lightA, LightB: lightB,
 				})
 				if !forked && v >= forkAt {
 					forked = true
@@ -57,7 +67,7 @@ func generateBranches(guides []Guide, noise *Perlin, rng *rand.Rand) []BranchSeg
 						side = -1
 					}
 					forkDir := heading.Add(heading.Perp().Mul(side * .95)).Norm()
-					branches = appendBranchFork(branches, end, forkDir, reach*geom.Lerp(.35, .55, rng.Float64()), width*.55, .425*(1-geom.Smoothstep(.12, 1, v)), phase, noise)
+					branches = appendBranchFork(branches, end, forkDir, reach*geom.Lerp(.35, .55, rng.Float64()), width*.55, .425*(1-geom.Smoothstep(.12, 1, v)), phase, noise, guides)
 				}
 				p, d = end, next
 			}
@@ -66,21 +76,56 @@ func generateBranches(guides []Guide, noise *Perlin, rng *rand.Rand) []BranchSeg
 	return branches
 }
 
-func appendBranchFork(branches []BranchSegment, p, direction geom.V, reach, width, light, phase float64, noise *Perlin) []BranchSegment {
+func appendBranchFork(branches []BranchSegment, p, direction geom.V, reach, width, light, phase float64, noise *Perlin, guides []Guide) []BranchSegment {
+	if !branchCanGrow(p, light, width, guides) {
+		return branches
+	}
 	for d := 0.0; d < reach; {
 		next := math.Min(d+0.012, reach)
 		u, v := d/reach, next/reach
 		bend := noise.Noise(p.X*12+phase, (p.Y+noise.OffsetY)*12-phase)
 		heading := direction.Add(direction.Perp().Mul(bend)).Norm()
 		end := p.Add(heading.Mul(next - d))
+		lightA := light * (1 - geom.Smoothstep(0, 1, u))
+		lightB := light * (1 - geom.Smoothstep(0, 1, v))
+		widthA, widthB := width*geom.Lerp(1, .25, u), width*geom.Lerp(1, .25, v)
+		if !branchCanGrow(end, lightB, widthB, guides) || !branchCanGrow(geom.LerpVector(p, end, .5), (lightA+lightB)*.5, (widthA+widthB)*.5, guides) {
+			break
+		}
 		branches = append(branches, BranchSegment{
 			A: p, B: end,
-			WidthA: width * geom.Lerp(1, .25, u), WidthB: width * geom.Lerp(1, .25, v),
-			LightA: light * (1 - geom.Smoothstep(0, 1, u)), LightB: light * (1 - geom.Smoothstep(0, 1, v)),
+			WidthA: widthA, WidthB: widthB,
+			LightA: lightA, LightB: lightB,
 		})
 		p, d = end, next
 	}
 	return branches
+}
+
+// A masked centerline must end here: continuing through the invisible band
+// lets a later segment reappear as an isolated rock chip. Check during growth,
+// before the relief is sampled into faces, for both trunks and forks.
+func branchCanGrow(p geom.V, light, width float64, guides []Guide) bool {
+	edgeFade := geom.Smoothstep(0, foregroundEdgeFadeWidth, math.Min(p.X, generationWidth-p.X))
+	// A spur thinner than the face sampling can disappear in one face and
+	// reappear in the next. Stop before its solid width falls below ordinary
+	// site spacing, allowing for the negative chip noise in reliefHeight.
+	shoulder := 1 - geom.Smoothstep(width*.15, width*1.8, maxRockSeedSpacing/2)
+	if (.08*light*shoulder-rockReliefChipHeight)*edgeFade <= rockContourHeight {
+		return false
+	}
+	const shadowRadius = guideSpacing * 5
+	for i := range guides {
+		g := &guides[i]
+		if g.distanceBound2(p) >= shadowRadius*shadowRadius {
+			continue
+		}
+		pr := g.project(p)
+		if pr.Signed < 0 && pr.Dist < shadowRadius {
+			return false
+		}
+	}
+	return true
 }
 
 const branchCell = .032

@@ -98,6 +98,21 @@ func TestReliefFadesBeforeHorizontalScreenInset(t *testing.T) {
 	}
 }
 
+func TestReliefTapersBeforeOpenGuideTips(t *testing.T) {
+	guide := SplineGuide([]geom.V{{X: .2, Y: .5}, {X: .8, Y: .5}}, 1)
+	noise := NewPerlin(rand.New(rand.NewSource(42)))
+	for _, x := range []float64{.19, .2, .8, .81} {
+		if height := reliefHeight(geom.V{X: x, Y: .51}, []Guide{guide}, noise, nil); height != 0 {
+			t.Fatalf("open tip extends a raised cap beyond the guide at x=%v: height %v", x, height)
+		}
+	}
+	for _, x := range []float64{.25, .5, .75} {
+		if height := reliefHeight(geom.V{X: x, Y: .51}, []Guide{guide}, noise, nil); height <= rockContourHeight {
+			t.Fatalf("tip taper erased the full-height ridge at x=%v: height %v", x, height)
+		}
+	}
+}
+
 func TestLightingSeparatesShapeFromMaterialAndVisibility(t *testing.T) {
 	up := RockSurfaceColor(rockLight, 1, 1)
 	front := RockSurfaceColor(geom.V3{Z: 1}, 1, 1)

@@ -92,7 +92,7 @@ func TestRandomGuideSectionsHaveCoverageClearanceAndVariety(t *testing.T) {
 		for _, g := range guides {
 			length := g.S[len(g.S)-1]
 			minLength, maxLength = math.Min(minLength, length), math.Max(maxLength, length)
-			if g.Min.X < foregroundScreenInset || g.Max.X > generationWidth-foregroundScreenInset || g.Min.Y < 0 || g.Max.Y > generationWidth {
+			if g.Min.X < foregroundGuideInset || g.Max.X > generationWidth-foregroundGuideInset || g.Min.Y < 0 || g.Max.Y > generationWidth {
 				t.Fatal("guide escaped its placement bounds")
 			}
 		}
@@ -103,6 +103,45 @@ func TestRandomGuideSectionsHaveCoverageClearanceAndVariety(t *testing.T) {
 	a := generateGuideSection(rand.New(rand.NewSource(42)))
 	if !reflect.DeepEqual(a, generateGuideSection(rand.New(rand.NewSource(42)))) {
 		t.Fatal("same seed did not reproduce its curves")
+	}
+}
+
+func TestWorldGuideLipsSurviveScreenEdgeFade(t *testing.T) {
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		for _, tc := range []struct{ seed, id int64 }{{1, 0}, {42, 0}, {42, 21}, {93, 0}} {
+			guides := newGuideCache(tc.seed, orientation).window(tc.id)
+			noise := NewPerlin(rand.New(rand.NewSource(tc.seed)))
+			noise.OffsetY = SectionTop(tc.id)
+			for _, g := range guides {
+				length := g.S[len(g.S)-1]
+				for i := 0; i <= 32; i++ {
+					// Tips taper intentionally; the full-height lip must survive.
+					q, _, normal := g.frameAt(geom.Lerp(.038, length-.038, float64(i)/32))
+					// Sample on the rock side, avoiding the guide discontinuity.
+					p := q.Add(normal.Mul(.001))
+					if height := reliefHeight(p, []Guide{g}, noise, nil); height <= rockContourHeight {
+						t.Fatalf("%v seed %d section %d: guide lip erased at %v: height %v", orientation, tc.seed, tc.id, p, height)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestRandomGuideTipsDoNotFoldBackward(t *testing.T) {
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		for seed := int64(0); seed < 32; seed++ {
+			guides := generateGuideSection(rand.New(rand.NewSource(seed)), orientation)
+			for _, g := range guides {
+				last := len(g.Pts) - 1
+				length := g.S[last]
+				tail := g.Pts[last].Sub(g.Pts[last-1])
+				earlier, _, _ := g.frameAt(math.Max(0, length-.025))
+				if tail.Dot(g.Pts[last].Sub(earlier)) <= 0 {
+					t.Fatalf("%v seed %d: last spline segment folds back over the exposed lip", orientation, seed)
+				}
+			}
+		}
 	}
 }
 

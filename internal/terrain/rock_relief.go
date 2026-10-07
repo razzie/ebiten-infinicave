@@ -7,7 +7,10 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
 
-const foregroundEdgeFadeWidth = .140
+const (
+	foregroundEdgeFadeWidth = .140
+	rockReliefChipHeight    = .0012
+)
 
 // All terrain lighting, including exposed walls, uses this one light.
 var rockLight = (geom.V3{X: -.28, Y: -.86, Z: .65}).Norm()
@@ -51,14 +54,16 @@ func reliefHeight(p geom.V, guides []Guide, noise *Perlin, branches *BranchField
 		width := 0.105 + 0.035*variation
 		elevation := 0.062 + 0.014*variation
 		bevel := 0.016 + 0.004*variation
-		along := math.Sqrt(math.Max(0, pr.Dist*pr.Dist-pr.Signed*pr.Signed))
-		end := 1 - geom.Smoothstep(0, 0.038, along)
+		// Fade along the actual guide before its tips. Extending a raised
+		// half-cap beyond an open tip introduces a discontinuity that no
+		// guide edge cuts, leaving detached wedges when faces are sampled.
+		end := geom.Smoothstep(0, 0.038, math.Min(pr.S, g.S[len(g.S)-1]-pr.S))
 		height = math.Max(height, ridgeProfile(pr.Dist, width, elevation, bevel)*end)
 	}
 	// Offshoots carry low connected spurs of the same solid rock surface.
 	height = math.Max(height, 0.08*branchBias(p, branches)*branchMask)
 	world := geom.V{X: p.X, Y: p.Y + noise.OffsetY}
-	chips := .0012 * noise.Noise(world.X*35+43, world.Y*35+97)
+	chips := rockReliefChipHeight * noise.Noise(world.X*35+43, world.Y*35+97)
 	edgeFade := geom.Smoothstep(0, foregroundEdgeFadeWidth, math.Min(p.X, generationWidth-p.X))
 	return math.Max(0, height+chips*geom.Smoothstep(0, 0.015, height)) * edgeFade
 }
