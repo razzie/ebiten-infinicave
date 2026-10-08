@@ -166,3 +166,23 @@ func TestStreamingRequestsAndCacheStayBounded(t *testing.T) {
 		s.vines.Deallocate()
 	}
 }
+
+func TestPrefetchOnlyExpandsWhileMoving(t *testing.T) {
+	stationary, required := prefetch(-10.8, 1.8, 0)
+	if !reflect.DeepEqual(stationary, []int64{9, 10, 8, 11}) || required != 4 {
+		t.Fatalf("stationary view queued distant sections: %v, required=%d", stationary, required)
+	}
+	for _, velocity := range []float64{-.008, .008} {
+		ids, gotRequired := prefetch(-10.8, 1.8, velocity)
+		if gotRequired != required || !reflect.DeepEqual(ids[:required], stationary) || len(ids) > sectionQueueLimit {
+			t.Fatalf("moving prefetch lost required bands or exceeded its bound: %v", ids)
+		}
+		want := int64(12)
+		if velocity > 0 {
+			want = 7
+		}
+		if ids[required] != want {
+			t.Fatalf("velocity %g looks ahead to %d, want %d", velocity, ids[required], want)
+		}
+	}
+}

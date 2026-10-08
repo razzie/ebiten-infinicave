@@ -29,7 +29,7 @@ type Config struct {
 	// Fog is moving mist strength between the background and foreground layers.
 	// It must be finite and nonnegative; 0 disables it, 1 is the default strength,
 	// and values above 1 produce denser mist.
-	// Diagnostic views disable fog regardless of this setting.
+	// Mist appears across unloaded bands too. Diagnostic views disable fog.
 	Fog float64
 	// BatsPerMinute is the average number of animated bat arrivals per minute.
 	// It must be finite and nonnegative; zero disables bats.
@@ -46,7 +46,7 @@ type Config struct {
 	// Nil uses the default random generator.
 	LoadSection SectionLoader
 	// OnCollisionReady receives foreground collision polygons without waiting
-	// for vegetation generation or render meshes.
+	// for background generation, shading, vegetation, or render meshes.
 	// Scene calls it during Update on the game goroutine, including for prefetched
 	// sections. The geometry owns its slices and includes authored holes, stored
 	// runtime cuts, and CollisionTolerance. Nil disables notifications.

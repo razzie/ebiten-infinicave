@@ -26,7 +26,17 @@ type GridMesh struct {
 	Outlines []TriangleMesh
 }
 
+type MeshLayers uint8
+
+const (
+	ForegroundLayer MeshLayers = 1 << iota
+	BackgroundLayer
+	VegetationLayer
+	AllLayers = ForegroundLayer | BackgroundLayer | VegetationLayer
+)
+
 type SectionMesh struct {
+	Layers                                              MeshLayers
 	ID                                                  int64
 	TerrainOnly                                         bool
 	Background, Foreground                              GridMesh
@@ -63,10 +73,10 @@ func PrepareSection(data terrain.SectionData, view View) SectionMesh {
 	return mesh
 }
 
-// PrepareTerrain can run against the immutable early terrain while vegetation
-// is still growing. Its mesh buffers stay read-only after publication.
+// PrepareTerrain combines both materialized rock layers for synchronous callers.
+// Streaming prepares and publishes each layer separately. Buffers remain immutable.
 func PrepareTerrain(data terrain.SectionData, view View) SectionMesh {
-	mesh := SectionMesh{ID: data.ID, TerrainOnly: true}
+	mesh := SectionMesh{ID: data.ID, TerrainOnly: true, Layers: ForegroundLayer | BackgroundLayer}
 	parallel.Run(
 		func() {
 			mesh.Background = prepareGridBand(data.Background, view, nil, data.BackgroundNeighbors, true)
@@ -77,12 +87,12 @@ func PrepareTerrain(data terrain.SectionData, view View) SectionMesh {
 }
 
 func PrepareVegetation(data terrain.SectionData, view View) SectionMesh {
-	mesh := SectionMesh{ID: data.ID}
+	mesh := SectionMesh{ID: data.ID, Layers: VegetationLayer}
 	if view == ViewShaded {
 		parallel.Run(
 			func() { mesh.Vines = PrepareVines(data.Vines) },
 			func() { mesh.ForegroundVines = PrepareForegroundVines(data.ForegroundVines, data.Orientation) },
-			func() { mesh.Mushrooms = PrepareMushrooms(data.Mushrooms) },
+			func() { mesh.Mushrooms = PrepareOwnedMushrooms(data.Mushrooms) },
 		)
 	}
 	FinishSectionMesh(&mesh)
@@ -258,5 +268,99 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 			})
 		}
 	}
+	return mesh
+}
+
+// LayerMask accepts legacy complete meshes and terrain-only callers.
+func (m SectionMesh) LayerMask() MeshLayers {
+	if m.Layers != 0 {
+		return m.Layers
+	}
+	if m.TerrainOnly {
+		return ForegroundLayer | BackgroundLayer
+	}
+	return AllLayers
+}
+
+// MergeSectionMeshes combines immutable independently published layers.
+func MergeSectionMeshes(previous, next SectionMesh) SectionMesh {
+	mask := next.LayerMask()
+	if mask&ForegroundLayer != 0 {
+		previous.Foreground = next.Foreground
+	}
+	if mask&BackgroundLayer != 0 {
+		previous.Background = next.Background
+	}
+	if mask&VegetationLayer != 0 {
+		previous.Vines, previous.ForegroundVines, previous.Mushrooms = next.Vines, next.ForegroundVines, next.Mushrooms
+		previous.VinesBounds, previous.ForegroundVinesBounds, previous.MushroomsBounds = next.VinesBounds, next.ForegroundVinesBounds, next.MushroomsBounds
+	}
+	previous.ID = next.ID
+	previous.Layers = previous.LayerMask() | mask
+	previous.TerrainOnly = previous.Layers&VegetationLayer == 0
+	if next.Geometry != nil {
+		previous.Geometry = next.Geometry
+	}
+	return previous
+}
+
+func PrepareForeground(data terrain.SectionData, view View) SectionMesh {
+	return SectionMesh{ID: data.ID, TerrainOnly: true, Layers: ForegroundLayer,
+		Foreground: PrepareOwnedGridWithTopology(data.Foreground, view, data.ForegroundTopology)}
+}
+
+func PrepareBackground(data terrain.SectionData, view View) SectionMesh {
+	return SectionMesh{ID: data.ID, TerrainOnly: true, Layers: BackgroundLayer,
+		Background: prepareGridBand(data.Background, view, nil, data.BackgroundNeighbors, true)}
+}
+
+// A padded guide can generate the same mushroom in neighboring sections.
+// Only the anchor's half-open band owns its render mesh; generation stays padded.
+func PrepareOwnedMushrooms(groups []terrain.MushroomGroup) TriangleMesh {
+	owned := make([]terrain.MushroomGroup, 0, len(groups))
+	for _, group := range groups {
+		mushrooms := make([]terrain.Mushroom, 0, len(group.Mushrooms))
+		for _, mushroom := range group.Mushrooms {
+			if mushroom.Anchor.Y >= 0 && mushroom.Anchor.Y < terrain.SectionHeight {
+				mushrooms = append(mushrooms, mushroom)
+			}
+		}
+		if len(mushrooms) > 0 {
+			owned = append(owned, terrain.MushroomGroup{Mushrooms: mushrooms})
+		}
+	}
+	return PrepareMushrooms(owned)
+}
+
+// DrawUnaliased is used when batching into a persistent supersampled surface.
+func (m TriangleMesh) DrawUnaliased(dst, white *ebiten.Image) {
+	if len(m.Indices) == 0 {
+		return
+	}
+	op := &ebiten.DrawTrianglesOptions{FillRule: m.fillRule}
+	if m.premultiplied {
+		op.ColorScaleMode = ebiten.ColorScaleModePremultipliedAlpha
+	}
+	dst.DrawTriangles32(m.Vertices, m.Indices, white, op)
+}
+
+// SupersampledBatch copies only referenced vertices and preserves triangle
+// order and material coordinates. Both index and vertex submissions stay bounded.
+func SupersampledBatch(mesh TriangleMesh, start, end int) TriangleMesh {
+	source := mesh.Vertices
+	indices := mesh.Indices[start:end]
+	mesh.Vertices = make([]ebiten.Vertex, 0, min(len(source), len(indices)))
+	mesh.Indices = make([]uint32, len(indices))
+	remap := make(map[uint32]uint32, min(len(source), len(indices)))
+	for i, index := range indices {
+		mapped, ok := remap[index]
+		if !ok {
+			mapped = uint32(len(mesh.Vertices))
+			remap[index] = mapped
+			mesh.Vertices = append(mesh.Vertices, source[index])
+		}
+		mesh.Indices[i] = mapped
+	}
+	transformVertices(mesh.Vertices, 2, image.Point{})
 	return mesh
 }

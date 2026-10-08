@@ -17,13 +17,13 @@ func (g *Scene) prepareCarvedVegetation(mesh *render.SectionMesh) {
 		plants := mesh.Geometry.Vegetation
 		mesh.Vines = render.PrepareVines(plants.Vines)
 		mesh.ForegroundVines = render.PrepareForegroundVines(plants.ForegroundVines, g.orientation)
-		mesh.Mushrooms = render.PrepareMushrooms(plants.Mushrooms)
+		mesh.Mushrooms = render.PrepareOwnedMushrooms(plants.Mushrooms)
 	}
 	render.FinishSectionMesh(mesh)
 }
 
 func (g *Scene) redrawCarvedVegetation(section *worldSection, id int64) {
-	if section.vegetationPending || section.terrain == nil {
+	if section.vegetationPending || section.foreground == nil {
 		return
 	}
 	mesh := render.SectionMesh{ID: id, Geometry: section.geometry}
@@ -33,7 +33,7 @@ func (g *Scene) redrawCarvedVegetation(section *worldSection, id int64) {
 		section.mesh.Vines, section.mesh.ForegroundVines, section.mesh.Mushrooms = mesh.Vines, mesh.ForegroundVines, mesh.Mushrooms
 		section.mesh.VinesBounds, section.mesh.ForegroundVinesBounds, section.mesh.MushroomsBounds = mesh.VinesBounds, mesh.ForegroundVinesBounds, mesh.MushroomsBounds
 	}
-	pixels := section.renderWidth()
+	pixels := section.vegetationWidth()
 	mesh = render.ScaleSectionMesh(mesh, pixels)
 	if g.world.white == nil {
 		g.world.white = ebiten.NewImage(1, 1)
@@ -123,10 +123,10 @@ func (g *Scene) applyStoredCuts(mesh *render.SectionMesh) {
 		changed = changed || edited
 		plantsChanged = plantsChanged || plantsEdited
 	}
-	if changed {
+	if changed && mesh.LayerMask()&render.ForegroundLayer != 0 {
 		mesh.Foreground = render.PrepareOwnedGridWithTopology(nil, g.view, mesh.Geometry.Topology)
 	}
-	if plantsChanged {
+	if plantsChanged && mesh.LayerMask()&render.VegetationLayer != 0 {
 		g.prepareCarvedVegetation(mesh)
 	}
 }
@@ -134,52 +134,45 @@ func (g *Scene) applyStoredCuts(mesh *render.SectionMesh) {
 // Restart affected uploads, including partially drawn or blurred vegetation.
 // Published foreground was edited above and need not be uploaded again.
 func (g *Scene) carveUpload(cut terrain.RockCut) {
-	u := g.world.upload
-	if u == nil {
-		return
+	if u := g.world.upload; u != nil {
+		g.carveSectionUpload(u, cut)
 	}
+	for _, u := range g.world.parked {
+		g.carveSectionUpload(u, cut)
+	}
+}
+
+func (g *Scene) carveSectionUpload(u *sectionUpload, cut terrain.RockCut) {
 	geometry, _, changed := cut.Geometry(u.data.ID, u.data.Geometry, g.collisionTolerance)
 	geometry, plantsChanged := cut.Plants(geometry)
 	if !changed && !plantsChanged {
 		return
 	}
-	defer func() {
-		pixels := u.pixels
-		if pixels == 0 {
-			pixels = g.world.renderWidth()
-		}
-		u.raster = render.ScaleSectionMesh(u.data, pixels)
-	}()
 	u.data.Geometry = geometry
-	if changed {
+	if changed && u.data.LayerMask()&render.ForegroundLayer != 0 {
 		u.data.Foreground = render.PrepareOwnedGridWithTopology(nil, g.view, geometry.Topology)
+		if u.initialized && u.stage <= uploadForegroundPublish {
+			if u.foreground != nil {
+				u.foreground.Deallocate()
+				u.foreground = nil
+			}
+			u.clearSurface()
+			u.needed |= render.ForegroundLayer
+			u.stage, u.next = uploadForegroundFaces, 0
+		}
 	}
-	if plantsChanged {
+	if plantsChanged && u.data.LayerMask()&render.VegetationLayer != 0 {
 		g.prepareCarvedVegetation(&u.data)
-		for _, img := range []*ebiten.Image{u.vines, u.foregroundVines, u.mushrooms} {
-			if img != nil {
-				img.Deallocate()
+		if u.initialized && u.stage >= uploadVines {
+			for _, img := range []*ebiten.Image{u.vines, u.foregroundVines, u.mushrooms} {
+				if img != nil {
+					img.Deallocate()
+				}
 			}
+			u.vines, u.foregroundVines, u.mushrooms = nil, nil, nil
+			u.clearSurface()
+			u.needed |= render.VegetationLayer
+			u.stage, u.next = uploadVines, 0
 		}
-		u.vines, u.foregroundVines, u.mushrooms = nil, nil, nil
-		if u.stage >= 5 {
-			u.stage, u.next = 5, 0
-			if section := g.world.sections[u.data.ID]; section != nil {
-				section.geometry = geometry
-			}
-		}
-	}
-	if u.stage >= 5 {
-		return
-	}
-	if !changed {
-		return
-	}
-	if u.stage >= 2 {
-		if u.foreground != nil {
-			u.foreground.Deallocate()
-			u.foreground = nil
-		}
-		u.stage, u.next = 2, 0
 	}
 }

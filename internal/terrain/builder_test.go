@@ -111,17 +111,22 @@ func TestCollisionReadyBeforeDecorationIncludesAuthoredHoles(t *testing.T) {
 		}
 	}
 	var early *Geometry
+	var snapshot RockGrid
 	data := NewSectionBuilder(42, load).BuildWithTerrain(0, func(data SectionData) {
 		if len(data.Vines)+len(data.ForegroundVines)+len(data.Mushrooms) != 0 {
 			t.Fatal("collision waited for decoration")
 		}
+		if len(data.Background) != 0 {
+			t.Fatal("collision waited for background")
+		}
 		early = PrepareTerrainGeometry(data, .002)
+		snapshot = append(RockGrid(nil), early.Grid...)
 		if len(early.Collision.Polygons) == 0 || early.Collision.Contains(geom.V{X: .5, Y: -.6}) {
 			t.Fatal("early collision omitted terrain or authored holes")
 		}
 	})
 	final := PrepareTerrainGeometry(data, .002)
-	if early == nil || !reflect.DeepEqual(early.Collision, final.Collision) || !reflect.DeepEqual(early.Grid, final.Grid) {
+	if early == nil || !reflect.DeepEqual(early.Collision, final.Collision) || !reflect.DeepEqual(early.Faces, final.Faces) || !reflect.DeepEqual(early.Grid, snapshot) {
 		t.Fatal("decoration changed published terrain")
 	}
 	if len(data.Vines)+len(data.ForegroundVines)+len(data.Mushrooms) == 0 {

@@ -30,7 +30,7 @@ func (r *FogRenderer) Update() {
 	r.Time += 1 / float64(tps)
 }
 
-// Only cover loaded section bands, preserving untouched gaps and the floor.
+// Cover visible section bands immediately, including unloaded bands, preserving the floor.
 // Source coordinates and the section's world offset keep the noise continuous
 // across seams, camera movement, resizing, and separate Draw calls in one tick.
 func (r *FogRenderer) DrawSection(dst *ebiten.Image, top, cameraY float64, view RenderTransform) {

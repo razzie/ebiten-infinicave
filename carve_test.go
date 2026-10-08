@@ -3,6 +3,7 @@ package infinicave
 import (
 	"math"
 	"reflect"
+	"strconv"
 	"testing"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -340,15 +341,15 @@ func TestCarveOutsideWorldLeavesPaddingAndIdentityAlone(t *testing.T) {
 
 func TestCarveDuringEveryUploadStage(t *testing.T) {
 	data := terrain.SectionData{Foreground: RockGrid{terrainRect(.2, .2, .6, .6)}}
-	for stage := 0; stage <= 8; stage++ {
-		t.Run(string(rune('0'+stage)), func(t *testing.T) {
+	for stage := 0; stage <= uploadPlantsPublish; stage++ {
+		t.Run(strconv.Itoa(stage), func(t *testing.T) {
 			scene := queryScene()
-			u := &sectionUpload{stage: stage, next: 3, data: render.SectionMesh{ID: 0, Geometry: terrain.PrepareTerrainGeometry(data, 0)}}
-			if stage == 3 || stage == 4 {
+			u := &sectionUpload{stage: stage, next: 3, initialized: true, needed: render.AllLayers, data: render.SectionMesh{ID: 0, Geometry: terrain.PrepareTerrainGeometry(data, 0)}}
+			if stage == uploadForegroundOutlines || stage == uploadForegroundPublish {
 				u.foreground = ebiten.NewImage(1, 1)
 			}
 			scene.world.upload = u
-			if stage >= 5 {
+			if stage > uploadForegroundPublish {
 				scene.world.sections[0] = &worldSection{geometry: u.data.Geometry}
 			}
 			_, err := scene.CarveCircle(V{X: .5, Y: -.5}, .08)
@@ -358,10 +359,10 @@ func TestCarveDuringEveryUploadStage(t *testing.T) {
 			if u.data.Geometry.Collision.Contains(V{X: .5, Y: -.5}) {
 				t.Fatal("upload geometry ignored cut")
 			}
-			if stage >= 2 && stage <= 4 && (u.stage != 2 || u.next != 0 || u.foreground != nil) {
+			if stage <= uploadForegroundPublish && (u.stage != uploadForegroundFaces || u.next != 0 || u.foreground != nil) {
 				t.Fatal("partially drawn foreground was not restarted")
 			}
-			if stage >= 5 && scene.world.sections[0].geometry.Collision.Contains(V{X: .5, Y: -.5}) {
+			if stage > uploadForegroundPublish && scene.world.sections[0].geometry.Collision.Contains(V{X: .5, Y: -.5}) {
 				t.Fatal("published terrain ignored cut during vegetation upload")
 			}
 		})

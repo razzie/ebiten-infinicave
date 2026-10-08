@@ -214,7 +214,7 @@ config.OnCollisionReady = func(geometry infinicave.CollisionGeometry) {
 ```
 
 `Scene.Update` invokes this optional callback on the game goroutine, before
-vegetation generation, mesh preparation, or GPU uploads have to finish. It also
+background generation, shading, vegetation, mesh preparation, or GPU uploads have to finish. It also
 notifies for prefetched sections and empty geometry. Polygons include authored
 holes, stored runtime cuts, and `CollisionTolerance`; the callback owns its copy.
 `scene.CollisionGeometry(id)` is available at this point too. Eviction and
@@ -222,7 +222,7 @@ regeneration notify again; resizing does not. `Reset` keeps the callback, so
 clear your game's old collision shapes when resetting. Runtime carving uses
 `CarveResult.SectionIDs` to identify collision shapes to refresh.
 `GenerateSectionWithConfig` invokes the callback synchronously on its caller's
-goroutine, before generating vegetation.
+goroutine, before generating background, shading, or vegetation.
 
 World queries run independently of the camera and rendering. After `Update`,
 cast a finite ray in world coordinates and scene units:
@@ -478,9 +478,11 @@ go run ./cmd/infinicave -seed 42 -view normals -output normals.png
 go run ./cmd/infinicave -seed 42 -view shadows -output shadows.png
 ```
 
-Relief, foreground self-shadowing, rock triangulation, outlines, and vine and mushroom meshes are prepared in the background once per cached section. Up to two sections can generate concurrently, each with its own builder and reusable buffers. Background and foreground construction, vegetation layers, and independent vine growth trials can also run concurrently. Loader calls within one world stay serialized, and returned content is copied before another call. Terrain meshes are prepared while vegetation grows, so completed terrain can appear before vegetation generation finishes. Nested generation and mesh jobs share a helper budget: the generation caller plus at most `GOMAXPROCS - 2` helpers (no helpers on one or two processors). This leaves scheduling capacity for the game loop. Geometry and draw order remain independent of worker scheduling.
+Scene generation uses a bounded queue of up to eight sections, with at most two builders running concurrently. Each section yields its worker between foreground geometry, material/foreground mesh, background mesh, and vegetation phases. Visible foreground takes priority, followed by visible background and vegetation, adjacent windows that can supply plants, and distant prefetch work. Stationary views request only visible bands and their neighbors. While scrolling, the next band's foreground moves ahead of visible details and lookahead expands with speed. Vegetation yields at stage and vine-trial boundaries only for higher-priority foreground work; its deterministic generation can then retry on another builder. Loader calls within one world stay serialized, and returned content is copied before another call. Nested jobs share a helper budget: the generation caller plus at most `GOMAXPROCS - 2` helpers (no helpers on one or two processors).
 
-Collision polygons are published before vegetation generation and mesh preparation. The game loop collects CPU results during uploads, with bounded prefetching, and uploads meshes with limits on submission time, triangle indices, and draw calls per tick. Vegetation completion reuses already uploaded terrain when its geometry and resolution match. Resets, closing, and camera jumps cancel obsolete generation between stages and vine trials. Vegetation meshes are batched in draw order, and their textures are cropped to occupied bounds while retaining world-aligned grain.
+Collision publishes immediately after foreground shaping, inset, and authored holes, before background generation or shading. Its opaque shape snapshot remains immutable while material attributes are computed separately. Foreground, background, and vegetation images publish independently in that order. Fog draws immediately across unloaded bands, and an empty background skips the blur/shadow compositor. Mushrooms are rendered by their anchor's section, while public generated geometry retains its padding. Cross-band plants remain hidden wherever their supporting terrain layer is unavailable.
+
+The game loop collects CPU results during uploads and scales each layer only when needed. Terrain faces and mushrooms draw in bounded index batches into persistent supersampled surfaces and resolve antialiasing once per layer. Optional uploads can pause at batch boundaries for visible foreground, and vegetation can pause for visible backgrounds, then resume without discarding progress. GPU stages retain separate ticks with a shared per-tick draw, index, and CPU-time budget; empty stages and publication advance immediately; complete foreground and background layers each publish and yield so foreground appears first and newly ready foreground can preempt optional layers. Published layers retain their own resolution during refreshes; vegetation completion reuses matching terrain images. Resizes coalesce partial work at the latest resolution, and resets, closing, and camera jumps cancel obsolete work. Vegetation meshes retain draw order and are cropped to occupied bounds with world-aligned grain.
 
 Vine steering uses reusable fields and linear distance sweeps. Guide proposals are cached in a bounded window; guide projections cache segment data and reject distant segment blocks. Lighting caches ray offsets and probe constants; fragment merging caches perimeter and compactness. Terrain tessellation skips primitives outside the owned band, while lighting and collision retain the padded geometry. Rock adjacency is shared with mesh preparation, and fragment merging searches spatial buckets. These caches do not affect geometry: the same seed, section, and guide inputs reproduce the same result regardless of load order or eviction. The renderer uses a shallow 2.5D surface: illumination is constant within each polygon, with foreground depth shadows averaged over the face to preserve the faceted appearance. Background blur and cast shadows use reusable GPU buffers each draw; separable Gaussian passes run at reduced resolution for large softness values.
 

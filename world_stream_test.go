@@ -1,9 +1,11 @@
 package infinicave
 
 import (
+	"fmt"
 	"image"
 	"testing"
 
+	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 	"github.com/razzie/ebiten-infinicave/internal/render"
 )
@@ -45,10 +47,13 @@ func TestResizeKeepsCutsAndCoalescesPartialUploads(t *testing.T) {
 		t.Fatal(err)
 	}
 	geometry := g.world.sections[0].geometry
+	// Force a partial refresh even though cheap stages now share a tick.
+	g.world.sections[0].mesh.Foreground.Outlines = append(g.world.sections[0].mesh.Foreground.Outlines,
+		make([]render.TriangleMesh, uploadDrawsPerTick*2+1)...)
 	g.SetRenderWidth(1600)
 	g.Update(viewport)
 	g.Update(viewport) // Allocate the first native terrain image.
-	if g.world.upload == nil || g.world.upload.img == nil {
+	if g.world.upload == nil || g.world.upload.foreground == nil {
 		t.Fatal("resize did not begin a refresh")
 	}
 	g.SetRenderWidth(1920)
@@ -80,6 +85,10 @@ func TestResizeRefreshesNeighborOnlyForVisibleVegetation(t *testing.T) {
 
 func TestResizeRefreshFollowsCameraAndRetainsCutsDuringUpload(t *testing.T) {
 	g := resolutionTestScene(t)
+	for _, id := range []int64{0, 1} {
+		g.world.sections[id].mesh.Foreground.Outlines = append(g.world.sections[id].mesh.Foreground.Outlines,
+			make([]render.TriangleMesh, uploadDrawsPerTick*2+1)...)
+	}
 	g.SetRenderWidth(1920)
 	g.Update(Viewport{Y: -.8, Height: .8})
 	g.Update(Viewport{Y: -.8, Height: .8})
@@ -88,10 +97,10 @@ func TestResizeRefreshFollowsCameraAndRetainsCutsDuringUpload(t *testing.T) {
 		t.Fatal("moving the camera did not defer the offscreen refresh")
 	}
 	viewport := Viewport{Y: -1.8, Height: .8}
-	for tick := 0; tick < 10 && g.world.upload.stage < 5; tick++ {
+	for tick := 0; tick < 10 && g.world.upload.stage < uploadVines; tick++ {
 		g.Update(viewport)
 	}
-	if g.world.upload.stage != 5 {
+	if g.world.upload.stage != uploadVines {
 		t.Fatal("terrain was not published before vegetation")
 	}
 	if _, err := g.CarveCircle(V{X: .5, Y: -1.5}, .1); err != nil {
@@ -138,12 +147,9 @@ func TestSectionUploadsPublishTerrainBeforeVegetation(t *testing.T) {
 		stage, next := w.upload.stage, w.upload.next
 		w.receive(g)
 		section := w.sections[0]
-		if stage < 4 && section != nil {
-			t.Fatal("incomplete terrain became visible")
-		}
-		if stage == 4 {
-			if section == nil || section.terrain == nil || section.foreground == nil || !section.vegetationPending {
-				t.Fatal("complete terrain was not published early")
+		if section != nil && !published {
+			if section == nil || section.terrain != nil || section.foreground == nil || !section.vegetationPending {
+				t.Fatal("foreground was not published before background")
 			}
 			if w.upload.img != nil || w.upload.foreground != nil {
 				t.Fatal("upload retained ownership of published images")
@@ -160,7 +166,7 @@ func TestSectionUploadsPublishTerrainBeforeVegetation(t *testing.T) {
 			w.sections[1] = &worldSection{}
 		}
 		if w.upload == nil {
-			if !published || stage != 8 || section == nil || section.vegetationPending {
+			if !published || section == nil || section.vegetationPending {
 				t.Fatal("upload did not finish both publication stages")
 			}
 			if section.vines == nil || section.foregroundVines == nil || section.mushrooms == nil {
@@ -177,7 +183,7 @@ func TestSectionUploadsPublishTerrainBeforeVegetation(t *testing.T) {
 		if stage == w.upload.stage && w.upload.next-next > uploadDrawsPerTick {
 			t.Fatal("tick submitted too many mesh uploads")
 		}
-		if (stage == 1 || stage == 5 || stage == 7) && next == 0 && w.upload.stage != stage {
+		if (stage == uploadBackgroundOutlines || stage == uploadVines || stage == uploadForegroundVines) && next == 0 && w.upload.stage != stage {
 			t.Fatal("large mesh list was uploaded in one tick")
 		}
 	}
@@ -195,7 +201,7 @@ func TestEarlyTerrainPublicationReusesImagesForVegetation(t *testing.T) {
 	early.TerrainOnly = true
 	w.terrainMeshes <- early
 	w.receive(g)
-	for tick := 0; tick < 8 && w.upload != nil; tick++ {
+	for tick := 0; tick < 20 && w.upload != nil; tick++ {
 		w.receive(g)
 	}
 	section := w.sections[0]
@@ -212,7 +218,7 @@ func TestEarlyTerrainPublicationReusesImagesForVegetation(t *testing.T) {
 	complete.Geometry = &geometry
 	w.results <- complete
 	w.receive(g)
-	for tick := 0; tick < 8 && w.upload != nil; tick++ {
+	for tick := 0; tick < 20 && w.upload != nil; tick++ {
 		w.receive(g)
 	}
 	if w.upload != nil || section.vegetationPending || section.geometry != &geometry {
@@ -258,14 +264,14 @@ func TestCarveSurvivesEarlyTerrainAndVegetationCompletion(t *testing.T) {
 		early.TerrainOnly = true
 		w.startUpload(early)
 		if afterPublication {
-			for tick := 0; tick < 8 && w.upload != nil; tick++ {
+			for tick := 0; tick < 20 && w.upload != nil; tick++ {
 				w.receive(g)
 			}
 		}
 		if _, err := g.CarveCircle(V{X: .5, Y: -.5}, .08); err != nil {
 			t.Fatal(err)
 		}
-		for tick := 0; tick < 8 && w.upload != nil; tick++ {
+		for tick := 0; tick < 20 && w.upload != nil; tick++ {
 			w.receive(g)
 		}
 		// The complete result still carries the worker's original immutable
@@ -292,5 +298,192 @@ func TestCarveSurvivesEarlyTerrainAndVegetationCompletion(t *testing.T) {
 			}
 		}
 		g.Close()
+	}
+}
+
+func TestIndependentLayersMergeWithoutReuploadingForeground(t *testing.T) {
+	g := resolutionTestScene(t)
+	w := g.world
+	w.sections[0].deallocate()
+	delete(w.sections, 0)
+	mesh := resolutionTestMesh(0)
+	foreground := mesh
+	foreground.TerrainOnly = true
+	foreground.Layers = render.ForegroundLayer
+	w.startUpload(foreground)
+	for tick := 0; tick < 20 && w.upload != nil; tick++ {
+		w.receive(g)
+	}
+	s := w.sections[0]
+	if s == nil || s.foreground == nil || s.terrain != nil || !s.vegetationPending {
+		t.Fatal("foreground depends on another layer")
+	}
+	image := s.foreground
+	revision := w.revision
+	background := mesh
+	background.TerrainOnly = true
+	background.Layers = render.BackgroundLayer
+	w.startUpload(background)
+	for tick := 0; tick < 20 && w.upload != nil; tick++ {
+		w.receive(g)
+	}
+	if s.terrain == nil || s.foreground != image || w.revision != revision {
+		t.Fatal("background replaced foreground or query geometry")
+	}
+	plants := mesh
+	plants.Layers = render.VegetationLayer
+	w.startUpload(plants)
+	for tick := 0; tick < 20 && w.upload != nil; tick++ {
+		w.receive(g)
+	}
+	if s.foreground != image || s.vegetationPending || s.mesh.LayerMask() != render.AllLayers {
+		t.Fatal("vegetation completion lost an independent layer")
+	}
+}
+
+func TestRockUploadPreemptsAndResumesVegetation(t *testing.T) {
+	for _, layer := range []render.MeshLayers{render.ForegroundLayer, render.BackgroundLayer} {
+		t.Run(fmt.Sprint(layer), func(t *testing.T) {
+			g := resolutionTestScene(t)
+			w := g.world
+			plants := resolutionTestMesh(0)
+			plants.Layers = render.VegetationLayer
+			plants.Vines = make([]render.TriangleMesh, uploadDrawsPerTick*2+1)
+			plants.VinesBounds = image.Rect(10, 20, 30, 40)
+			w.startUpload(plants)
+			w.receive(g) // Start the vegetation phase.
+			paused := w.upload
+			if paused == nil || paused.stage != uploadVines || paused.next == 0 {
+				t.Fatal("vegetation did not begin")
+			}
+			stage, next := paused.stage, paused.next
+			// A newly visible rock layer takes the upload slot at the batch boundary.
+			if layer == render.ForegroundLayer {
+				w.sections[1].foreground.Deallocate()
+				w.sections[1].foreground = nil
+			} else {
+				w.sections[1].terrain.Deallocate()
+				w.sections[1].terrain = nil
+			}
+			foreground := resolutionTestMesh(1)
+			foreground.Layers = layer
+			foreground.TerrainOnly = true
+			w.savePending(foreground)
+			w.receive(g)
+			if w.upload == nil || w.upload.data.ID != 1 || w.parked[0] != paused {
+				t.Fatal("rock layer did not preempt optional upload")
+			}
+			for tick := 0; tick < 20 && w.upload != nil; tick++ {
+				w.receive(g)
+			}
+			if (layer == render.ForegroundLayer && w.sections[1].foreground == nil) ||
+				(layer == render.BackgroundLayer && w.sections[1].terrain == nil) {
+				t.Fatal("rock layer did not publish")
+			}
+			w.receive(g)
+			if w.upload != paused || paused.stage != stage || paused.next != next {
+				t.Fatal("vegetation restarted instead of resuming")
+			}
+			for tick := 0; tick < 20 && w.upload != nil; tick++ {
+				w.receive(g)
+			}
+			if w.sections[0].vegetationPending || len(w.parked) != 0 {
+				t.Fatal("paused vegetation did not finish")
+			}
+		})
+	}
+}
+
+func TestResizeRetainsParkedSourceAndDropsPartialImages(t *testing.T) {
+	g := resolutionTestScene(t)
+	w := g.world
+	u := &sectionUpload{data: resolutionTestMesh(0), stage: uploadMushrooms, initialized: true, pixels: 1000}
+	u.surface = render.NewSectionImageAt(1, 10)
+	w.parked = map[int64]*sectionUpload{0: u}
+	g.SetRenderWidth(1200)
+	if len(w.parked) != 0 || u.surface != nil || w.pending[0].ID != 0 {
+		t.Fatal("resize lost parked CPU data or kept old GPU work")
+	}
+	finishResolutionRefresh(t, g, Viewport{Y: -.8, Height: .8})
+	if w.sections[0].foreground.Bounds().Dx() != 1200 {
+		t.Fatal("parked source did not refresh at the latest width")
+	}
+}
+
+func TestVegetationLayersShareUploadBudget(t *testing.T) {
+	g := resolutionTestScene(t)
+	w := g.world
+	w.sections[0].vegetationPending = true
+	plants := resolutionTestMesh(0)
+	plants.Layers = render.VegetationLayer
+	plants.Vines = make([]render.TriangleMesh, uploadDrawsPerTick-1)
+	plants.ForegroundVines = make([]render.TriangleMesh, uploadDrawsPerTick-1)
+	plants.VinesBounds = image.Rect(10, 20, 30, 40)
+	plants.ForegroundVinesBounds = plants.VinesBounds
+	w.startUpload(plants)
+	w.receive(g)
+	if w.upload == nil || !w.sections[0].vegetationPending {
+		t.Fatal("separate vegetation stages each consumed a full tick budget")
+	}
+	if w.upload.stage == uploadForegroundVines && w.upload.next > 0 {
+		t.Fatal("vine draws and finishing pass left no draw budget for foreground vines")
+	}
+	for tick := 0; tick < 10 && w.upload != nil; tick++ {
+		w.receive(g)
+	}
+	if w.upload != nil || w.sections[0].vegetationPending {
+		t.Fatal("vegetation stopped making progress after exhausting its budget")
+	}
+}
+
+func TestCheapUploadStagesPublishInSameTick(t *testing.T) {
+	g := resolutionTestScene(t)
+	w := g.world
+	w.sections[0].deallocate()
+	delete(w.sections, 0)
+	w.pixels = 10
+	w.startUpload(render.SectionMesh{ID: 0, Layers: render.ForegroundLayer, TerrainOnly: true})
+	w.receive(g)
+	s := w.sections[0]
+	if s == nil || s.foreground == nil || s.terrain != nil || !s.vegetationPending {
+		t.Fatal("empty face/outline stages delayed foreground publication")
+	}
+	if w.upload.foreground != nil {
+		t.Fatal("publication retained ownership of the foreground image")
+	}
+}
+
+func TestFaceUploadRetainsSurfaceAcrossIndexBudgets(t *testing.T) {
+	g := resolutionTestScene(t)
+	w := g.world
+	w.sections[0].deallocate()
+	delete(w.sections, 0)
+	w.pixels = 10
+	batch := (uploadIndicesPerTick / 3) * 3
+	mesh := render.TriangleMesh{
+		Vertices: []ebiten.Vertex{{DstX: 100, DstY: 1100, ColorA: 1}, {DstX: 900, DstY: 1100, ColorA: 1}, {DstX: 500, DstY: 1900, ColorA: 1}},
+		Indices:  make([]uint32, batch*2+3),
+	}
+	for i := range mesh.Indices {
+		mesh.Indices[i] = uint32(i % 3)
+	}
+	w.startUpload(render.SectionMesh{ID: 0, Layers: render.ForegroundLayer, TerrainOnly: true, Foreground: render.GridMesh{Faces: mesh}})
+	w.receive(g)
+	u := w.upload
+	if u == nil || u.surface == nil || u.faceNext != batch || w.sections[0] != nil {
+		t.Fatal("first face batch exceeded its index budget or published incomplete terrain")
+	}
+	surface := u.surface
+	for tick := 0; tick < 10 && w.sections[0] == nil; tick++ {
+		before := u.faceNext
+		w.receive(g)
+		if u.surface != nil {
+			if u.surface != surface || u.faceNext-before > batch {
+				t.Fatal("partial face upload discarded its accumulator or exceeded the tick budget")
+			}
+		}
+	}
+	if s := w.sections[0]; s == nil || s.foreground == nil || u.surface != nil {
+		t.Fatal("budgeted face batches did not resolve and publish their completed layer")
 	}
 }

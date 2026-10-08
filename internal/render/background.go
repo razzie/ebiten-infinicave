@@ -56,13 +56,16 @@ func (r *BackgroundRenderer) Draw(dst *ebiten.Image, w BackgroundLayers, y, heig
 	// Include the Gaussian kernel and the downsampling/reconstruction filters.
 	// Neighboring bands prevent viewport edges from clipping soft shadows.
 	padding := int(math.Ceil(3*math.Max(r.softness, r.shadowSoftness)*float64(view.Pixels))) + 2
+	paddedY := y - float64(padding)/float64(view.Pixels)
+	paddedHeight := height + 2*float64(padding)/float64(view.Pixels)
+	if visible, ok := w.(interface{ BackgroundVisible(float64, float64) bool }); ok && !visible.BackgroundVisible(paddedY, paddedHeight) {
+		return
+	}
 	fullHeight := dst.Bounds().Dy() + 2*padding
 	EnsureEffectImage(&r.background, width, fullHeight)
 	EnsureEffectImage(&r.mask, width, fullHeight)
 	r.background.Clear()
 	r.mask.Clear()
-	paddedY := y - float64(padding)/float64(view.Pixels)
-	paddedHeight := height + 2*float64(padding)/float64(view.Pixels)
 	w.DrawBackground(r.background, paddedY, paddedHeight, view)
 	if r.opacity > 0 {
 		w.DrawForegroundRocks(r.mask, paddedY-r.Offset.Y, paddedHeight, r.Offset.X, view)

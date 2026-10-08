@@ -138,6 +138,7 @@ func (cut RockCut) Geometry(id int64, old *Geometry, tolerance float64) (*Geomet
 	cuts := append(append([]RockCut(nil), old.Cuts...), cut)
 	topology := carveTopology(old.Topology, grid, parents, cuts, old.Top)
 	updated := PrepareTerrainGeometry(SectionData{ID: id, Guides: old.Guides, ForegroundTopology: topology}, tolerance)
+	updated.source = old.source
 	updated.Vegetation = old.Vegetation
 	return updated, parents, true
 }

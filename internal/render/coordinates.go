@@ -70,6 +70,10 @@ func scaleVegetationMeshes(meshes []TriangleMesh, bounds image.Rectangle, pixels
 func ScaleSectionMesh(mesh SectionMesh, pixels int) SectionMesh {
 	mesh.Background = ScaleGridMesh(mesh.Background, pixels, -BackgroundRasterBounds(pixels).Min.X)
 	mesh.Foreground = ScaleGridMesh(mesh.Foreground, pixels, 0)
+	return ScaleVegetationMesh(mesh, pixels)
+}
+
+func ScaleVegetationMesh(mesh SectionMesh, pixels int) SectionMesh {
 	mesh.Vines, mesh.VinesBounds = scaleVegetationMeshes(mesh.Vines, mesh.VinesBounds, pixels)
 	mesh.ForegroundVines, mesh.ForegroundVinesBounds = scaleVegetationMeshes(mesh.ForegroundVines, mesh.ForegroundVinesBounds, pixels)
 	mushrooms, bounds := scaleVegetationMeshes([]TriangleMesh{mesh.Mushrooms}, mesh.MushroomsBounds, pixels)

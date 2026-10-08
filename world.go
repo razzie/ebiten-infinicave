@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/razzie/ebiten-infinicave/internal/parallel"
 	"github.com/razzie/ebiten-infinicave/internal/render"
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
@@ -23,6 +22,7 @@ type worldSection struct {
 	vegetationPending                                   bool
 	mesh                                                *render.SectionMesh
 	pixels                                              int
+	backgroundPixels, vegetationPixels                  int
 }
 
 type world struct {
@@ -52,11 +52,17 @@ type world struct {
 	pixels            int
 	pending           map[int64]render.SectionMesh
 	viewport          Viewport
+	priorities        chan Viewport
+	parked            map[int64]*sectionUpload
 }
 
 type sectionJob struct {
-	id  int64
-	ctx context.Context
+	id       int64
+	ctx      context.Context
+	phase    int
+	build    *terrain.SectionBuild
+	geometry *terrain.Geometry
+	mesh     render.SectionMesh
 }
 
 var errSectionComplete = errors.New("section generation completed")
@@ -74,10 +80,10 @@ type sectionTerrain struct {
 
 func newWorld(seed int64, view View, tolerance float64, loadSection SectionLoader, orientation ...Orientation) *world {
 	limit := min(2, max(1, runtime.GOMAXPROCS(0)-1))
-	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan sectionJob, limit),
-		results: make(chan render.SectionMesh, limit), terrain: make(chan sectionTerrain, limit),
-		terrainMeshes: make(chan render.SectionMesh, limit), canceled: make(chan int64, limit),
-		done: make(chan struct{}), inflight: make(map[int64]sectionFlight), maxJobs: limit}
+	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan sectionJob, sectionQueueLimit),
+		results: make(chan render.SectionMesh, sectionQueueLimit*2), terrain: make(chan sectionTerrain, sectionQueueLimit),
+		terrainMeshes: make(chan render.SectionMesh, sectionQueueLimit*2), canceled: make(chan int64, sectionQueueLimit),
+		done: make(chan struct{}), inflight: make(map[int64]sectionFlight), maxJobs: limit, priorities: make(chan Viewport, 1), parked: make(map[int64]*sectionUpload)}
 	w.ctx, w.cancel = context.WithCancel(context.Background())
 	// Keep application loader calls serialized within this world, even though
 	// separate builders can generate their sections concurrently.
@@ -96,54 +102,76 @@ func newWorld(seed int64, view View, tolerance float64, loadSection SectionLoade
 			return content
 		}
 	}
-	build := func(builder *terrain.Builder, job sectionJob) {
-		ctx, id := job.ctx, job.id
-		var geometry *terrain.Geometry
-		var terrainMesh render.SectionMesh
-		joinTerrain := func() {}
-		data, ok := builder.BuildWithContext(ctx, id, func(data terrain.SectionData) {
-			geometry = terrain.PrepareTerrainGeometry(data, tolerance)
+
+	advance := func(builder *terrain.Builder, job sectionJob, ctx context.Context) *sectionJob {
+		id := job.id
+		sendMesh := func(mesh render.SectionMesh, channel chan render.SectionMesh) bool {
 			select {
 			case <-ctx.Done():
-				return
-			case w.terrain <- sectionTerrain{id: id, geometry: geometry, ctx: ctx}:
+				return false
+			case channel <- mesh:
+				return true
 			}
-			joinTerrain = parallel.Start(func() {
-				if ctx.Err() != nil {
-					return
-				}
-				terrainMesh = render.PrepareTerrain(data, view)
-				terrainMesh.Geometry = geometry
-				select {
-				case <-ctx.Done():
-				case w.terrainMeshes <- terrainMesh:
-				}
-			})
-		})
+		}
+		ok := ctx.Err() == nil
 		if ok {
-			mesh := render.PrepareVegetation(data, view)
-			joinTerrain()
-			mesh.Background, mesh.Foreground = terrainMesh.Background, terrainMesh.Foreground
-			complete := *geometry
-			complete.Vegetation = terrain.SectionVegetation(data)
-			mesh.Geometry = &complete
-			select {
-			case <-ctx.Done():
-			case w.results <- mesh:
-				return
+			switch job.phase {
+			case sectionGeometry:
+				job.build = builder.Begin(ctx, id)
+				ok = job.build != nil
+				if ok {
+					job.geometry = terrain.PrepareTerrainGeometry(job.build.Data(), tolerance)
+					select {
+					case <-ctx.Done():
+						ok = false
+					case w.terrain <- sectionTerrain{id: id, geometry: job.geometry, ctx: job.ctx}:
+					}
+				}
+			case sectionForeground:
+				ok = job.build.Materialize(ctx)
+				if ok {
+					job.geometry = terrain.BindTerrainMaterial(job.geometry, job.build.Data())
+					job.mesh = render.PrepareForeground(job.build.Data(), view)
+					job.mesh.Geometry = job.geometry
+					ok = sendMesh(job.mesh, w.terrainMeshes)
+				}
+			case sectionBackground:
+				mesh := render.PrepareBackground(job.build.Data(), view)
+				mesh.Geometry = job.geometry
+				job.mesh = render.MergeSectionMeshes(job.mesh, mesh)
+				ok = sendMesh(mesh, w.terrainMeshes)
+			case sectionVegetation:
+				ok = builder.Decorate(ctx, job.build)
+				if ok {
+					mesh := render.PrepareVegetation(job.build.Data(), view)
+					complete := *job.geometry
+					complete.Vegetation = terrain.SectionVegetation(job.build.Data())
+					mesh.Geometry = &complete
+					mesh = render.MergeSectionMeshes(job.mesh, mesh)
+					ok = sendMesh(mesh, w.results)
+					if ok {
+						job.phase = sectionComplete // completion must not retry if a yield races the send
+						return &job
+					}
+				}
 			}
-		} else {
-			joinTerrain()
 		}
-		select {
-		case <-w.done:
-			return
-		case w.canceled <- id:
+		if !ok {
+			if context.Cause(ctx) == errSectionYield && job.ctx.Err() == nil {
+				return nil
+			}
+			select {
+			case <-w.done:
+			case w.canceled <- id:
+			}
+			return nil
 		}
+		job.phase++
+		return &job
 	}
-	go w.runSectionJobs(func() *terrain.Builder {
+	go w.runSectionPhases(func() *terrain.Builder {
 		return terrain.NewSectionBuilder(seed, loadSection, orientation...)
-	}, build)
+	}, advance)
 
 	return w
 }
@@ -155,21 +183,13 @@ func (w *world) close() {
 		}
 		close(w.done)
 	})
-	if w.upload != nil && w.upload.img != nil {
-		w.upload.img.Deallocate()
+	if w.upload != nil {
+		w.upload.deallocate()
 	}
-	if w.upload != nil && w.upload.foreground != nil {
-		w.upload.foreground.Deallocate()
+	for _, u := range w.parked {
+		u.deallocate()
 	}
-	if w.upload != nil && w.upload.vines != nil {
-		w.upload.vines.Deallocate()
-	}
-	if w.upload != nil && w.upload.foregroundVines != nil {
-		w.upload.foregroundVines.Deallocate()
-	}
-	if w.upload != nil && w.upload.mushrooms != nil {
-		w.upload.mushrooms.Deallocate()
-	}
+	w.parked = nil
 	w.upload = nil
 	w.pending = nil
 	w.collision = nil
@@ -194,17 +214,24 @@ func (w *world) request(id int64) {
 		if _, exists := w.inflight[id]; exists {
 			return
 		}
-		if len(w.inflight) >= w.maxJobs {
+		if len(w.inflight) >= sectionQueueLimit {
 			return
 		}
-		// Early meshes of active jobs don't consume another result slot.
-		outstanding := len(w.inflight)
-		for pendingID := range w.pending {
-			if _, active := w.inflight[pendingID]; !active {
-				outstanding++
-			}
+		// Count each retained result once, including paused GPU work.
+		outstanding := make(map[int64]bool, sectionQueueLimit)
+		for id := range w.inflight {
+			outstanding[id] = true
 		}
-		if outstanding >= 2 {
+		for id := range w.pending {
+			outstanding[id] = true
+		}
+		for id := range w.parked {
+			outstanding[id] = true
+		}
+		if w.upload != nil {
+			outstanding[w.upload.data.ID] = true
+		}
+		if len(outstanding) >= sectionQueueLimit {
 			return
 		}
 		ctx, cancel := context.WithCancelCause(w.ctx)
@@ -239,6 +266,10 @@ func prefetch(y float64, height float64, velocity float64) (ids []int64, require
 	}
 	ids = append(ids, low-1, high+1)
 	required = len(ids)
+	// Stationary views need their neighboring plants, but no distant lookahead.
+	if velocity == 0 {
+		return
+	}
 	ahead := 2 + min(2, int(math.Abs(velocity)/.008))
 	if velocity <= 0 {
 		for i := 0; i < ahead; i++ {
@@ -258,6 +289,16 @@ func prefetch(y float64, height float64, velocity float64) (ids []int64, require
 // whether everything the viewport needs is already built.
 func (w *world) ensure(y float64, height float64, velocity float64) bool {
 	ids, required := prefetch(y, height, velocity)
+	if w.priorities != nil {
+		select {
+		case <-w.priorities:
+		default:
+		}
+		select {
+		case w.priorities <- Viewport{Y: y, Height: height, Velocity: velocity}:
+		default:
+		}
+	}
 	ready := true
 	for i, id := range ids {
 		if id < 0 {
@@ -277,7 +318,7 @@ func (w *world) ensure(y float64, height float64, velocity float64) bool {
 			continue
 		}
 		if section := w.sections[id]; section != nil {
-			if section.mesh != nil && section.renderWidth() != w.renderWidth() && meshVisible(*section.mesh, viewport) {
+			if section.mesh != nil && section.needsRefresh(w.renderWidth()) && meshVisible(*section.mesh, viewport) {
 				if w.upload == nil {
 					w.startUpload(*section.mesh)
 				}
@@ -323,6 +364,12 @@ func (w *world) prune(y float64, height float64, velocity float64) {
 		w.activeCancel()
 	}
 
+	for id, u := range w.parked {
+		if !keep[id] {
+			u.deallocate()
+			delete(w.parked, id)
+		}
+	}
 	for id, section := range w.sections {
 		if w.upload != nil && w.upload.data.ID == id {
 			continue

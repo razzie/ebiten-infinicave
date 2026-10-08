@@ -177,7 +177,7 @@ func TestGeometryRevisionTracksPublicationGrowthAndEviction(t *testing.T) {
 		t.Fatal("early collision unexpectedly published query geometry")
 	}
 	revision = g.GeometryRevision()
-	w.upload = &sectionUpload{stage: 4, data: render.SectionMesh{ID: top.ID, Geometry: geometry}}
+	w.upload = &sectionUpload{stage: uploadForegroundPublish, initialized: true, needed: render.ForegroundLayer, data: render.SectionMesh{ID: top.ID, Geometry: geometry}}
 	w.receive(g)
 	grown, ok := g.Formation(before.ID)
 	if g.GeometryRevision() <= revision || !ok || grown.ID != before.ID ||

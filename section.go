@@ -60,7 +60,7 @@ func GenerateSection(seed, id int64) (Section, error) {
 // background effects, and View only affect rendering. A custom loader must return
 // the same content for repeated IDs to preserve geometry across neighboring
 // sections and cache eviction.
-// OnCollisionReady, when set, runs on the caller's goroutine before vegetation
+// OnCollisionReady, when set, runs on the caller's goroutine before background, shading, or vegetation
 // generation and receives an independent copy of the section's collision.
 func GenerateSectionWithConfig(config Config, id int64) (Section, error) {
 	if err := config.validate(); err != nil {

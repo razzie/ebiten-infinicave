@@ -3,6 +3,7 @@ package infinicave
 import (
 	"image"
 	"reflect"
+	"strconv"
 	"testing"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -43,17 +44,17 @@ func TestCarvePlantsAcrossSectionSeamsAndReload(t *testing.T) {
 func TestCarvePlantsDuringEveryUploadStage(t *testing.T) {
 	data := terrain.SectionData{Foreground: RockGrid{terrainRect(.1, .4, .8, .3)}, Mushrooms: []MushroomGroup{{Mushrooms: []Mushroom{testGroundedMushroom(.5, .4)}}},
 		Vines: []Vine{{Parent: -1, Points: []VinePoint{{P: V{X: .1, Y: .4}, Radius: .003}, {P: V{X: .9, Y: .4}, Radius: .003}}}}}
-	for stage := 0; stage <= 8; stage++ {
-		t.Run(string(rune('0'+stage)), func(t *testing.T) {
+	for stage := 0; stage <= uploadPlantsPublish; stage++ {
+		t.Run(strconv.Itoa(stage), func(t *testing.T) {
 			scene := queryScene()
 			mesh := render.PrepareSection(data, ViewShaded)
 			mesh.Geometry = terrain.PrepareTerrainGeometry(data, 0)
 			render.FinishSectionMesh(&mesh)
-			u := &sectionUpload{data: mesh, stage: stage, next: 3}
-			if stage == 3 || stage == 4 {
+			u := &sectionUpload{data: mesh, stage: stage, next: 3, initialized: true, needed: render.AllLayers}
+			if stage == uploadForegroundOutlines || stage == uploadForegroundPublish {
 				u.foreground = ebiten.NewImage(1, 1)
 			}
-			if stage >= 5 {
+			if stage >= uploadVines {
 				u.vines, u.mushrooms, u.foregroundVines = ebiten.NewImage(1, 1), ebiten.NewImage(1, 1), ebiten.NewImage(1, 1)
 				scene.world.sections[0] = &worldSection{geometry: mesh.Geometry, vegetationPending: true}
 			}
@@ -65,10 +66,10 @@ func TestCarvePlantsDuringEveryUploadStage(t *testing.T) {
 			if len(plants.Mushrooms) != 0 || len(plants.Vines) != 2 || len(u.data.Mushrooms.Indices) != 0 || !u.data.MushroomsBounds.Empty() {
 				t.Fatal("upload kept stale mushroom/vine meshes or crop bounds")
 			}
-			if stage >= 5 && (u.stage != 5 || u.next != 0 || u.vines != nil || u.mushrooms != nil || u.foregroundVines != nil) {
+			if stage >= uploadVines && (u.stage != uploadVines || u.next != 0 || u.vines != nil || u.mushrooms != nil || u.foregroundVines != nil) {
 				t.Fatal("partially uploaded plants were not restarted")
 			}
-			if stage >= 5 && !reflect.DeepEqual(scene.world.sections[0].geometry.Vegetation, plants) {
+			if stage >= uploadVines && !reflect.DeepEqual(scene.world.sections[0].geometry.Vegetation, plants) {
 				t.Fatal("published section and pending plants disagree")
 			}
 			if u.foreground != nil {

@@ -89,8 +89,8 @@ func NewScene(config Config) (*Scene, error) {
 // sections, and advances enabled ambient animations. Call once per game tick.
 // It never waits for generation and returns true when all layers needed by
 // viewport are ready. Collision becomes available
-// before vegetation generation and mesh preparation; complete terrain uploads
-// before vegetation. OnCollisionReady runs here as soon as generated polygons
+// before background generation, shading, and vegetation; foreground images
+// publish before background and vegetation. OnCollisionReady runs here as soon as generated polygons
 // arrive. An invalid viewport or a closed Scene returns false without doing work.
 func (g *Scene) Update(viewport Viewport) bool {
 	viewport, valid := orientedViewport(g.orientation, viewport)
@@ -147,6 +147,7 @@ func (g *Scene) SetRenderWidth(pixels int) {
 	}
 	g.world.pixels = pixels
 	g.world.deferUpload()
+	g.world.deferParked()
 }
 
 // Draw draws available terrain, fog, vegetation, and enabled bats into dst,
@@ -157,7 +158,7 @@ func (g *Scene) SetRenderWidth(pixels int) {
 // = target width / min(target width, target height) for Horizontal, with the
 // same viewport as Update. Horizontal scenes use a reusable native-size buffer
 // to map the section-frame compositor into world orientation.
-// Missing terrain is left untouched; bats may fly across unloaded areas. Draw does
+// Fog appears immediately across unloaded bands; bats may fly across them. Draw does
 // not add hover, loading text, or UI, and does nothing for an invalid viewport
 // or a closed Scene.
 func (g *Scene) Draw(dst *ebiten.Image, viewport Viewport) {

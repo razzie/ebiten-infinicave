@@ -39,8 +39,17 @@ func newRockGridInRange(seeds []geom.V, colorAt func(geom.V) color.NRGBA, minX, 
 }
 
 func InsetForegroundGrid(grid RockGrid) RockGrid {
+	clipped, _ := insetForegroundGrid(grid, false)
+	return clipped
+}
+
+func insetForegroundGrid(grid RockGrid, mapping bool) (RockGrid, []int) {
 	clipped := make(RockGrid, 0, len(grid))
-	for _, cell := range grid {
+	var parents []int
+	if mapping {
+		parents = make([]int, 0, len(grid))
+	}
+	for parent, cell := range grid {
 		poly := geom.ClipHalfPlane(cell.Polygon, geom.V{X: -1, Y: 0}, -foregroundScreenInset)
 		poly = geom.ClipHalfPlane(poly, geom.V{X: 1, Y: 0}, generationWidth-foregroundScreenInset)
 		if len(poly) < 3 || geom.PolygonArea(poly) < 1e-15 {
@@ -51,8 +60,11 @@ func InsetForegroundGrid(grid RockGrid) RockGrid {
 			cell.Center = geom.PolygonCenter(poly)
 		}
 		clipped = append(clipped, cell)
+		if mapping {
+			parents = append(parents, parent)
+		}
 	}
-	return clipped
+	return clipped, parents
 }
 
 // RockOrientation returns the lighting basis of a generated rock face.
