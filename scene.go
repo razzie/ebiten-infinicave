@@ -211,8 +211,8 @@ func (g *Scene) Reset(seed int64) {
 }
 
 // Close stops background work and releases all GPU resources. It is safe to
-// call repeatedly. An in-progress CPU generation finishes in the background
-// before its worker exits; Close does not wait for it.
+// call repeatedly. Background generation stops at its next cancellation check;
+// Close does not wait for its workers.
 func (g *Scene) Close() {
 	if g.closed {
 		return

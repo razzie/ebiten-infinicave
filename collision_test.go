@@ -11,7 +11,7 @@ import (
 func TestCollisionReadyDuringUploadIncludesStoredCutsAndOwnsPolygons(t *testing.T) {
 	w := &world{
 		sections: make(map[int64]*worldSection), terrain: make(chan sectionTerrain, 1),
-		jobs: make(chan int64, 1), done: make(chan struct{}), working: true,
+		jobs: make(chan sectionJob, 1), done: make(chan struct{}), working: true,
 		// Empty draw batches keep an unrelated upload busy.
 		upload: &sectionUpload{stage: 1, img: render.NewBackgroundImageAt(1000), data: render.SectionMesh{
 			Background: render.GridMesh{Outlines: make([]render.TriangleMesh, uploadDrawsPerTick*2)},

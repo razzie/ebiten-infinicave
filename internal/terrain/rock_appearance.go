@@ -11,12 +11,12 @@ import (
 // ShadeRockFaces prepares a private rendering copy. Generation colors continue
 // to steer vegetation; visual normals also drive the rendered depth shadows.
 // Polygons and control-point heights are never changed by this material pass.
-func ShadeRockFaces(grid RockGrid, boundary []RockEdge) RockGrid {
+func ShadeRockFaces(grid RockGrid, boundary []RockEdge, adjacency ...[][]int) RockGrid {
 	if len(grid) == 0 {
 		return grid
 	}
 	if !grid[0].Raised {
-		return shadeBackgroundRockFaces(grid)
+		return shadeBackgroundRockFaces(grid, adjacency...)
 	}
 	faces := append(RockGrid(nil), grid...)
 	noise := NewPerlin(rand.New(rand.NewSource(0x6661636574)))
@@ -106,7 +106,7 @@ func rockFacetTilt(c RockCell, noise *Perlin) geom.V {
 // material field and exact black pockets, then refine its shallow relief with
 // correlated normals and restrained contact occlusion. Neighbor probes cover
 // the extended side margins as well as the cave's central square.
-func shadeBackgroundRockFaces(grid RockGrid) RockGrid {
+func shadeBackgroundRockFaces(grid RockGrid, adjacency ...[][]int) RockGrid {
 	faces := append(RockGrid(nil), grid...)
 	noise := NewPerlin(rand.New(rand.NewSource(0x6661636574)))
 	parallelFor(len(faces), func(i int) {
@@ -118,7 +118,13 @@ func shadeBackgroundRockFaces(grid RockGrid) RockGrid {
 		}
 		c.Normal = (geom.V3{X: 1.4*n.X/n.Z + tilt.X, Y: 1.4*n.Y/n.Z + tilt.Y, Z: 1}).Norm()
 	})
-	neighbors := RockNeighbors(faces)
+	var neighbors [][]int
+	if len(adjacency) > 0 {
+		neighbors = adjacency[0]
+	}
+	if neighbors == nil {
+		neighbors = RockNeighbors(faces)
+	}
 	// Normals are immutable during the second pass; only each worker's own
 	// output color/illumination changes. Read neighbor material from the input.
 	parallelFor(len(faces), func(i int) {

@@ -31,6 +31,7 @@ func RidgedGuide(g Guide, seed int64) Guide {
 		taper := geom.Smoothstep(0, 0.018, math.Min(s, length-s))
 		pts = append(pts, p.Add(n.Mul(geom.Lerp(-0.0025, 0.0025, rng.Float64())*taper)))
 	}
+	g.projection = nil
 	g.Pts, g.S = pts, make([]float64, len(pts))
 	g.Min, g.Max = pts[0], pts[0]
 	for i, p := range pts {

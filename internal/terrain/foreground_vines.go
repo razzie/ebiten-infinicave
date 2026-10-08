@@ -1,10 +1,9 @@
 package terrain
 
 import (
+	"context"
 	"math"
 	"math/rand"
-
-	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
 
 const foregroundVineGuideClearance = .030
@@ -35,17 +34,8 @@ func newForegroundVineTerrainWithWorkspace(foreground RockGrid, guides []Guide, 
 			y0 := max(0, int(math.Floor((min(a.Y, b.Y)-reach-GenerationMinY)/vineFieldStep)))
 			y1 := min(vineFieldHeight-1, int(math.Ceil((max(a.Y, b.Y)+reach-GenerationMinY)/vineFieldStep)))
 			for y := y0; y <= y1; y++ {
-				for x := x0; x <= x1; x++ {
-					i := y*vineFieldWidth + x
-					if field.clearance[i] == 0 {
-						continue
-					}
-					p := geom.V{X: (float64(x) + .5) * vineFieldStep, Y: GenerationMinY + (float64(y)+.5)*vineFieldStep}
-					q := a.Add(d.Mul(geom.Clamp(p.Sub(a).Dot(d)/length2, 0, 1)))
-					distance := p.Sub(q).Len()
-					if distance < reach {
-						field.clearance[i] = min(field.clearance[i], max(0, distance-foregroundVineGuideClearance))
-					}
+				if x0 <= x1 {
+					segmentDistanceSpan(field.clearance[y*vineFieldWidth+x0:y*vineFieldWidth+x1+1], x0, GenerationMinY+(float64(y)+.5)*vineFieldStep, a, d, length2, true, true)
 				}
 			}
 		}
@@ -58,9 +48,13 @@ func generateForegroundVines(foreground RockGrid, guides []Guide, rng *rand.Rand
 }
 
 func generateForegroundVinesWithWorkspace(foreground RockGrid, guides []Guide, rng *rand.Rand, workspace *vineWorkspace) []Vine {
+	return generateForegroundVinesContext(context.Background(), foreground, guides, rng, workspace)
+}
+
+func generateForegroundVinesContext(ctx context.Context, foreground RockGrid, guides []Guide, rng *rand.Rand, workspace *vineWorkspace) []Vine {
 	field := newForegroundVineTerrainWithWorkspace(foreground, guides, workspace)
 	defer field.release()
-	vines := generateVinesInBand(field, rng, 0, SectionHeight, 2)
+	vines := generateVinesInBandContext(ctx, field, rng, 0, SectionHeight, 2)
 	for i := range vines {
 		vines[i].Foreground = true
 	}

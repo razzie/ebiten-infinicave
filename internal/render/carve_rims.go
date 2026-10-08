@@ -13,7 +13,15 @@ import (
 // This is decorative depth, like the existing rock walls; collision stays on
 // the actual cut perimeter. World-space variation keeps reloads and seams fixed.
 func AppendCarveRims(vertices []ebiten.Vertex, indices []uint32, topology *terrain.RockTopology, view View) ([]ebiten.Vertex, []uint32) {
+	return appendCarveRims(vertices, indices, topology, view, false)
+}
+
+func appendCarveRims(vertices []ebiten.Vertex, indices []uint32, topology *terrain.RockTopology, view View, owned bool) ([]ebiten.Vertex, []uint32) {
 	for _, edge := range topology.Boundary {
+		// Rims extend at most .009 scene units from the cut edge.
+		if owned && !inTerrainBand(edge.A.Add(geom.V{Y: -.009}), edge.B.Add(geom.V{Y: -.009}), edge.A.Add(geom.V{Y: .009}), edge.B.Add(geom.V{Y: .009})) {
+			continue
+		}
 		mid := geom.LerpVector(edge.A, edge.B, .5).Add(geom.V{Y: topology.Top})
 		onCut := false
 		for _, cut := range topology.Cuts {

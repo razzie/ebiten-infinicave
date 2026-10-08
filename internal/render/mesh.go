@@ -3,13 +3,12 @@ package render
 import (
 	"image"
 	"math"
-	"runtime"
 	"sort"
-	"sync"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 	"github.com/razzie/ebiten-infinicave/internal/geom"
+	"github.com/razzie/ebiten-infinicave/internal/parallel"
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
@@ -29,6 +28,7 @@ type GridMesh struct {
 
 type SectionMesh struct {
 	ID                                                  int64
+	TerrainOnly                                         bool
 	Background, Foreground                              GridMesh
 	Vines                                               []TriangleMesh
 	ForegroundVines                                     []TriangleMesh
@@ -39,34 +39,53 @@ type SectionMesh struct {
 
 func PrepareSection(data terrain.SectionData, view View) SectionMesh {
 	mesh := SectionMesh{ID: data.ID}
-	jobs := make(chan func(), 5)
-	jobs <- func() { mesh.Background = prepareGrid(data.Background, view) }
-	jobs <- func() { mesh.Foreground = PrepareGridWithTopology(data.Foreground, view, data.ForegroundTopology) }
-	if view == ViewShaded {
-		jobs <- func() { mesh.Vines = PrepareVines(data.Vines) }
-		jobs <- func() { mesh.ForegroundVines = PrepareForegroundVines(data.ForegroundVines, data.Orientation) }
-		jobs <- func() { mesh.Mushrooms = PrepareMushrooms(data.Mushrooms) }
-	}
-	close(jobs)
-
-	// Each layer owns its output buffers. Match parallelFor's CPU budget so
-	// polygonization also leaves capacity for the game loop.
-	workers := min(max(1, runtime.GOMAXPROCS(0)-1), len(jobs))
-	if workers == 1 {
-		for job := range jobs {
-			job()
-		}
-		return mesh
-	}
-	var wg sync.WaitGroup
-	for range workers {
-		wg.Go(func() {
-			for job := range jobs {
-				job()
+	parallel.Run(
+		func() {
+			mesh.Background = prepareGridWithNeighbors(data.Background, view, nil, data.BackgroundNeighbors)
+		},
+		func() { mesh.Foreground = PrepareGridWithTopology(data.Foreground, view, data.ForegroundTopology) },
+		func() {
+			if view == ViewShaded {
+				mesh.Vines = PrepareVines(data.Vines)
 			}
-		})
+		},
+		func() {
+			if view == ViewShaded {
+				mesh.ForegroundVines = PrepareForegroundVines(data.ForegroundVines, data.Orientation)
+			}
+		},
+		func() {
+			if view == ViewShaded {
+				mesh.Mushrooms = PrepareMushrooms(data.Mushrooms)
+			}
+		},
+	)
+	return mesh
+}
+
+// PrepareTerrain can run against the immutable early terrain while vegetation
+// is still growing. Its mesh buffers stay read-only after publication.
+func PrepareTerrain(data terrain.SectionData, view View) SectionMesh {
+	mesh := SectionMesh{ID: data.ID, TerrainOnly: true}
+	parallel.Run(
+		func() {
+			mesh.Background = prepareGridBand(data.Background, view, nil, data.BackgroundNeighbors, true)
+		},
+		func() { mesh.Foreground = PrepareOwnedGridWithTopology(data.Foreground, view, data.ForegroundTopology) },
+	)
+	return mesh
+}
+
+func PrepareVegetation(data terrain.SectionData, view View) SectionMesh {
+	mesh := SectionMesh{ID: data.ID}
+	if view == ViewShaded {
+		parallel.Run(
+			func() { mesh.Vines = PrepareVines(data.Vines) },
+			func() { mesh.ForegroundVines = PrepareForegroundVines(data.ForegroundVines, data.Orientation) },
+			func() { mesh.Mushrooms = PrepareMushrooms(data.Mushrooms) },
+		)
 	}
-	wg.Wait()
+	FinishSectionMesh(&mesh)
 	return mesh
 }
 
@@ -88,13 +107,26 @@ func prepareGrid(grid terrain.RockGrid, view View) GridMesh {
 }
 
 func PrepareGridWithTopology(grid terrain.RockGrid, view View, topology *terrain.RockTopology) GridMesh {
+	return prepareGridWithNeighbors(grid, view, topology, nil)
+}
+
+func prepareGridWithNeighbors(grid terrain.RockGrid, view View, topology *terrain.RockTopology, neighbors [][]int) GridMesh {
+	return prepareGridBand(grid, view, topology, neighbors, false)
+}
+
+func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTopology, neighbors [][]int, owned bool) GridMesh {
 	if topology != nil {
 		grid = topology.Grid
+		neighbors = topology.Neighbors()
 	} else if len(grid) > 0 && grid[0].Raised {
 		grid = terrain.InsetForegroundGrid(grid)
 	}
-	vertices := make([]ebiten.Vertex, 0, len(grid)*18)
-	indices := make([]uint32, 0, len(grid)*18)
+	capacity := len(grid) * 18
+	if owned {
+		capacity /= 3
+	}
+	vertices := make([]ebiten.Vertex, 0, capacity)
+	indices := make([]uint32, 0, capacity)
 	var boundary []terrain.RockEdge
 	raised := len(grid) > 0 && grid[0].Raised
 	if raised {
@@ -104,10 +136,10 @@ func PrepareGridWithTopology(grid terrain.RockGrid, view View, topology *terrain
 			boundary = terrain.ExposedRockEdges(grid)
 		}
 	}
-	grid = terrain.ShadeRockFaces(grid, boundary)
+	grid = terrain.ShadeRockFaces(grid, boundary, neighbors)
 	if raised {
 		if view == ViewShaded || view == ViewClay {
-			vertices, indices = appendRockWalls(vertices, indices, grid, boundary, view)
+			vertices, indices = appendRockWalls(vertices, indices, grid, boundary, view, owned)
 		}
 	}
 	type cellEdge struct {
@@ -119,7 +151,7 @@ func PrepareGridWithTopology(grid terrain.RockGrid, view View, topology *terrain
 	hiddenEdges := make(map[[4]int64]bool)
 	for cellIndex, cell := range grid {
 		s, clr, poly := cell.Center, rockViewColor(cell, view), cell.Polygon
-		if clr.A == 0 {
+		if clr.A == 0 || (owned && !inTerrainBand(poly...)) {
 			continue
 		}
 		vertices, indices = appendCellMesh(vertices, indices, poly, s, clr, cell.Normal)
@@ -147,15 +179,15 @@ func PrepareGridWithTopology(grid terrain.RockGrid, view View, topology *terrain
 	}
 
 	if raised && view == ViewShaded {
-		for _, seam := range rockCrevices(grid) {
+		for _, seam := range rockCrevicesInBand(grid, neighbors, owned) {
 			edges[geom.EdgeKey(seam.a, seam.b)] = cellEdge{a: seam.a, b: seam.b, alpha: seam.alpha}
 		}
 	}
 	if view == ViewShaded || view == ViewClay {
-		vertices, indices = appendRockBevels(vertices, indices, grid, boundary, view)
+		vertices, indices = appendRockBevels(vertices, indices, grid, boundary, view, owned)
 	}
 	if topology != nil && len(topology.Cuts) > 0 && (view == ViewShaded || view == ViewClay) {
-		vertices, indices = AppendCarveRims(vertices, indices, topology, view)
+		vertices, indices = appendCarveRims(vertices, indices, topology, view, owned)
 	}
 	mesh := GridMesh{Faces: TriangleMesh{Vertices: vertices, Indices: indices}}
 	if len(indices) == 0 {
@@ -187,7 +219,7 @@ func PrepareGridWithTopology(grid terrain.RockGrid, view View, topology *terrain
 	})
 	for _, key := range keys {
 		edge := edges[key]
-		if hiddenEdges[key] || edge.alpha == 0 {
+		if hiddenEdges[key] || edge.alpha == 0 || (owned && !inTerrainBand(edge.a, edge.b)) {
 			continue
 		}
 		group := paths[edge.alpha]

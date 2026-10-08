@@ -14,8 +14,11 @@ const rockDepthWidth = int(generationWidth / rockDepthStep)
 const rockDepthHeight = int(GenerationHeight / rockDepthStep)
 
 type rockDepth struct {
-	heights []float64
-	light   geom.V3
+	heights   []float64
+	light     geom.V3
+	direction geom.V
+	rise      float64
+	probes    []shadowProbe
 }
 
 // Each face remains one plane, including concave faces. Clamp extrapolation
@@ -44,16 +47,20 @@ func newRockDepth(grids ...RockGrid) *rockDepth {
 			break
 		}
 	}
-	for i := range d.heights {
-		d.heights[i] = -.016
+	d.direction = (geom.V{X: d.light.X, Y: d.light.Y}).Norm()
+	d.rise = d.light.Z / math.Hypot(d.light.X, d.light.Y)
+	for distance := .008; distance <= .184; distance += .004 {
+		d.probes = append(d.probes, shadowProbe{offset: d.direction.Mul(distance), rise: distance * d.rise, softness: .005 + distance*.05})
 	}
+	fillFloat64(d.heights, -.016)
+	crossings := make([]float64, 0, 16)
 	for _, grid := range grids {
 		for _, c := range grid {
 			minY, maxY := float64(generationMaxY), float64(GenerationMinY)
 			for _, p := range c.Polygon {
 				minY, maxY = math.Min(minY, p.Y), math.Max(maxY, p.Y)
 			}
-			var crossings []float64
+
 			for y := max(0, int((minY-GenerationMinY)/rockDepthStep)); y < min(rockDepthHeight, int((maxY-GenerationMinY)/rockDepthStep)+1); y++ {
 				py := GenerationMinY + (float64(y)+.5)*rockDepthStep
 				crossings = crossings[:0]
@@ -67,10 +74,10 @@ func newRockDepth(grids ...RockGrid) *rockDepth {
 				}
 				sort.Float64s(crossings)
 				for j := 0; j+1 < len(crossings); j += 2 {
-					for x := max(0, int(math.Ceil(crossings[j]/rockDepthStep-.5-1e-9))); x < min(rockDepthWidth, int(math.Ceil(crossings[j+1]/rockDepthStep-.5-1e-9))); x++ {
-						p := geom.V{X: (float64(x) + .5) * rockDepthStep, Y: py}
-						index := y*rockDepthWidth + x
-						d.heights[index] = math.Max(d.heights[index], RockDepthAt(c, p))
+					first := max(0, int(math.Ceil(crossings[j]/rockDepthStep-.5-1e-9)))
+					last := min(rockDepthWidth, int(math.Ceil(crossings[j+1]/rockDepthStep-.5-1e-9)))
+					if first < last {
+						rasterDepthSpan(d.heights[y*rockDepthWidth+first:y*rockDepthWidth+last], first, py, c)
 					}
 				}
 			}
@@ -90,15 +97,18 @@ func (d *rockDepth) at(p geom.V) float64 {
 	return d.heights[y*rockDepthWidth+x]
 }
 
+type shadowProbe struct {
+	offset         geom.V
+	rise, softness float64
+}
+
 func (d *rockDepth) visibility(p geom.V, z float64) float64 {
-	direction := (geom.V{X: d.light.X, Y: d.light.Y}).Norm()
-	rise := d.light.Z / math.Hypot(d.light.X, d.light.Y)
 	visible := 1.0
-	for distance := .008; distance <= .184; distance += .004 {
-		blocker := d.at(p.Add(direction.Mul(distance))) - z - distance*rise
+	for _, probe := range d.probes {
+		blocker := d.at(p.Add(probe.offset)) - z - probe.rise
 		// A small bias avoids self-shadow acne; increasing softness models a
 		// finite light source and leaves a sharper contact near the blocker.
-		visible = math.Min(visible, 1-geom.Smoothstep(.002, .005+distance*.05, blocker))
+		visible = math.Min(visible, 1-geom.Smoothstep(.002, probe.softness, blocker))
 		if visible == 0 {
 			break
 		}
@@ -106,14 +116,30 @@ func (d *rockDepth) visibility(p geom.V, z float64) float64 {
 	return visible
 }
 
+var ambientDirections = func() (directions [8]geom.V) {
+	for i := range directions {
+		angle := float64(i) * math.Pi / 4
+		directions[i] = geom.V{X: math.Cos(angle), Y: math.Sin(angle)}
+	}
+	return
+}()
+
+var ambientProbes = func() (probes [8][3]struct {
+	offset   geom.V
+	distance float64
+}) { for i, direction := range ambientDirections {
+	for j, distance := range [...]float64{.008, .020, .040} {
+		probes[i][j].offset = direction.Mul(distance)
+		probes[i][j].distance = distance
+	}
+}; return }()
+
 func (d *rockDepth) ambient(p geom.V, z float64) float64 {
 	occlusion := 0.0
-	for i := 0; i < 8; i++ {
-		angle := float64(i) * math.Pi / 4
-		direction := geom.V{X: math.Cos(angle), Y: math.Sin(angle)}
+	for _, probes := range ambientProbes {
 		horizon := 0.0
-		for _, distance := range []float64{.008, .020, .040} {
-			horizon = math.Max(horizon, (d.at(p.Add(direction.Mul(distance)))-z-.003)/distance)
+		for _, probe := range probes {
+			horizon = math.Max(horizon, (d.at(p.Add(probe.offset))-z-.003)/probe.distance)
 		}
 		occlusion += geom.Clamp(horizon, 0, 1)
 	}

@@ -1,6 +1,7 @@
 package infinicave
 
 import (
+	"context"
 	"image/color"
 	"time"
 
@@ -37,6 +38,9 @@ func meshVisible(mesh render.SectionMesh, viewport Viewport) bool {
 func (w *world) savePending(data render.SectionMesh) {
 	if w.pending == nil {
 		w.pending = make(map[int64]render.SectionMesh)
+	}
+	if previous, ok := w.pending[data.ID]; ok && !previous.TerrainOnly && data.TerrainOnly {
+		return
 	}
 	w.pending[data.ID] = data
 }
@@ -114,22 +118,118 @@ func (w *world) uploadMeshes(dst *ebiten.Image, meshes []render.TriangleMesh) bo
 	return u.next == len(meshes)
 }
 
-// GPU resources stay on the game thread. Publish complete terrain/collision
-// first, then add vegetation together once all its layers have finished.
-func (w *world) receive(g *Scene) {
-	if w.upload == nil {
+// Collect CPU results even while another section uploads. At most two
+// outstanding sections (active jobs or completed pending results) are kept.
+func (w *world) collect() {
+	// Each job sends its early mesh before its final result. Drain the early
+	// channel first so completed/canceled jobs cannot resurrect old terrain.
+	for {
 		select {
-		case data := <-w.results:
-			w.working = false
-			if !meshVisible(data, w.viewport) {
-				w.savePending(data)
-				return
+		case mesh := <-w.terrainMeshes:
+			if flight, active := w.inflight[mesh.ID]; w.inflight == nil || (active && flight.ctx.Err() == nil) {
+				w.savePending(mesh)
 			}
-			w.startUpload(data)
 		default:
+			goto results
+		}
+	}
+results:
+	for {
+		select {
+		case mesh := <-w.results:
+			flight, active := w.inflight[mesh.ID]
+			if w.inflight == nil || (active && flight.ctx.Err() == nil) {
+				w.savePending(mesh)
+			} else {
+				w.discardIncomplete(mesh.ID)
+			}
+			w.finishJob(mesh.ID, active && flight.ctx.Err() == nil)
+		default:
+			goto canceled
+		}
+	}
+canceled:
+	for {
+		select {
+		case id := <-w.canceled:
+			if _, active := w.inflight[id]; active || (w.inflight == nil && w.working && w.activeID == id) {
+				w.finishJob(id, false)
+				w.discardIncomplete(id)
+			}
+		default:
+			return
+		}
+	}
+}
+
+func (w *world) finishJob(id int64, completed bool) {
+	if w.inflight != nil {
+		if flight, active := w.inflight[id]; active {
+			if completed {
+				flight.cancel(errSectionComplete)
+			} else {
+				flight.cancel(context.Canceled)
+			}
+			delete(w.inflight, id)
+		}
+		w.working = len(w.inflight) != 0
+		return
+	}
+	w.working = false
+	if w.activeCancel != nil {
+		w.activeCancel()
+		w.activeCancel = nil
+	}
+}
+
+// Cancellation may leave an early terrain result without a vegetation result.
+// Remove that provisional cache so revisiting the section schedules a rebuild.
+func (w *world) discardIncomplete(id int64) {
+	if mesh, ok := w.pending[id]; ok && mesh.TerrainOnly {
+		delete(w.pending, id)
+	}
+	if w.upload != nil && w.upload.data.ID == id && w.upload.data.TerrainOnly {
+		w.deferUpload()
+		delete(w.pending, id)
+	}
+	if section := w.sections[id]; section != nil && section.mesh != nil && section.mesh.TerrainOnly {
+		section.deallocate()
+		delete(w.sections, id)
+		w.revision++
+	}
+	if _, ok := w.collision[id]; ok {
+		delete(w.collision, id)
+		w.collisionRevision++
+	}
+}
+
+func (w *world) receive(g *Scene) {
+	w.collect()
+	if w.upload == nil {
+		// ensure chooses pending sections in viewport priority order. Preserve
+		// immediate acceptance when receive is used without an ensure call.
+		var selected render.SectionMesh
+		found := false
+		for _, mesh := range w.pending {
+			if meshVisible(mesh, w.viewport) && (!found || mesh.ID < selected.ID) {
+				selected, found = mesh, true
+			}
+		}
+		if render.ValidViewport(w.viewport) {
+			ids, _ := prefetch(w.viewport.Y, w.viewport.Height, w.viewport.Velocity)
+			for _, id := range ids {
+				if mesh, ok := w.pending[id]; ok && meshVisible(mesh, w.viewport) {
+					selected, found = mesh, true
+					break
+				}
+			}
+		}
+		if found {
+			w.startUpload(selected)
 		}
 		return
 	}
+
 	u := w.upload
 	if u.pixels == 0 { // Manually constructed uploads use the default scale.
 		u.pixels = w.renderWidth()
@@ -137,6 +237,20 @@ func (w *world) receive(g *Scene) {
 	if u.stage == 0 {
 		g.applyStoredCuts(&u.data)
 		u.raster = render.ScaleSectionMesh(u.data, u.pixels)
+		// The same immutable terrain was already uploaded from the early
+		// result. Publish complete CPU geometry and upload only vegetation.
+		section := w.sections[u.data.ID]
+		if !u.data.TerrainOnly && section != nil && section.mesh != nil && section.mesh.TerrainOnly && section.pixels == u.pixels &&
+			section.geometry != nil && u.data.Geometry != nil && section.geometry.Topology == u.data.Geometry.Topology {
+			section.geometry = u.data.Geometry
+			source := u.data
+			section.mesh = &source
+			u.stage = 5
+		}
+	}
+	if u.data.TerrainOnly && u.stage >= 5 {
+		w.upload = nil
+		return
 	}
 	data := &u.raster
 	top := terrain.SectionWindowTop(u.data.ID)

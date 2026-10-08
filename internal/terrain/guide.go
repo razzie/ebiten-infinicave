@@ -2,6 +2,7 @@ package terrain
 
 import (
 	"math"
+	"sort"
 
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
@@ -12,6 +13,7 @@ type Guide struct {
 	BrightSign float64   // selects a continuous lit side, including around curls
 	Seed       int64     // stable random stream for streamed world guides
 	Min, Max   geom.V
+	projection *guideProjection
 }
 
 // Each spline segment is a cubic Bezier with matching tangents at its joins.
@@ -66,6 +68,7 @@ type Projection struct {
 }
 
 func (g *Guide) translateY(offset float64) {
+	g.projection = nil
 	for i := range g.Pts {
 		g.Pts[i].Y += offset
 	}
@@ -80,23 +83,7 @@ func (g *Guide) distanceBound2(p geom.V) float64 {
 }
 
 func (g *Guide) project(p geom.V) Projection {
-	best2 := math.Inf(1)
-	segment, u := 0, 0.0
-	var q geom.V
-	for i := 0; i < len(g.Pts)-1; i++ {
-		a, b := g.Pts[i], g.Pts[i+1]
-		d := b.Sub(a)
-		l2 := d.Len2()
-		if l2 == 0 {
-			continue
-		}
-		t := geom.Clamp(p.Sub(a).Dot(d)/l2, 0, 1)
-		point := a.Add(d.Mul(t))
-		distance2 := p.Sub(point).Len2()
-		if distance2 < best2 {
-			best2, segment, u, q = distance2, i, t, point
-		}
-	}
+	segment, u, q, best2 := guideNearest(g, p)
 	tangent := g.segmentTangent(segment, u)
 	normal := tangent.Perp().Mul(g.BrightSign)
 	return Projection{Q: q, T: tangent, N: normal, S: geom.Lerp(g.S[segment], g.S[segment+1], u), Signed: p.Sub(q).Dot(normal), Dist: math.Sqrt(best2)}
@@ -117,10 +104,7 @@ func (g *Guide) segmentTangent(i int, u float64) geom.V {
 
 func (g *Guide) frameAt(s float64) (q, t, n geom.V) {
 	s = geom.Clamp(s, 0, g.S[len(g.S)-1])
-	i := 0
-	for i+1 < len(g.S)-1 && g.S[i+1] < s {
-		i++
-	}
+	i := sort.Search(len(g.S)-2, func(i int) bool { return g.S[i+1] >= s })
 	a, b := g.Pts[i], g.Pts[i+1]
 	seg := g.S[i+1] - g.S[i]
 	u := 0.0

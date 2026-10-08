@@ -46,3 +46,22 @@ func TestNativeMeshScalingRetainsMaterialCoordinatesAndCropOrigin(t *testing.T) 
 		t.Fatal("native scaling mutated cached reference meshes")
 	}
 }
+
+func TestVertexTransformMatchesScalarExactly(t *testing.T) {
+	vertices := make([]ebiten.Vertex, 67)
+	for i := range vertices {
+		vertices[i] = ebiten.Vertex{DstX: float32(i*i) * -.3125, DstY: float32(i) * .17, SrcX: float32(i), SrcY: .5, ColorR: .23, ColorG: .6, ColorB: .9, ColorA: .7, Custom0: 2}
+	}
+	for _, scale := range []float64{.001, .501, 1, 1.92, 1e5} {
+		for _, offset := range []image.Point{{}, {X: 713, Y: -501}} {
+			for count := 0; count <= len(vertices); count++ {
+				got, want := append([]ebiten.Vertex(nil), vertices[:count]...), append([]ebiten.Vertex(nil), vertices[:count]...)
+				transformVertices(got, scale, offset)
+				transformVerticesScalar(want, scale, offset)
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("scale %v, offset %v, count %d changed rounding or attributes", scale, offset, count)
+				}
+			}
+		}
+	}
+}

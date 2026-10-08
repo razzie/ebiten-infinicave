@@ -1,6 +1,7 @@
 package terrain
 
 import (
+	"context"
 	"math"
 	"math/rand"
 	"sort"
@@ -257,6 +258,10 @@ func generateVines(field *VineTerrain, rng *rand.Rand) []Vine {
 }
 
 func generateVinesInBand(field *VineTerrain, rng *rand.Rand, bottom, top float64, count int) []Vine {
+	return generateVinesInBandContext(context.Background(), field, rng, bottom, top, count)
+}
+
+func generateVinesInBandContext(ctx context.Context, field *VineTerrain, rng *rand.Rand, bottom, top float64, count int) []Vine {
 	minLength, minSpan := vineMinTrunkLength, vineMinTrunkSpan
 	radiusLow, radiusHigh := .006, .009
 	forks := 5
@@ -267,6 +272,9 @@ func generateVinesInBand(field *VineTerrain, rng *rand.Rand, bottom, top float64
 	}
 	var vines []Vine
 	for rootIndex := 0; rootIndex < count; rootIndex++ {
+		if ctx.Err() != nil {
+			return nil
+		}
 		type candidate struct {
 			p     geom.V
 			score float64
@@ -302,13 +310,11 @@ func generateVinesInBand(field *VineTerrain, rng *rand.Rand, bottom, top float64
 		}
 		reachA, reachB := geom.Lerp(.560, .820, rng.Float64()), geom.Lerp(.420, .650, rng.Float64())
 		trunk, rootAt, best := Vine{}, 0, 0.0
-		var tried []geom.V
-		// Compare complete growth from several separated roots. An open root
-		// alone does not guarantee a long dark corridor in either direction.
+		var selected []candidate
 		for _, candidate := range candidates {
 			near := false
-			for _, p := range tried {
-				if p.Sub(candidate.p).Len() < .065 {
+			for _, previous := range selected {
+				if previous.p.Sub(candidate.p).Len() < .065 {
 					near = true
 					break
 				}
@@ -316,23 +322,38 @@ func generateVinesInBand(field *VineTerrain, rng *rand.Rand, bottom, top float64
 			if near {
 				continue
 			}
-			tried = append(tried, candidate.p)
-			for trial := 0; trial < 4; trial++ {
-				d := geom.Rotate(heading, float64(trial)*math.Pi/4)
-				a := growVine(field, candidate.p, d, radius, reachA, phase, curl, 0)
-				b := growVine(field, candidate.p, d.Mul(-1), radius, reachB, phase+math.Pi, -curl, 0)
-				v, joint := joinVineHalves(a, b)
-				length, span := v.extent()
-				if length < minLength || span < minSpan {
-					continue
-				}
-				score := length*.6 + span + candidate.score*.3
-				if score > best {
-					trunk, rootAt, best = v, joint, score
-				}
-			}
-			if len(tried) >= 10 {
+			selected = append(selected, candidate)
+			if len(selected) >= 10 {
 				break
+			}
+		}
+		type growthTrial struct {
+			vine  Vine
+			joint int
+			score float64
+		}
+		trials := make([]growthTrial, len(selected)*4)
+		parallelFor(len(trials), func(n int) {
+			if ctx.Err() != nil {
+				return
+			}
+			candidate, trial := selected[n/4], n%4
+			d := geom.Rotate(heading, float64(trial)*math.Pi/4)
+			a := growVine(field, candidate.p, d, radius, reachA, phase, curl, 0)
+			if ctx.Err() != nil {
+				return
+			}
+			b := growVine(field, candidate.p, d.Mul(-1), radius, reachB, phase+math.Pi, -curl, 0)
+			v, joint := joinVineHalves(a, b)
+			length, span := v.extent()
+			if length >= minLength && span >= minSpan {
+				trials[n] = growthTrial{v, joint, length*.6 + span + candidate.score*.3}
+			}
+		})
+		// Reduce in candidate/heading order, preserving the original tie-break.
+		for _, trial := range trials {
+			if trial.score > best {
+				trunk, rootAt, best = trial.vine, trial.joint, trial.score
 			}
 		}
 		if best == 0 {

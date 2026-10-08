@@ -38,8 +38,9 @@ type SectionContent = terrain.SectionContent
 //
 // Generation also loads neighboring sections for seamless padding. IDs may be
 // requested repeatedly and in any order, so return consistent content per ID.
-// Scene calls the loader on its background generation worker; synchronous
-// generation calls it on the calling goroutine. Reset can overlap an old worker,
+// Scene serializes loader calls within one world and copies returned content
+// before the next call. Synchronous generation calls it on the calling goroutine.
+// Reset can overlap an old worker,
 // so loaders sharing mutable state must be safe for concurrent calls.
 type SectionLoader = terrain.SectionLoader
 

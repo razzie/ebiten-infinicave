@@ -33,11 +33,7 @@ func scaleTriangleMesh(mesh TriangleMesh, scale float64, offset image.Point) Tri
 		return mesh
 	}
 	mesh.Vertices = append([]ebiten.Vertex(nil), mesh.Vertices...)
-	for i := range mesh.Vertices {
-		v := &mesh.Vertices[i]
-		v.DstX = float32(float64(v.DstX)*scale) + float32(offset.X)
-		v.DstY = float32(float64(v.DstY)*scale) + float32(offset.Y)
-	}
+	transformVertices(mesh.Vertices, scale, offset)
 	return mesh
 }
 
@@ -96,4 +92,12 @@ func TargetTransform(dst *ebiten.Image) RenderTransform {
 
 func horizontalFade(x float64) float64 {
 	return geom.Smoothstep(terrain.BackgroundMinX, 0, x) * (1 - geom.Smoothstep(terrain.Width, terrain.BackgroundMaxX, x))
+}
+
+func transformVerticesScalar(vertices []ebiten.Vertex, scale float64, offset image.Point) {
+	for i := range vertices {
+		v := &vertices[i]
+		v.DstX = float32(float64(v.DstX)*scale) + float32(offset.X)
+		v.DstY = float32(float64(v.DstY)*scale) + float32(offset.Y)
+	}
 }

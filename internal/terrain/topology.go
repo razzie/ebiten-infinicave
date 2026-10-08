@@ -22,6 +22,9 @@ type RockTopology struct {
 	Top         float64
 }
 
+// Neighbors returns immutable adjacency in Grid order. Callers must not modify it.
+func (t *RockTopology) Neighbors() [][]int { return t.neighbors }
+
 func newRockTopology(grid RockGrid) *RockTopology {
 	t := &RockTopology{Grid: InsetForegroundGrid(grid)}
 	t.neighbors = RockNeighbors(t.Grid)

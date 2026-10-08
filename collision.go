@@ -1,6 +1,7 @@
 package infinicave
 
 import (
+	"context"
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
@@ -37,20 +38,29 @@ func (g *Scene) CollisionGeometry(id int64) (CollisionGeometry, bool) {
 // Drain early terrain independently of mesh reception and GPU upload budgets.
 // The generation worker never invokes application code on its goroutine.
 func (w *world) receiveCollision(g *Scene) {
-	select {
-	case ready := <-w.terrain:
-		geometry := ready.geometry
-		for _, cut := range w.cuts {
-			geometry, _, _ = cut.Geometry(ready.id, geometry, g.collisionTolerance)
+	for {
+		select {
+		case ready := <-w.terrain:
+			if ready.ctx != nil && ready.ctx.Err() != nil && context.Cause(ready.ctx) != errSectionComplete {
+				continue
+			}
+			geometry := ready.geometry
+			for _, cut := range w.cuts {
+				geometry, _, _ = cut.Geometry(ready.id, geometry, g.collisionTolerance)
+			}
+			if w.collision == nil {
+				w.collision = make(map[int64]*terrain.Geometry)
+			}
+			w.collision[ready.id] = geometry
+			w.collisionRevision++
+			if g.onCollisionReady != nil {
+				g.onCollisionReady(terrain.OrientedCollision(g.orientation, geometry.Collision))
+				if g.closed || g.world != w {
+					return
+				}
+			}
+		default:
+			return
 		}
-		if w.collision == nil {
-			w.collision = make(map[int64]*terrain.Geometry)
-		}
-		w.collision[ready.id] = geometry
-		w.collisionRevision++
-		if g.onCollisionReady != nil {
-			g.onCollisionReady(terrain.OrientedCollision(g.orientation, geometry.Collision))
-		}
-	default:
 	}
 }

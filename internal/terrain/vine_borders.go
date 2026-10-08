@@ -19,9 +19,7 @@ func newVineBorders(background RockGrid) []float64 {
 // the field is only a smooth steering attraction, capped at one cell width.
 func vineBordersForEdges(graph *vineEdgeGraph, workspace *vineWorkspace) []float64 {
 	distances := workspace.take()
-	for i := range distances {
-		distances[i] = vineBorderRange
-	}
+	fillFloat64(distances, vineBorderRange)
 	const reach = 2 * vineFieldStep
 	for _, edge := range graph.edges {
 		a, b := graph.points[edge.a], graph.points[edge.b]
@@ -32,12 +30,8 @@ func vineBordersForEdges(graph *vineEdgeGraph, workspace *vineWorkspace) []float
 		y0 := max(0, int(math.Floor((min(a.Y, b.Y)-reach-GenerationMinY)/vineFieldStep)))
 		y1 := min(vineFieldHeight-1, int(math.Ceil((max(a.Y, b.Y)+reach-GenerationMinY)/vineFieldStep)))
 		for y := y0; y <= y1; y++ {
-			for x := x0; x <= x1; x++ {
-				p := geom.V{X: (float64(x) + .5) * vineFieldStep, Y: GenerationMinY + (float64(y)+.5)*vineFieldStep}
-				t := geom.Clamp(p.Sub(a).Dot(d)*inverse, 0, 1)
-				distance := p.Sub(a.Add(d.Mul(t))).Len()
-				i := y*vineFieldWidth + x
-				distances[i] = min(distances[i], distance)
+			if x0 <= x1 {
+				segmentDistanceSpan(distances[y*vineFieldWidth+x0:y*vineFieldWidth+x1+1], x0, GenerationMinY+(float64(y)+.5)*vineFieldStep, a, d, inverse, false, false)
 			}
 		}
 	}

@@ -1,6 +1,7 @@
 package terrain
 
 import (
+	"context"
 	"math"
 	"reflect"
 	"runtime"
@@ -9,6 +10,25 @@ import (
 
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
+
+func TestCanceledBuildDoesNotLoadOrDecorate(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	builder := NewSectionBuilder(42, func(int64) SectionContent { t.Fatal("canceled build loaded content"); return SectionContent{} })
+	if _, ok := builder.BuildWithContext(ctx, 0, nil); ok {
+		t.Fatal("canceled build returned a section")
+	}
+	ctx, cancel = context.WithCancel(context.Background())
+	builder = NewSectionBuilder(42, func(int64) SectionContent { return SectionContent{} })
+	published := false
+	data, ok := builder.BuildWithContext(ctx, 0, func(SectionData) { published = true; cancel() })
+	if !published || ok || len(data.Vines)+len(data.ForegroundVines)+len(data.Mushrooms) != 0 {
+		t.Fatal("cancellation after terrain did not stop decoration")
+	}
+	if len(builder.fields.free)+len(builder.frontFields.free) != 0 {
+		t.Fatal("canceled decoration allocated vine workspaces")
+	}
+}
 
 type sectionStats struct {
 	bg, fg, vines int

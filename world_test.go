@@ -2,6 +2,7 @@ package infinicave
 
 import (
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -9,6 +10,50 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/render"
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
+
+func TestWorldCancelsObsoleteGenerationAndResumes(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	var first atomic.Bool
+	w := newWorld(42, ViewClay, 0, func(int64) SectionContent {
+		if first.CompareAndSwap(false, true) {
+			close(entered)
+			<-release
+		}
+		return SectionContent{}
+	})
+	defer w.close()
+	w.request(0)
+	select {
+	case <-entered:
+	case <-time.After(20 * time.Second):
+		close(release)
+		t.Fatal("loader did not start")
+	}
+	w.prune(-100.8, .8, 0)
+	close(release)
+	select {
+	case id := <-w.canceled:
+		if id != 0 {
+			t.Fatal("wrong section was canceled")
+		}
+		w.canceled <- id
+		w.collect()
+	case <-time.After(20 * time.Second):
+		t.Fatal("obsolete generation did not stop")
+	}
+	if w.working || len(w.results)+len(w.terrain)+len(w.terrainMeshes) != 0 {
+		t.Fatal("canceled generation published geometry or remained active")
+	}
+	w.request(100)
+	select {
+	case mesh := <-w.results:
+		if mesh.ID != 100 || len(mesh.Background.Faces.Indices) == 0 {
+			t.Fatal("worker did not resume at the new viewport")
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("worker did not resume after cancellation")
+	}
+}
 
 func TestWorldWorkerPreparesAllLayers(t *testing.T) {
 	w := newWorld(42, ViewShaded, 0, nil)
@@ -86,12 +131,12 @@ func TestVisibleSectionsAtSeams(t *testing.T) {
 }
 
 func TestStreamingRequestsAndCacheStayBounded(t *testing.T) {
-	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1)}
+	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan sectionJob, 1)}
 	if w.ensure(-.800, .800, 0) {
 		t.Fatal("unloaded viewport reported ready")
 	}
-	if id := <-w.jobs; id != 0 {
-		t.Fatalf("first request is %d, want floor section", id)
+	if job := <-w.jobs; job.id != 0 {
+		t.Fatalf("first request is %d, want floor section", job.id)
 	}
 	// Repeated frames must not enqueue duplicate work while the worker is busy.
 	w.ensure(-.800, .800, 0)

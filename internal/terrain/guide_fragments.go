@@ -15,15 +15,17 @@ const (
 )
 
 type guideFragment struct {
-	poly   []geom.V
-	center geom.V
-	lo, hi geom.V
-	area   float64
-	cut    bool
+	poly    []geom.V
+	center  geom.V
+	lo, hi  geom.V
+	area    float64
+	length  float64
+	quality float64
+	cut     bool
 }
 
 func makeGuideFragment(poly []geom.V, center geom.V, cut bool) guideFragment {
-	f := guideFragment{poly: poly, center: center, area: geom.PolygonArea(poly), cut: cut,
+	f := guideFragment{poly: poly, center: center, area: geom.PolygonArea(poly), cut: cut, length: -1, quality: -1,
 		lo: geom.V{X: math.Inf(1), Y: math.Inf(1)}, hi: geom.V{X: math.Inf(-1), Y: math.Inf(-1)}}
 	for _, p := range poly {
 		f.lo.X, f.lo.Y = math.Min(f.lo.X, p.X), math.Min(f.lo.Y, p.Y)
@@ -33,16 +35,29 @@ func makeGuideFragment(poly []geom.V, center geom.V, cut bool) guideFragment {
 }
 
 func (f guideFragment) perimeter() float64 {
-	perimeter := 0.0
-	for i, p := range f.poly {
-		perimeter += f.poly[(i+1)%len(f.poly)].Sub(p).Len()
+	if f.length >= 0 {
+		return f.length
 	}
-	return perimeter
+	length := 0.0
+	for i, p := range f.poly {
+		length += f.poly[(i+1)%len(f.poly)].Sub(p).Len()
+	}
+	return length
+}
+
+func makeMergeGuideFragment(poly []geom.V, center geom.V, cut bool) guideFragment {
+	f := makeGuideFragment(poly, center, cut)
+	f.length = f.perimeter()
+	f.quality = f.compactness()
+	return f
 }
 
 // Unlike an absolute width cutoff, compactness catches large, elongated
 // fragments too, independent of their orientation or scale.
 func (f guideFragment) compactness() float64 {
+	if f.quality >= 0 {
+		return f.quality
+	}
 	perimeter := f.perimeter()
 	if perimeter == 0 {
 		return 0
@@ -70,6 +85,7 @@ func mergeGuideFragments(faces []guideFragment, guides []Guide) {
 		// Ignore roundoff from translating overlapping generation windows.
 		return math.Round(faces[order[i]].area*1e11) < math.Round(faces[order[j]].area*1e11)
 	})
+	index := newFragmentIndex(faces)
 	for changed := true; changed; {
 		changed = false
 		for _, i := range order {
@@ -83,7 +99,8 @@ func mergeGuideFragments(faces []guideFragment, guides []Guide) {
 				merged guideFragment
 			}
 			var neighbors []neighbor
-			for j, other := range faces {
+			for _, j := range index.candidates(f) {
+				other := faces[j]
 				if i == j || len(other.poly) < 3 ||
 					other.lo.X > f.hi.X+mergeTolerance || other.hi.X < f.lo.X-mergeTolerance ||
 					other.lo.Y > f.hi.Y+mergeTolerance || other.hi.Y < f.lo.Y-mergeTolerance {
@@ -92,7 +109,7 @@ func mergeGuideFragments(faces []guideFragment, guides []Guide) {
 				if shared := mergeableBorder(f.poly, other.poly, guides); shared > mergeTolerance {
 					poly := joinFaces(f.poly, other.poly)
 					if len(poly) >= 3 {
-						merged := makeGuideFragment(poly, geom.PolygonCenter(poly), true)
+						merged := makeMergeGuideFragment(poly, geom.PolygonCenter(poly), true)
 						// A thin face must become more compact. Merely choosing
 						// the best neighbor can still make it thinner, triggering
 						// repeated merges into an ever larger sprawling face.
@@ -118,7 +135,10 @@ func mergeGuideFragments(faces []guideFragment, guides []Guide) {
 			})
 			if len(neighbors) > 0 {
 				best := neighbors[0]
+				index.remove(best.index, faces[best.index])
+				index.remove(i, faces[i])
 				faces[best.index] = best.merged
+				index.add(best.index, best.merged)
 				faces[i].poly = nil
 				changed = true
 			}

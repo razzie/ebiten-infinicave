@@ -100,8 +100,8 @@ applications can use the same APIs to draw their own selection effects.
 `scene.Reset(seed)` discards cached sections and starts a new
 world with the same rendering settings, section content loader, and collision callback. Rendering does not include UI or exports.
 Call every `Scene` method on the Ebitengine game goroutine. `Close` is idempotent
-and releases shaders and cached images; an in-progress CPU generation finishes
-before its worker exits.
+and releases shaders and cached images; background generation stops at its next cancellation check
+before its workers exit.
 
 `DefaultConfig` uses texture strength 8, background blur 0.002, dynamic shadow
 opacity 0.65, shadow softness 0.008, shadow offset (0.018, 0.025), fog strength 1, 7.5 bats per minute, shaded rendering,
@@ -478,6 +478,16 @@ go run ./cmd/infinicave -seed 42 -view normals -output normals.png
 go run ./cmd/infinicave -seed 42 -view shadows -output shadows.png
 ```
 
-Relief, foreground self-shadowing, rock triangulation, outlines, and vine and mushroom meshes are prepared in the background once per cached section. Background rock, foreground rock, both vine layers, and mushrooms are polygonized concurrently, using up to `GOMAXPROCS - 1` workers (at least one) to leave CPU capacity for rendering. The game loop uploads meshes with limits on submission time, triangle indices, and draw calls per tick. Collision polygons are published before vegetation generation and mesh preparation; complete terrain uploads first, and vegetation appears when all its layers finish. Vegetation meshes are batched in draw order, and their textures are cropped to occupied bounds while retaining world-aligned grain. Vine steering uses reusable fields and linear distance sweeps; guide proposals are cached in a bounded window and rock adjacency uses spatial buckets. These caches do not affect geometry: the same seed, section, and guide inputs reproduce the same result regardless of load order or eviction. The renderer uses a shallow 2.5D surface: illumination is constant within each polygon, with foreground depth shadows averaged over the face to preserve the faceted appearance. Background blur and cast shadows use reusable GPU buffers each draw; separable Gaussian passes run at reduced resolution for large softness values.
+Relief, foreground self-shadowing, rock triangulation, outlines, and vine and mushroom meshes are prepared in the background once per cached section. Up to two sections can generate concurrently, each with its own builder and reusable buffers. Background and foreground construction, vegetation layers, and independent vine growth trials can also run concurrently. Loader calls within one world stay serialized, and returned content is copied before another call. Terrain meshes are prepared while vegetation grows, so completed terrain can appear before vegetation generation finishes. Nested generation and mesh jobs share a helper budget: the generation caller plus at most `GOMAXPROCS - 2` helpers (no helpers on one or two processors). This leaves scheduling capacity for the game loop. Geometry and draw order remain independent of worker scheduling.
+
+Collision polygons are published before vegetation generation and mesh preparation. The game loop collects CPU results during uploads, with bounded prefetching, and uploads meshes with limits on submission time, triangle indices, and draw calls per tick. Vegetation completion reuses already uploaded terrain when its geometry and resolution match. Resets, closing, and camera jumps cancel obsolete generation between stages and vine trials. Vegetation meshes are batched in draw order, and their textures are cropped to occupied bounds while retaining world-aligned grain.
+
+Vine steering uses reusable fields and linear distance sweeps. Guide proposals are cached in a bounded window; guide projections cache segment data and reject distant segment blocks. Lighting caches ray offsets and probe constants; fragment merging caches perimeter and compactness. Terrain tessellation skips primitives outside the owned band, while lighting and collision retain the padded geometry. Rock adjacency is shared with mesh preparation, and fragment merging searches spatial buckets. These caches do not affect geometry: the same seed, section, and guide inputs reproduce the same result regardless of load order or eviction. The renderer uses a shallow 2.5D surface: illumination is constant within each polygon, with foreground depth shadows averaged over the face to preserve the faceted appearance. Background blur and cast shadows use reusable GPU buffers each draw; separable Gaussian passes run at reduced resolution for large softness values.
+
+Go 1.27's experimental portable SIMD kernels cover guide projection, Perlin fade and interpolation across FBM octaves, mesh coordinate scaling, depth rasterization, vine segment distances, tone compositing, and field classification when built with `GOEXPERIMENT=simd`. Ordinary builds and CPUs using SIMD emulation use scalar implementations. Both paths retain `float64` arithmetic, operation order, and scalar tails; distance sweeps retain their sequential dependencies.
+
+```sh
+GOEXPERIMENT=simd go run ./cmd/infinicave
+```
 
 Run checks with `go test ./...` and `go vet ./...`. Ebitengine initializes the display for tests, so these also need a graphical session.

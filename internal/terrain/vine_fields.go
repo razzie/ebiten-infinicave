@@ -4,8 +4,6 @@ import (
 	"math"
 	"sort"
 	"sync"
-
-	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
 
 // Generation returns these large buffers after growth, never with a Section.
@@ -155,38 +153,26 @@ func newVineTerrainWithWorkspace(background, foreground RockGrid, onForeground b
 	defer workspace.put(tones)
 	if !onForeground {
 		field.unsupported, field.foreground, field.foregroundInside = workspace.take(), workspace.take(), workspace.take()
-		for i := range field.foreground {
-			field.foreground[i] = math.Inf(1)
-		}
+		fillFloat64(field.foreground, math.Inf(1))
 	}
 	for layer, grid := range []RockGrid{background, foreground} {
 		rasterVineSpans(grid, func(cell RockCell, first, last int) {
 			alpha := float64(cell.Color.A) / 255
 			tone := .30*float64(cell.Color.R) + .59*float64(cell.Color.G) + .11*float64(cell.Color.B)
-			for i := first; i < last; i++ {
-				if onForeground {
-					if cell.Color.A != 0 {
-						tones[i] = 36
-					}
-				} else {
-					tones[i] = geom.Lerp(tones[i], tone, alpha)
-					if layer == 1 {
-						field.foreground[i], field.foregroundInside[i] = 0, math.Inf(1)
-					}
+			if onForeground {
+				if cell.Color.A != 0 {
+					fillFloat64(tones[first:last], 36)
+				}
+			} else {
+				blendVineTone(tones[first:last], tone, alpha)
+				if layer == 1 {
+					clear(field.foreground[first:last])
+					fillFloat64(field.foregroundInside[first:last], math.Inf(1))
 				}
 			}
 		})
 	}
-	for y := 0; y < vineFieldHeight; y++ {
-		for x := 0; x < vineFieldWidth; x++ {
-			i := y*vineFieldWidth + x
-			if tones[i] > vineVoidTone && tones[i] < vineLightTone {
-				field.clearance[i] = float64(min(x+1, y+1, vineFieldWidth-x, vineFieldHeight-y)) * vineFieldStep
-			} else if !onForeground {
-				field.unsupported[i] = math.Inf(1)
-			}
-		}
-	}
+	classifyVineTones(field, tones)
 	fields := [][]float64{field.clearance}
 	if !onForeground {
 		fields = append(fields, field.unsupported, field.foreground, field.foregroundInside)

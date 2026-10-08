@@ -62,7 +62,7 @@ func resolutionTestScene(t *testing.T) *Scene {
 	}
 	g.world.close()
 	// No worker: any accidental regeneration is observable in the jobs queue.
-	g.world = &world{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1), results: make(chan render.SectionMesh, 1), done: make(chan struct{})}
+	g.world = &world{sections: make(map[int64]*worldSection), jobs: make(chan sectionJob, 1), results: make(chan render.SectionMesh, 1), done: make(chan struct{})}
 	for id := int64(0); id < 5; id++ {
 		mesh := resolutionTestMesh(id)
 		g.world.sections[id] = &worldSection{mesh: &mesh, geometry: mesh.Geometry,

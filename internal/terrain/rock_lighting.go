@@ -19,22 +19,15 @@ func rockHeight(p geom.V, noise *Perlin) float64 {
 	return -.008 + .004*noise.Noise(p.X*6, p.Y*6) + .001*noise.Noise(p.X*25+73, p.Y*25+149)
 }
 
-func shapeRockGrid(grid RockGrid, guides []Guide, noise *Perlin) {
+func shapeRockGrid(grid RockGrid, guides []Guide, noise *Perlin) [][]int {
 	if len(guides) > 0 {
 		shapeReliefGrid(grid, guides, noise, nil)
-		return
+		return nil
 	}
-	for i := range grid {
-		grid[i].Z = rockHeight(grid[i].Center, noise)
-	}
+	parallelFor(len(grid), func(i int) { grid[i].Z = rockHeight(grid[i].Center, noise) })
 	neighbors := RockNeighbors(grid)
-	for i := range grid {
-		grid[i].Normal = rockNormal(grid, i, neighbors[i])
-		if toward, ok := guideFacing(grid[i], guides); ok {
-			// The guide overrides the height slope, retaining a visible front.
-			grid[i].Normal = geom.V3{X: toward.X * 1.4, Y: toward.Y * 1.4, Z: 1}.Norm()
-		}
-	}
+	parallelFor(len(grid), func(i int) { grid[i].Normal = rockNormal(grid, i, neighbors[i]) })
+	return neighbors
 }
 
 // Match shared boundary lengths, including partial edges left by guide cuts

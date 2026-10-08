@@ -60,7 +60,7 @@ func contourRockFace(poly []geom.V, center geom.V, heightAt func(geom.V) float64
 	if inside == 0 && heightAt(center) <= rockContourHeight {
 		return nil
 	}
-	triangles := geom.Triangulate(poly)
+	var triangles [][3]int
 	fan := geom.InsidePolygon(center, poly)
 	for i, p := range poly {
 		if geom.Cross(poly[(i+1)%len(poly)].Sub(p), center.Sub(p)) < -1e-15 {
@@ -74,6 +74,9 @@ func contourRockFace(poly []geom.V, center geom.V, heightAt func(geom.V) float64
 		}
 		values = append(values, heightAt(center)-rockContourHeight)
 		poly = append(append([]geom.V(nil), poly...), center)
+	}
+	if !fan {
+		triangles = geom.Triangulate(poly)
 	}
 	var faces [][]geom.V
 	for _, tri := range triangles {
@@ -199,8 +202,17 @@ func polishRockContours(grid RockGrid, guides []Guide, heightAt func(geom.V) flo
 		rejected := make([][]key, len(grid))
 		parallelFor(len(grid), func(n int) {
 			c := grid[n]
-			poly := append([]geom.V(nil), c.Polygon...)
 			changed := false
+			for _, p := range c.Polygon {
+				if _, ok := moves[keyAt(p)]; ok {
+					changed = true
+					break
+				}
+			}
+			if !changed {
+				return
+			}
+			poly := append([]geom.V(nil), c.Polygon...)
 			for i, p := range poly {
 				if q, ok := moves[keyAt(p)]; ok {
 					poly[i], changed = q, true

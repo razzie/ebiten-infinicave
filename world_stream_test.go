@@ -116,7 +116,7 @@ func TestResizeRefreshFollowsCameraAndRetainsCutsDuringUpload(t *testing.T) {
 }
 
 func TestSectionUploadsPublishTerrainBeforeVegetation(t *testing.T) {
-	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1), results: make(chan render.SectionMesh, 1), done: make(chan struct{}), working: true}
+	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan sectionJob, 1), results: make(chan render.SectionMesh, 1), done: make(chan struct{}), working: true}
 	// Empty batches isolate the scheduler; nonempty crop bounds exercise image ownership.
 	bounds := image.Rect(10, 20, 30, 40)
 	w.results <- render.SectionMesh{ID: 0, Background: render.GridMesh{Outlines: make([]render.TriangleMesh, uploadDrawsPerTick*2+1)}, Vines: make([]render.TriangleMesh, uploadDrawsPerTick*2+1), ForegroundVines: make([]render.TriangleMesh, uploadDrawsPerTick*2+1), VinesBounds: bounds, ForegroundVinesBounds: bounds, MushroomsBounds: bounds}
@@ -182,4 +182,115 @@ func TestSectionUploadsPublishTerrainBeforeVegetation(t *testing.T) {
 		}
 	}
 	t.Fatal("section upload did not complete")
+}
+
+func TestEarlyTerrainPublicationReusesImagesForVegetation(t *testing.T) {
+	g := resolutionTestScene(t)
+	w := g.world
+	w.sections[0].deallocate()
+	delete(w.sections, 0)
+	w.terrainMeshes = make(chan render.SectionMesh, 1)
+	w.working = true
+	early := resolutionTestMesh(0)
+	early.TerrainOnly = true
+	w.terrainMeshes <- early
+	w.receive(g)
+	for tick := 0; tick < 8 && w.upload != nil; tick++ {
+		w.receive(g)
+	}
+	section := w.sections[0]
+	if section == nil || !section.vegetationPending || w.upload != nil || !w.working {
+		t.Fatal("terrain did not publish independently of unfinished generation")
+	}
+	if w.ensure(-.8, .8, 0) {
+		t.Fatal("early terrain reported vegetation ready")
+	}
+	background, foreground := section.terrain, section.foreground
+	complete := early
+	complete.TerrainOnly = false
+	geometry := *early.Geometry
+	complete.Geometry = &geometry
+	w.results <- complete
+	w.receive(g)
+	for tick := 0; tick < 8 && w.upload != nil; tick++ {
+		w.receive(g)
+	}
+	if w.upload != nil || section.vegetationPending || section.geometry != &geometry {
+		t.Fatal("complete geometry and vegetation did not publish")
+	}
+	if section.terrain != background || section.foreground != foreground {
+		t.Fatal("vegetation completion redundantly uploaded terrain")
+	}
+}
+
+func TestCollectResultsDuringUploadAndDiscardCanceledTerrain(t *testing.T) {
+	w := &world{sections: make(map[int64]*worldSection), pending: make(map[int64]render.SectionMesh),
+		results: make(chan render.SectionMesh, 1), terrainMeshes: make(chan render.SectionMesh, 1), canceled: make(chan int64, 1),
+		working: true, activeID: 3, upload: &sectionUpload{data: render.SectionMesh{ID: 1}}}
+	w.results <- render.SectionMesh{ID: 3}
+	w.collect()
+	if w.working || w.pending[3].ID != 3 || w.upload.data.ID != 1 {
+		t.Fatal("active upload blocked completed CPU work")
+	}
+	// A late early result must never replace an already collected full result.
+	w.terrainMeshes <- render.SectionMesh{ID: 3, TerrainOnly: true}
+	w.collect()
+	if w.pending[3].TerrainOnly {
+		t.Fatal("late terrain replaced a complete section")
+	}
+	w.working, w.activeID = true, 4
+	w.terrainMeshes <- render.SectionMesh{ID: 4, TerrainOnly: true}
+	w.canceled <- 4
+	w.collect()
+	if _, ok := w.pending[4]; ok || w.working {
+		t.Fatal("canceled provisional terrain survived collection")
+	}
+}
+
+func TestCarveSurvivesEarlyTerrainAndVegetationCompletion(t *testing.T) {
+	for _, afterPublication := range []bool{false, true} {
+		g := resolutionTestScene(t)
+		w := g.world
+		w.sections[0].deallocate()
+		delete(w.sections, 0)
+		original := resolutionTestMesh(0)
+		early := original
+		early.TerrainOnly = true
+		w.startUpload(early)
+		if afterPublication {
+			for tick := 0; tick < 8 && w.upload != nil; tick++ {
+				w.receive(g)
+			}
+		}
+		if _, err := g.CarveCircle(V{X: .5, Y: -.5}, .08); err != nil {
+			t.Fatal(err)
+		}
+		for tick := 0; tick < 8 && w.upload != nil; tick++ {
+			w.receive(g)
+		}
+		// The complete result still carries the worker's original immutable
+		// geometry; persisted cuts must apply before vegetation can publish.
+		w.results <- original
+		w.receive(g)
+		for tick := 0; tick < 20 && w.upload != nil; tick++ {
+			w.receive(g)
+		}
+		section := w.sections[0]
+		if section == nil || section.vegetationPending || section.geometry.Collision.Contains(V{X: .5, Y: -.5}) {
+			t.Fatal("vegetation completion lost a cut to early terrain")
+		}
+		mesh := section.mesh.Foreground.Faces
+		center := V{X: 500, Y: 1500}
+		for i := 0; i < len(mesh.Indices); i += 3 {
+			var triangle []V
+			for _, index := range mesh.Indices[i : i+3] {
+				v := mesh.Vertices[index]
+				triangle = append(triangle, V{X: float64(v.DstX), Y: float64(v.DstY)})
+			}
+			if geom.InsidePolygon(center, triangle) {
+				t.Fatal("completed rendering filled the early cut")
+			}
+		}
+		g.Close()
+	}
 }

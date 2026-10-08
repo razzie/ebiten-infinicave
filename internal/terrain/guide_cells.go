@@ -53,7 +53,7 @@ func guideRockFaces(seeds []geom.V, guides []Guide) RockGrid {
 			if len(faces) > 1 {
 				center = geom.PolygonCenter(face)
 			}
-			perSite[i] = append(perSite[i], makeGuideFragment(face, center, len(faces) > 1))
+			perSite[i] = append(perSite[i], makeMergeGuideFragment(face, center, len(faces) > 1))
 		}
 	})
 	var fragments []guideFragment

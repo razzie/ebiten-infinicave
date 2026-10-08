@@ -15,9 +15,20 @@ type rockCrevice struct {
 // Concave changes of slope and exposed depth steps get narrow contact cracks.
 // Coplanar and convex joins read through their face tones alone. Intersecting
 // collinear edge intervals handles the partial joins of clipped/merged cells.
-func rockCrevices(grid terrain.RockGrid) []rockCrevice {
+func rockCrevices(grid terrain.RockGrid, adjacency ...[][]int) []rockCrevice {
+	var neighbors [][]int
+	if len(adjacency) > 0 {
+		neighbors = adjacency[0]
+	}
+	return rockCrevicesInBand(grid, neighbors, false)
+}
+
+func rockCrevicesInBand(grid terrain.RockGrid, neighbors [][]int, owned bool) []rockCrevice {
+	if neighbors == nil {
+		neighbors = terrain.RockNeighbors(grid)
+	}
 	var seams []rockCrevice
-	for i, neighbors := range terrain.RockNeighbors(grid) {
+	for i, neighbors := range neighbors {
 		for _, j := range neighbors {
 			if j <= i {
 				continue
@@ -31,7 +42,7 @@ func rockCrevices(grid terrain.RockGrid) []rockCrevice {
 				for l, p := range other.Polygon {
 					q := other.Polygon[(l+1)%len(other.Polygon)]
 					start, end, ok := sharedRockSegment(a, b, p, q)
-					if !ok {
+					if !ok || (owned && !inTerrainBand(start, end)) {
 						continue
 					}
 					strength := rockCreviceStrength(c, other, start.Add(end).Mul(.5))

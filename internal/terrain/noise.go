@@ -64,14 +64,38 @@ func (n *Perlin) Noise(x, y float64) float64 {
 	return geom.Lerp(x1, x2, v) * 0.7071
 }
 
-func fbm(n *Perlin, p geom.V) float64 {
+func fbmBatched(n *Perlin, p geom.V) float64 {
 	p.Y += n.OffsetY
-	a, f, sum, norm := 1.0, noiseScale, 0.0, 0.0
-	for i := 0; i < 4; i++ {
-		sum += a * n.Noise(p.X*f, p.Y*f)
-		norm += a
-		a *= 0.52
+	var xs, ys, values [4]float64
+	f := float64(noiseScale)
+	for i := range xs {
+		xs[i], ys[i] = p.X*f, p.Y*f
 		f *= 2.08
 	}
+	noiseBatch(n, xs[:], ys[:], values[:])
+	a, sum, norm := 1.0, 0.0, 0.0
+	for _, value := range values {
+		sum += a * value
+		norm += a
+		a *= 0.52
+	}
 	return 0.5 + 0.5*sum/norm
+}
+
+func noiseBatchScalar(n *Perlin, xs, ys, dst []float64) {
+	for i := range dst {
+		dst[i] = n.Noise(xs[i], ys[i])
+	}
+}
+
+func fbmScalar(n *Perlin, p geom.V) float64 {
+	p.Y += n.OffsetY
+	a, f, sum, norm := 1.0, float64(noiseScale), 0.0, 0.0
+	for range 4 {
+		sum += a * n.Noise(p.X*f, p.Y*f)
+		norm += a
+		a *= .52
+		f *= 2.08
+	}
+	return .5 + .5*sum/norm
 }

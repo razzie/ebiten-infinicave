@@ -23,7 +23,7 @@ func appendRockQuad(vertices []ebiten.Vertex, indices []uint32, points [4]geom.V
 
 // A shallow oblique view exposes the drop below a silhouette. Draw walls
 // before the top faces; their inward portions are naturally hidden by rock.
-func appendRockWalls(vertices []ebiten.Vertex, indices []uint32, grid terrain.RockGrid, edges []terrain.RockEdge, viewMode View) ([]ebiten.Vertex, []uint32) {
+func appendRockWalls(vertices []ebiten.Vertex, indices []uint32, grid terrain.RockGrid, edges []terrain.RockEdge, viewMode View, owned ...bool) ([]ebiten.Vertex, []uint32) {
 	if len(grid) == 0 || !grid[0].Raised {
 		return vertices, indices
 	}
@@ -37,6 +37,9 @@ func appendRockWalls(vertices []ebiten.Vertex, indices []uint32, grid terrain.Ro
 		za, zb := math.Max(0, terrain.RockDepthAt(c, edge.A)+.008), math.Max(0, terrain.RockDepthAt(c, edge.B)+.008)
 		a := edge.A.Add(view.Mul(za))
 		b := edge.B.Add(view.Mul(zb))
+		if len(owned) > 0 && owned[0] && !inTerrainBand(edge.A, edge.B, b, a) {
+			continue
+		}
 		normal := (geom.V3{X: outward.X, Y: outward.Y, Z: .1}).Norm()
 		clr := terrain.RockSurfaceColor(normal, c.Shadow*.65, c.Ambient*.55, terrain.RockOrientation(c))
 		clr = rockViewColor(terrain.RockCell{Color: clr, Raised: true}, viewMode)
@@ -97,7 +100,7 @@ func rockMaterialColor(c color.NRGBA, raised bool) color.NRGBA {
 
 // A restrained bevel belongs only to an exposed silhouette. Internal cell
 // edges have neither a raised rim nor a lighting seam from triangulation.
-func appendRockBevels(vertices []ebiten.Vertex, indices []uint32, grid terrain.RockGrid, edges []terrain.RockEdge, view View) ([]ebiten.Vertex, []uint32) {
+func appendRockBevels(vertices []ebiten.Vertex, indices []uint32, grid terrain.RockGrid, edges []terrain.RockEdge, view View, owned ...bool) ([]ebiten.Vertex, []uint32) {
 	for _, edge := range edges {
 		c := grid[edge.Cell]
 		inward := edge.B.Sub(edge.A).Perp().Norm()
@@ -112,6 +115,9 @@ func appendRockBevels(vertices []ebiten.Vertex, indices []uint32, grid terrain.R
 			width = math.Min((.00065+.00115*chip)*(.6+.4*facing), edge.B.Sub(edge.A).Len()*.1)
 		}
 		a, b := edge.A.Add(inward.Mul(width)), edge.B.Add(inward.Mul(width))
+		if len(owned) > 0 && owned[0] && !inTerrainBand(edge.A, edge.B, b, a) {
+			continue
+		}
 		if !geom.InsidePolygon(geom.LerpVector(a, b, .5), c.Polygon) {
 			continue
 		}

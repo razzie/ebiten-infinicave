@@ -2,50 +2,14 @@ package terrain
 
 import (
 	"math"
-	"runtime"
 	"sort"
-	"sync"
 
 	"github.com/razzie/ebiten-infinicave/internal/geom"
+	"github.com/razzie/ebiten-infinicave/internal/parallel"
 )
 
-// parallelFor runs fn over [0,n) in contiguous chunks. fn must only write
-// state owned by its index so results never depend on scheduling.
-func parallelFor(n int, fn func(i int)) {
-	// Leave a core for the game loop so generation cannot stall rendering.
-	workers := min(max(1, runtime.GOMAXPROCS(0)-1), n)
-	if workers <= 1 {
-		for i := 0; i < n; i++ {
-			fn(i)
-		}
-		return
-	}
-	// Small jobs (notably the four distance fields) must not all land in
-	// one eight-item chunk. Keep larger loops amortized over several items.
-	chunk := min(8, max(1, n/(workers*4)))
-	var next sync.Mutex
-	start := 0
-	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				next.Lock()
-				lo := start
-				start += chunk
-				next.Unlock()
-				if lo >= n {
-					return
-				}
-				for i := lo; i < min(lo+chunk, n); i++ {
-					fn(i)
-				}
-			}
-		}()
-	}
-	wg.Wait()
-}
+// parallelFor shares the terrain and rendering helper budget.
+func parallelFor(n int, fn func(i int)) { parallel.For(n, fn) }
 
 type siteGrid struct {
 	pts        []geom.V

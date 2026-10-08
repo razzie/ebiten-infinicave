@@ -91,7 +91,7 @@ func (g *Scene) redrawCarvedSection(section *worldSection) {
 	if section.foreground == nil { // CPU-only geometry consumers/tests
 		return
 	}
-	mesh := render.PrepareGridWithTopology(nil, g.view, section.geometry.Topology)
+	mesh := render.PrepareOwnedGridWithTopology(nil, g.view, section.geometry.Topology)
 	if section.mesh != nil {
 		section.mesh.Foreground = mesh
 		section.mesh.Geometry = section.geometry
@@ -124,7 +124,7 @@ func (g *Scene) applyStoredCuts(mesh *render.SectionMesh) {
 		plantsChanged = plantsChanged || plantsEdited
 	}
 	if changed {
-		mesh.Foreground = render.PrepareGridWithTopology(nil, g.view, mesh.Geometry.Topology)
+		mesh.Foreground = render.PrepareOwnedGridWithTopology(nil, g.view, mesh.Geometry.Topology)
 	}
 	if plantsChanged {
 		g.prepareCarvedVegetation(mesh)
@@ -152,7 +152,7 @@ func (g *Scene) carveUpload(cut terrain.RockCut) {
 	}()
 	u.data.Geometry = geometry
 	if changed {
-		u.data.Foreground = render.PrepareGridWithTopology(nil, g.view, geometry.Topology)
+		u.data.Foreground = render.PrepareOwnedGridWithTopology(nil, g.view, geometry.Topology)
 	}
 	if plantsChanged {
 		g.prepareCarvedVegetation(&u.data)

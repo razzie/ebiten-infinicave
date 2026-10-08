@@ -1,11 +1,16 @@
 package infinicave
 
 import (
+	"context"
+	"errors"
 	"image"
 	"math"
+	"runtime"
+	"slices"
 	"sync"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/razzie/ebiten-infinicave/internal/parallel"
 	"github.com/razzie/ebiten-infinicave/internal/render"
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
@@ -21,10 +26,18 @@ type worldSection struct {
 }
 
 type world struct {
-	sections map[int64]*worldSection
-	jobs     chan int64
-	results  chan render.SectionMesh
-	terrain  chan sectionTerrain
+	sections      map[int64]*worldSection
+	jobs          chan sectionJob
+	results       chan render.SectionMesh
+	terrain       chan sectionTerrain
+	terrainMeshes chan render.SectionMesh
+	canceled      chan int64
+	ctx           context.Context
+	cancel        context.CancelFunc
+	activeCancel  context.CancelFunc
+	activeID      int64
+	inflight      map[int64]sectionFlight
+	maxJobs       int
 	// Early collision topology is retained until terrain images publish.
 	collision         map[int64]*terrain.Geometry
 	done              chan struct{}
@@ -41,53 +54,107 @@ type world struct {
 	viewport          Viewport
 }
 
+type sectionJob struct {
+	id  int64
+	ctx context.Context
+}
+
+var errSectionComplete = errors.New("section generation completed")
+
+type sectionFlight struct {
+	ctx    context.Context
+	cancel context.CancelCauseFunc
+}
+
 type sectionTerrain struct {
 	id       int64
 	geometry *terrain.Geometry
+	ctx      context.Context
 }
 
 func newWorld(seed int64, view View, tolerance float64, loadSection SectionLoader, orientation ...Orientation) *world {
-	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan int64, 1), results: make(chan render.SectionMesh, 1), terrain: make(chan sectionTerrain, 1), done: make(chan struct{})}
-	go func() {
-		builder := terrain.NewSectionBuilder(seed, loadSection, orientation...)
-		for {
-			select {
-			case <-w.done:
-				return
-			case id := <-w.jobs:
-				var geometry *terrain.Geometry
-				data := builder.BuildWithTerrain(id, func(data terrain.SectionData) {
-					geometry = terrain.PrepareTerrainGeometry(data, tolerance)
-					select {
-					case <-w.done:
-					case w.terrain <- sectionTerrain{id: id, geometry: geometry}:
-					}
-				})
-				select {
-				case <-w.done:
-					return
-				default:
-				}
-				mesh := render.PrepareSection(data, view)
-				// The early geometry is already owned by the game loop. Add vegetation
-				// to a separate value without mutating its published topology.
-				complete := *geometry
-				complete.Vegetation = terrain.SectionVegetation(data)
-				mesh.Geometry = &complete
-				render.FinishSectionMesh(&mesh)
-				select {
-				case <-w.done:
-					return
-				case w.results <- mesh:
-				}
+	limit := min(2, max(1, runtime.GOMAXPROCS(0)-1))
+	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan sectionJob, limit),
+		results: make(chan render.SectionMesh, limit), terrain: make(chan sectionTerrain, limit),
+		terrainMeshes: make(chan render.SectionMesh, limit), canceled: make(chan int64, limit),
+		done: make(chan struct{}), inflight: make(map[int64]sectionFlight), maxJobs: limit}
+	w.ctx, w.cancel = context.WithCancel(context.Background())
+	// Keep application loader calls serialized within this world, even though
+	// separate builders can generate their sections concurrently.
+	var loaderMu sync.Mutex
+	loader := loadSection
+	if loader != nil {
+		loadSection = func(id int64) SectionContent {
+			loaderMu.Lock()
+			defer loaderMu.Unlock()
+			content := loader(id)
+			content.Guides = slices.Clone(content.Guides)
+			for i := range content.Guides {
+				content.Guides[i].Pts = slices.Clone(content.Guides[i].Pts)
 			}
+			content.Holes = slices.Clone(content.Holes)
+			return content
 		}
-	}()
+	}
+	build := func(builder *terrain.Builder, job sectionJob) {
+		ctx, id := job.ctx, job.id
+		var geometry *terrain.Geometry
+		var terrainMesh render.SectionMesh
+		joinTerrain := func() {}
+		data, ok := builder.BuildWithContext(ctx, id, func(data terrain.SectionData) {
+			geometry = terrain.PrepareTerrainGeometry(data, tolerance)
+			select {
+			case <-ctx.Done():
+				return
+			case w.terrain <- sectionTerrain{id: id, geometry: geometry, ctx: ctx}:
+			}
+			joinTerrain = parallel.Start(func() {
+				if ctx.Err() != nil {
+					return
+				}
+				terrainMesh = render.PrepareTerrain(data, view)
+				terrainMesh.Geometry = geometry
+				select {
+				case <-ctx.Done():
+				case w.terrainMeshes <- terrainMesh:
+				}
+			})
+		})
+		if ok {
+			mesh := render.PrepareVegetation(data, view)
+			joinTerrain()
+			mesh.Background, mesh.Foreground = terrainMesh.Background, terrainMesh.Foreground
+			complete := *geometry
+			complete.Vegetation = terrain.SectionVegetation(data)
+			mesh.Geometry = &complete
+			select {
+			case <-ctx.Done():
+			case w.results <- mesh:
+				return
+			}
+		} else {
+			joinTerrain()
+		}
+		select {
+		case <-w.done:
+			return
+		case w.canceled <- id:
+		}
+	}
+	go w.runSectionJobs(func() *terrain.Builder {
+		return terrain.NewSectionBuilder(seed, loadSection, orientation...)
+	}, build)
+
 	return w
 }
 
 func (w *world) close() {
-	w.closing.Do(func() { close(w.done) })
+	w.closing.Do(func() {
+		if w.cancel != nil {
+			w.cancel()
+		}
+		close(w.done)
+	})
 	if w.upload != nil && w.upload.img != nil {
 		w.upload.img.Deallocate()
 	}
@@ -123,9 +190,43 @@ func visibleSections(y float64, height float64) (low, high int64) {
 }
 
 func (w *world) request(id int64) {
-	if !w.working {
+	if w.inflight != nil {
+		if _, exists := w.inflight[id]; exists {
+			return
+		}
+		if len(w.inflight) >= w.maxJobs {
+			return
+		}
+		// Early meshes of active jobs don't consume another result slot.
+		outstanding := len(w.inflight)
+		for pendingID := range w.pending {
+			if _, active := w.inflight[pendingID]; !active {
+				outstanding++
+			}
+		}
+		if outstanding >= 2 {
+			return
+		}
+		ctx, cancel := context.WithCancelCause(w.ctx)
+		select {
+		case w.jobs <- sectionJob{id: id, ctx: ctx}:
+			w.inflight[id] = sectionFlight{ctx: ctx, cancel: cancel}
+			w.working = true
+		default:
+			cancel(context.Canceled)
+		}
+		return
+	}
+	if !w.working && len(w.pending) < 2 {
 		w.working = true
-		w.jobs <- id
+		w.activeID = id
+		ctx := context.Background()
+		if w.ctx != nil {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithCancel(w.ctx)
+			w.activeCancel = cancel
+		}
+		w.jobs <- sectionJob{id: id, ctx: ctx}
 	}
 }
 
@@ -153,7 +254,7 @@ func prefetch(y float64, height float64, velocity float64) (ids []int64, require
 	return
 }
 
-// ensure never blocks: it queues the most useful missing section and reports
+// ensure never blocks: it queues missing sections in viewport priority and reports
 // whether everything the viewport needs is already built.
 func (w *world) ensure(y float64, height float64, velocity float64) bool {
 	ids, required := prefetch(y, height, velocity)
@@ -198,7 +299,9 @@ func (w *world) ensure(y float64, height float64, velocity float64) bool {
 		if i < required {
 			ready = false
 		}
-		break
+		if w.inflight == nil {
+			break
+		}
 	}
 	return ready
 }
@@ -211,6 +314,15 @@ func (w *world) prune(y float64, height float64, velocity float64) {
 	for _, id := range ids {
 		keep[id] = true
 	}
+	for id, flight := range w.inflight {
+		if !keep[id] {
+			flight.cancel(context.Canceled)
+		}
+	}
+	if w.working && w.activeCancel != nil && !keep[w.activeID] {
+		w.activeCancel()
+	}
+
 	for id, section := range w.sections {
 		if w.upload != nil && w.upload.data.ID == id {
 			continue

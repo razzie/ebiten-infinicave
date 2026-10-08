@@ -173,6 +173,7 @@ func OrientedSection(o Orientation, s Section) Section {
 	}
 	for i := range s.Guides {
 		g := &s.Guides[i]
+		g.projection = nil
 		MapPoints(g.Pts, o.local)
 		g.Min, g.Max = geom.PolygonBounds(g.Pts)
 	}

@@ -1,17 +1,22 @@
 package terrain
 
 import (
+	"context"
 	"image/color"
 	"math/rand"
 
 	"github.com/razzie/ebiten-infinicave/internal/geom"
+	"github.com/razzie/ebiten-infinicave/internal/parallel"
 )
 
+// Builder retains reusable generation workspaces and a bounded guide cache.
+// A builder has one caller at a time; concurrent sections use separate builders.
 type Builder struct {
 	seed        int64
 	loadSection SectionLoader
 	guides      *guideCache
 	fields      vineWorkspace
+	frontFields vineWorkspace
 }
 
 func NewSectionBuilder(seed int64, loadSection SectionLoader, orientation ...Orientation) *Builder {
@@ -25,7 +30,15 @@ func (b *Builder) Build(id int64) SectionData {
 // onTerrain runs before decoration, once foreground topology includes all
 // authored holes. Published terrain is read-only for the rest of the build.
 func (b *Builder) BuildWithTerrain(id int64, onTerrain func(SectionData)) SectionData {
-	return buildSectionCached(b.seed, id, b.loadSection, b.guides, &b.fields, onTerrain)
+	data, _ := b.BuildWithContext(context.Background(), id, onTerrain)
+	return data
+}
+
+// BuildWithContext checks cancellation between generation stages. A canceled
+// build returns no section and never publishes partial vegetation.
+func (b *Builder) BuildWithContext(ctx context.Context, id int64, onTerrain func(SectionData)) (SectionData, bool) {
+	data := buildSectionCached(ctx, b.seed, id, b.loadSection, b.guides, &b.fields, &b.frontFields, onTerrain)
+	return data, ctx.Err() == nil
 }
 
 // Each section is generated with a full section of padding on either side.
@@ -42,13 +55,17 @@ type SectionData struct {
 	Holes                  []Hole
 	vegetationCuts         []RockCut
 	ForegroundTopology     *RockTopology
+	BackgroundNeighbors    [][]int
 }
 
 func BuildSection(seed, id int64) SectionData {
 	return NewSectionBuilder(seed, nil).Build(id)
 }
 
-func buildSectionCached(seed, id int64, loadSection SectionLoader, guideCache *guideCache, fields *vineWorkspace, onTerrain func(SectionData)) SectionData {
+func buildSectionCached(ctx context.Context, seed, id int64, loadSection SectionLoader, guideCache *guideCache, fields, frontFields *vineWorkspace, onTerrain func(SectionData)) SectionData {
+	if ctx.Err() != nil {
+		return SectionData{}
+	}
 	orientation := guideCache.orientation
 	top := SectionTop(id)
 	backgroundNoise := NewPerlin(rand.New(rand.NewSource(seed ^ 0x62617365)))
@@ -63,20 +80,55 @@ func buildSectionCached(seed, id int64, loadSection SectionLoader, guideCache *g
 	} else {
 		guides = guideCache.window(id)
 	}
-	backgroundSeeds := worldSeedsInRange(seed^0x62617365, top, backgroundNoise, BackgroundMinX, BackgroundMaxX)
+	if ctx.Err() != nil {
+		return SectionData{}
+	}
+	for i := range guides {
+		guides[i].prepareProjection()
+	}
+	var background RockGrid
+	var backgroundNeighbors [][]int
+	joinBackground := parallel.Start(func() {
+		seeds := worldSeedsInRange(seed^0x62617365, top, backgroundNoise, BackgroundMinX, BackgroundMaxX)
+		if ctx.Err() != nil {
+			return
+		}
+		background = newRockGridInRange(seeds, func(geom.V) color.NRGBA { return color.NRGBA{A: 255} }, BackgroundMinX, BackgroundMaxX)
+		if ctx.Err() != nil {
+			return
+		}
+		backgroundNeighbors = shapeRockGrid(background, nil, backgroundNoise)
+	})
 	seeds := artisticRockSeeds(worldSeeds(seed, top, noise), guides, seed, top)
+	if ctx.Err() != nil {
+		joinBackground()
+		return SectionData{}
+	}
 	branches := newBranchField(generateBranches(guides, noise, rand.New(rand.NewSource(seed))))
-	background := newRockGridInRange(backgroundSeeds, func(geom.V) color.NRGBA { return color.NRGBA{A: 255} }, BackgroundMinX, BackgroundMaxX)
 	foreground := guideRockFaces(seeds, guides)
-	shapeRockGrid(background, nil, backgroundNoise)
+	if ctx.Err() != nil {
+		joinBackground()
+		return SectionData{}
+	}
 	shapeReliefGrid(foreground, guides, noise, branches)
-	foreground = contourRockGrid(foreground, func(p geom.V) float64 {
-		return reliefHeight(p, guides, noise, branches)
-	})
-	polishRockContours(foreground, guides, func(p geom.V) float64 {
-		return reliefHeight(p, guides, noise, branches)
-	})
+	if ctx.Err() != nil {
+		joinBackground()
+		return SectionData{}
+	}
+	foreground = contourRockGrid(foreground, func(p geom.V) float64 { return reliefHeight(p, guides, noise, branches) })
+	if ctx.Err() != nil {
+		joinBackground()
+		return SectionData{}
+	}
+	polishRockContours(foreground, guides, func(p geom.V) float64 { return reliefHeight(p, guides, noise, branches) })
+	joinBackground()
+	if ctx.Err() != nil {
+		return SectionData{}
+	}
 	shadeRockGrids(background, foreground, backgroundNoise, orientation)
+	if ctx.Err() != nil {
+		return SectionData{}
+	}
 	topology := newRockTopology(foreground)
 	vegetationGrid := topology.Grid
 	// Retain the terrain after each cut so vegetation keeps the same sequential
@@ -87,6 +139,9 @@ func buildSectionCached(seed, id int64, loadSection SectionLoader, guideCache *g
 	}
 	var cuts []cutStage
 	for _, hole := range holes {
+		if ctx.Err() != nil {
+			return SectionData{}
+		}
 		cut, err := CutFromHole(TranslateHoleY(hole, top))
 		if err != nil {
 			continue
@@ -98,19 +153,42 @@ func buildSectionCached(seed, id int64, loadSection SectionLoader, guideCache *g
 		}
 		cuts = append(cuts, cutStage{cut, topology.Grid})
 	}
-	data := SectionData{Orientation: orientation, ID: id, Background: background, Foreground: foreground, Guides: guides, Holes: holes, ForegroundTopology: topology}
+	data := SectionData{Orientation: orientation, ID: id, Background: background, Foreground: foreground, Guides: guides, Holes: holes, ForegroundTopology: topology, BackgroundNeighbors: backgroundNeighbors}
 	if len(topology.Cuts) > 0 {
 		data.Foreground = topology.Grid
 	}
 	if onTerrain != nil {
 		onTerrain(data)
 	}
-	mushrooms := MushroomsForGuides(guides, vegetationGrid, orientation)
-	field := newVineTerrainWithWorkspace(background, foreground, false, fields)
-	vines := generateVinesInBand(field, rand.New(rand.NewSource(SectionSeed(seed^0x76696e6573, id))), 0, SectionHeight, 5)
-	field.release()
-	foregroundVines := generateForegroundVinesWithWorkspace(foreground, guides, rand.New(rand.NewSource(SectionSeed(seed^0x73757266616365, id))), fields)
-	plants := Vegetation{Vines: vines, ForegroundVines: foregroundVines, Mushrooms: mushrooms}
+	if ctx.Err() != nil {
+		return SectionData{}
+	}
+	var plants Vegetation
+	parallel.Run(
+		func() {
+			if ctx.Err() == nil {
+				plants.Mushrooms = MushroomsForGuides(guides, vegetationGrid, orientation)
+			}
+		},
+		func() {
+			if ctx.Err() != nil {
+				return
+			}
+			field := newVineTerrainWithWorkspace(background, foreground, false, fields)
+			defer field.release()
+			if ctx.Err() == nil {
+				plants.Vines = generateVinesInBandContext(ctx, field, rand.New(rand.NewSource(SectionSeed(seed^0x76696e6573, id))), 0, SectionHeight, 5)
+			}
+		},
+		func() {
+			if ctx.Err() == nil {
+				plants.ForegroundVines = generateForegroundVinesContext(ctx, foreground, guides, rand.New(rand.NewSource(SectionSeed(seed^0x73757266616365, id))), frontFields)
+			}
+		},
+	)
+	if ctx.Err() != nil {
+		return SectionData{}
+	}
 	for _, stage := range cuts {
 		plants, _ = stage.cut.vegetation(plants, stage.grid, top)
 	}
