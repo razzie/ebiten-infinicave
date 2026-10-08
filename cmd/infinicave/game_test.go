@@ -17,7 +17,7 @@ func TestResizeUpdatePreservesSeedAndCarvingStatus(t *testing.T) {
 	g := &Game{scene: scene, seed: config.Seed}
 	g.Layout(1000, 800)
 	g.carving = carveGesture{active: true}
-	g.carveStatus = "previous cut"
+	g.setCarveStatus("previous cut")
 	g.Layout(500, 400)
 	if err := g.Update(); err != nil {
 		t.Fatal(err)
@@ -26,7 +26,7 @@ func TestResizeUpdatePreservesSeedAndCarvingStatus(t *testing.T) {
 		t.Fatal("resize must refresh rendering with the current seed and retain carving status")
 	}
 	// Further ticks at the same size must not reset fresh gesture/status state.
-	g.carveStatus = "new cut"
+	g.setCarveStatus("new cut")
 	g.Layout(500, 400)
 	if err := g.Update(); err != nil {
 		t.Fatal(err)

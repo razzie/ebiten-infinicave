@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"image/color"
+	"math"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
@@ -11,34 +12,48 @@ import (
 	infinicave "github.com/razzie/ebiten-infinicave"
 )
 
-const drillWidth = .02
+const (
+	drillWidth         = .02
+	blastStartRadius   = .012
+	blastLockRadius    = .02
+	blastLockSeconds   = .2
+	blastGrowthRate    = math.Ln2 / 2 // Growth speed doubles every two seconds.
+	blastInitialGrowth = .02          // Scene units per second at the start.
+	blastGrowthOffset  = blastInitialGrowth/blastGrowthRate - blastStartRadius
+	drillDragPixels    = 8
+	carveStatusSeconds = 2
+)
 
 type carveGesture struct {
 	active, segment           bool
 	originCursor, origin, end infinicave.V
 	radius                    float64
+	heldSeconds               float64
 }
 
-// Cursor movement latches segment mode, even if the cursor returns to its
-// original pixel. Camera motion alone does not turn a blast into a segment.
+// A drag beyond the cursor dead zone latches segment mode before the blast reaches
+// its lock radius or hold duration, even if the cursor returns to its original
+// pixel. Camera motion alone does not turn a blast into a segment.
 func (c *carveGesture) advance(cursor, world infinicave.V, pressed, released, cancel bool, seconds float64) bool {
 	if cancel {
 		*c = carveGesture{}
 		return false
 	}
 	if pressed {
-		*c = carveGesture{active: true, originCursor: cursor, origin: world, end: world, radius: .012}
+		*c = carveGesture{active: true, originCursor: cursor, origin: world, end: world, radius: blastStartRadius}
 	}
 	if !c.active {
 		return false
 	}
-	if cursor != c.originCursor {
+	if cursor.Sub(c.originCursor).Len2() >= drillDragPixels*drillDragPixels &&
+		c.radius < blastLockRadius && c.heldSeconds < blastLockSeconds {
 		c.segment = true
 	}
 	if c.segment {
 		c.end = world
 	} else {
-		c.radius += .04 * seconds
+		c.radius += (c.radius + blastGrowthOffset) * math.Expm1(blastGrowthRate*seconds)
+		c.heldSeconds += seconds
 	}
 	if released {
 		c.active = false
@@ -53,9 +68,24 @@ func viewerWorldPoint(cursor infinicave.V, cameraY float64, screenWidth int) inf
 		Add(infinicave.V{Y: viewerCameraY(cameraY, screenWidth)})
 }
 
+func (g *Game) setCarveStatus(status string) {
+	g.carveStatus = status
+	g.carveStatusRemaining = 0
+	if status != "" {
+		g.carveStatusRemaining = carveStatusSeconds
+	}
+}
+
 func (g *Game) updateCarving() {
 	if g.output != "" {
 		return
+	}
+	seconds := 1 / float64(ebiten.TPS())
+	if g.carveStatusRemaining > 0 {
+		g.carveStatusRemaining = max(0, g.carveStatusRemaining-seconds)
+		if g.carveStatusRemaining == 0 {
+			g.setCarveStatus("")
+		}
 	}
 	x, y := ebiten.CursorPositionF()
 	cursor := infinicave.V{X: x, Y: y}
@@ -63,9 +93,9 @@ func (g *Game) updateCarving() {
 	wasActive := g.carving.active
 	commit := g.carving.advance(cursor, g.worldPoint(cursor),
 		inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft),
-		inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft), cancel, 1/float64(ebiten.TPS()))
+		inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft), cancel, seconds)
 	if cancel && wasActive {
-		g.carveStatus = "Cut cancelled"
+		g.setCarveStatus("Cut cancelled")
 	}
 	if !commit {
 		return
@@ -74,7 +104,7 @@ func (g *Game) updateCarving() {
 	var err error
 	if g.carving.segment {
 		if g.carving.origin == g.carving.end {
-			g.carveStatus = "Cut has no length"
+			g.setCarveStatus("Cut has no length")
 			return
 		}
 		result, err = g.scene.CarveSegment(g.carving.origin, g.carving.end, drillWidth)
@@ -82,7 +112,7 @@ func (g *Game) updateCarving() {
 		result, err = g.scene.CarveCircle(g.carving.origin, g.carving.radius)
 	}
 	if err != nil {
-		g.carveStatus = err.Error()
+		g.setCarveStatus(err.Error())
 		return
 	}
 	splits, destroyed := 0, 0
@@ -93,18 +123,19 @@ func (g *Game) updateCarving() {
 			destroyed++
 		}
 	}
-	g.carveStatus = fmt.Sprintf("Cut: %d formations affected, %d split, %d destroyed", len(result.Changes), splits, destroyed)
+	status := fmt.Sprintf("Cut: %d formations affected, %d split, %d destroyed", len(result.Changes), splits, destroyed)
 	if !result.Complete {
-		g.carveStatus += " (unloaded terrain: partial result)"
+		status += " (unloaded terrain: partial result)"
 	}
+	g.setCarveStatus(status)
 }
 
 func (g *Game) drawCarving(screen *ebiten.Image) {
-	text := "LMB: hold for blast / drag for drill; release to carve | RMB: cancel"
+	height := screen.Bounds().Dy()
+	ebitenutil.DebugPrintAt(screen, "LMB: hold for blast / drag for drill; release to carve | RMB: cancel", 8, height-20)
 	if g.carveStatus != "" {
-		text += "\n" + g.carveStatus
+		ebitenutil.DebugPrintAt(screen, g.carveStatus, 8, height-36)
 	}
-	ebitenutil.DebugPrintAt(screen, text, 8, screen.Bounds().Dy()-36)
 	c := g.carving
 	if !c.active {
 		return

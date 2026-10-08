@@ -31,6 +31,8 @@ type Game struct {
 	screenWidth  int
 	screenHeight int
 	regenerate   bool
+
+	carveStatusRemaining float64
 }
 
 func (g *Game) viewport() infinicave.Viewport {
@@ -59,7 +61,7 @@ func (g *Game) Update() error {
 	if g.regenerate {
 		g.scene.Reset(g.seed)
 		g.carving = carveGesture{}
-		g.carveStatus = ""
+		g.setCarveStatus("")
 		g.regenerate = false
 	}
 	g.scene.SetRenderWidth(g.renderPixels())

@@ -451,14 +451,22 @@ go run ./cmd/infinicave -mode landscape -seed 42
   rightward, and horizontal trackpad gestures follow the horizontal direction.
 - Page Up / Page Down: move by most of a viewport.
 - Home / End: return to the starting bottom edge.
-- Left mouse: press and hold to grow a blast; move the cursor to select a drill
-  rectangle from the initial world point to the current cursor. Release to carve.
+- Left mouse: press and hold to grow a blast; drag at least 8 pixels from the
+  initial cursor position within the first 0.2 seconds to select a drill rectangle
+  from the initial world point to the current cursor. After that hold duration,
+  or once the radius reaches 0.02 scene units, blasts stay circular even when the
+  cursor moves. Release to carve.
 - Right mouse: cancel the current action, including while left remains held.
 - R: generate a new world while keeping the current position; clears runtime cuts.
 
 A warm outline previews the cut while held; terrain changes only on release.
+The blast starts at a radius of 0.012 scene units, growing initially at 0.02 scene
+units per second. Its growth speed increases exponentially, doubling every two
+seconds.
 The drill is 0.02 scene units wide. The status text reports affected, split, and
-destroyed formations, marking partial reports when terrain is unloaded.
+destroyed formations, marking partial reports when terrain is unloaded. Carving
+messages appear above the controls and disappear after two seconds. The controls
+stay on the bottom line.
 
 The viewer defaults to `-bats-per-minute 7.5`; use `-bats-per-minute 0` to disable
 them or set another rate to change their frequency. The viewer disables bats for PNG exports.
