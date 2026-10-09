@@ -102,6 +102,10 @@ func (g *Game) updateCamera() {
 	if g.mode == infinicave.Horizontal && wheelX != 0 {
 		wheel = -wheelX
 	}
+	// Reserve wheel input for carving size, including the initial press tick.
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) || g.carving.active {
+		wheel = 0
+	}
 	// An impulse of d*(1-friction) coasts about d scene units in total.
 	const gain = 1 - cameraFriction
 	impulse := -wheel * .048 * gain

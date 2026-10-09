@@ -455,7 +455,16 @@ go run ./cmd/infinicave -mode landscape -seed 42
   initial cursor position within the first 0.2 seconds to select a drill rectangle
   from the initial world point to the current cursor. After that hold duration,
   or once the radius reaches 0.02 scene units, blasts stay circular even when the
-  cursor moves. Release to carve.
+  cursor moves. After the 0.2-second hold, the circle follows the mouse.
+  Release to carve.
+- Mouse wheel while holding a blast: scroll up to enlarge the radius by 10% per
+  notch; scroll down to shrink it by the reverse factor and stop automatic
+  growth for the rest of the gesture. Further scrolling only resizes the circle
+  manually; a new gesture starts automatic growth again.
+  The minimum radius is 0.001 scene units.
+- Mouse wheel while holding a drill: scroll up to thicken it by 10% per notch;
+  scroll down to thin it by the reverse factor, down to 0.002 scene units.
+  Wheel input does not scroll the camera while holding either carving shape.
 - Right mouse: cancel the current action, including while left remains held.
 - R: generate a new world while keeping the current position; clears runtime cuts.
 
@@ -463,10 +472,10 @@ A warm outline previews the cut while held; terrain changes only on release.
 The blast starts at a radius of 0.012 scene units, growing initially at 0.02 scene
 units per second. Its growth speed increases exponentially, doubling every two
 seconds.
-The drill is 0.02 scene units wide. The status text reports affected, split, and
-destroyed formations, marking partial reports when terrain is unloaded. Carving
-messages appear above the controls and disappear after two seconds. The controls
-stay on the bottom line.
+The drill starts each gesture at 0.02 scene units wide. The status text reports
+affected, split, and destroyed formations, marking partial reports when terrain
+is unloaded. Carving messages appear above the controls and disappear after two
+seconds. The controls stay on the bottom line.
 
 The viewer defaults to `-bats-per-minute 7.5`; use `-bats-per-minute 0` to disable
 them or set another rate to change their frequency. The viewer disables bats for PNG exports.
