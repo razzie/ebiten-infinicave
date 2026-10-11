@@ -14,7 +14,7 @@ import (
 func TestWorldCancelsObsoleteGenerationAndResumes(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	var first atomic.Bool
-	w := newWorld(42, ViewClay, 0, func(int64) SectionContent {
+	w := newWorld(42, ViewClay, 0, 0, terrain.DefaultSpiderWebDensity, func(int64) SectionContent {
 		if first.CompareAndSwap(false, true) {
 			close(entered)
 			<-release
@@ -56,7 +56,7 @@ func TestWorldCancelsObsoleteGenerationAndResumes(t *testing.T) {
 }
 
 func TestWorldWorkerPreparesAllLayers(t *testing.T) {
-	w := newWorld(42, ViewShaded, 0, nil)
+	w := newWorld(42, ViewShaded, 0, 0, terrain.DefaultSpiderWebDensity, nil)
 	defer w.close()
 	w.request(0)
 	var early *terrain.Geometry
@@ -100,7 +100,7 @@ func TestWorldWorkerPreparesAllLayers(t *testing.T) {
 }
 
 func TestDiagnosticWorkerRetainsTerrainGeometry(t *testing.T) {
-	w := newWorld(42, ViewClay, 0, testLedgeSection)
+	w := newWorld(42, ViewClay, 0, 0, terrain.DefaultSpiderWebDensity, testLedgeSection)
 	defer w.close()
 	w.request(0)
 	select {
@@ -183,6 +183,98 @@ func TestPrefetchOnlyExpandsWhileMoving(t *testing.T) {
 		}
 		if ids[required] != want {
 			t.Fatalf("velocity %g looks ahead to %d, want %d", velocity, ids[required], want)
+		}
+	}
+}
+
+func TestSceneSpiderWebSizeSurvivesReset(t *testing.T) {
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		t.Run(orientation.String(), func(t *testing.T) {
+			scene, err := NewScene(Config{Seed: 42, Orientation: orientation, SpiderWebMaxSize: .08, SpiderWebDensity: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer scene.Close()
+			for _, seed := range []int64{42, 43} {
+				if seed != 42 {
+					scene.Reset(seed)
+				}
+				scene.world.request(0)
+				select {
+				case mesh := <-scene.world.results:
+					webs := mesh.Geometry.Topology.SpiderWebs
+					if len(webs) == 0 {
+						t.Fatal("streamed section has no webs to check")
+					}
+					for _, w := range webs {
+						for i, a := range w.Network.Nodes {
+							for _, b := range w.Network.Nodes[i+1:] {
+								if a.Sub(b).Len() > .08+1e-9 {
+									t.Fatalf("seed %d: scene or reset ignored the web size setting", seed)
+								}
+							}
+						}
+					}
+				case <-time.After(20 * time.Second):
+					t.Fatal("streamed section did not complete")
+				}
+			}
+		})
+	}
+}
+
+func TestSceneSpiderWebDensitySurvivesResetAndCarving(t *testing.T) {
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		for _, tc := range []struct {
+			name    string
+			density float64
+		}{{"disabled", 0}, {"sparse", .2}} {
+			t.Run(orientation.String()+"/"+tc.name, func(t *testing.T) {
+				scene, err := NewScene(Config{Seed: 42, Orientation: orientation, SpiderWebDensity: tc.density})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer scene.Close()
+				check := func(topology *terrain.RockTopology) {
+					if tc.density == 0 && len(topology.SpiderWebs) != 0 {
+						t.Fatal("scene restored disabled webs")
+					}
+					for _, w := range topology.SpiderWebs {
+						key := terrain.CollisionVertexKey(terrain.RockMaterialPoint(topology.Grid[0], w.Corner))
+						if terrain.SiteRandom(0x737069646572, key[0], key[1], 0) >= tc.density {
+							t.Fatal("scene ignored density when selecting a pocket")
+						}
+					}
+				}
+				seen := 0
+				for _, seed := range []int64{42, 43} {
+					if seed != 42 {
+						scene.Reset(seed)
+					}
+					scene.world.request(0)
+					select {
+					case mesh := <-scene.world.results:
+						check(mesh.Geometry.Topology)
+						seen += len(mesh.Geometry.Topology.SpiderWebs)
+						cut, err := terrain.CutFromHole(Hole{Shape: HoleCircle, Center: mesh.Geometry.Grid[0].Center.Add(V{Y: mesh.Geometry.Top}), Radius: .005})
+						if err != nil {
+							t.Fatal(err)
+						}
+						geometry, _, changed := cut.Geometry(0, mesh.Geometry, 0)
+						if !changed {
+							t.Fatal("fixture carve did not change terrain")
+						}
+						carved := render.SectionMesh{Geometry: geometry}
+						scene.prepareCarvedVegetation(&carved)
+						check(carved.Geometry.Topology)
+					case <-time.After(20 * time.Second):
+						t.Fatal("streamed section did not complete")
+					}
+				}
+				if tc.density > 0 && seen == 0 {
+					t.Fatal("sparse scene produced no webs to check")
+				}
+			})
 		}
 	}
 }

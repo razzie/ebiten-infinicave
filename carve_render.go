@@ -16,7 +16,7 @@ func (g *Scene) prepareCarvedVegetation(mesh *render.SectionMesh) {
 	mesh.SpiderWebs = render.TriangleMesh{}
 	if g.view == ViewShaded {
 		geometry := *mesh.Geometry
-		geometry.Topology = terrain.PrepareSpiderWebs(geometry.Topology)
+		geometry.Topology = terrain.PrepareSpiderWebs(geometry.Topology, g.spiderWebMaxSize, g.spiderWebDensity)
 		mesh.Geometry = &geometry
 		plants := mesh.Geometry.Vegetation
 		mesh.Vines = render.PrepareVines(plants.Vines)

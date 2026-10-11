@@ -26,6 +26,8 @@ type RockTopology struct {
 	SpiderWebs   []SpiderWeb
 	webCorners   []webCorner
 	websPrepared bool
+	webMaxSize   float64 // cache keys for the prepared decoration
+	webDensity   float64
 }
 
 // Neighbors returns immutable adjacency in Grid order. Callers must not modify it.

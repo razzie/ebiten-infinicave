@@ -88,7 +88,9 @@ func (b *Builder) Decorate(ctx context.Context, s *SectionBuild) bool {
 	var plants Vegetation
 	var topology *RockTopology
 	parallel.Run(
-		func() { topology, _ = prepareSpiderWebsContext(ctx, data.ForegroundTopology) },
+		func() {
+			topology, _ = prepareSpiderWebsContext(ctx, data.ForegroundTopology, b.SpiderWebMaxSize, b.SpiderWebDensity)
+		},
 		func() {
 			if ctx.Err() == nil {
 				plants.Mushrooms = MushroomsForGuides(data.Guides, s.vegetationGrid, data.Orientation)

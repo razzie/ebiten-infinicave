@@ -332,7 +332,7 @@ func TestIndependentLayersMergeWithoutReuploadingForeground(t *testing.T) {
 	if s.terrain == nil || s.foreground != image || w.revision != revision {
 		t.Fatal("background replaced foreground or query geometry")
 	}
-	web := terrain.SpiderWeb{Corner: V{X: .3, Y: .3}, A: V{X: .36, Y: .3}, B: V{X: .33, Y: .35}}
+	web := terrain.NewSpiderWeb([]V{{X: .3, Y: .3}, {X: .36, Y: .3}, {X: .33, Y: .35}}, .5)
 	plants := render.PrepareVegetation(terrain.SectionData{
 		ForegroundTopology: &terrain.RockTopology{SpiderWebs: []terrain.SpiderWeb{web}},
 	}, ViewShaded)

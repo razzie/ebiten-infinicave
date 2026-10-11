@@ -3,11 +3,13 @@ package infinicave
 import (
 	"fmt"
 	"math"
+
+	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
 // Config controls generation and rendering. Start with DefaultConfig to use
 // the viewer's appearance. A zero Config disables texture, background effects,
-// fog, and bats.
+// fog, bats, and spider webs.
 type Config struct {
 	Seed int64
 	// Orientation fixes the scrolling axis for the scene's lifetime. The zero
@@ -35,6 +37,14 @@ type Config struct {
 	// It must be finite and nonnegative; zero disables bats.
 	// Bats use world coordinates and are hidden outside ViewShaded.
 	BatsPerMinute float64
+	// SpiderWebMaxSize limits the distance between any two web attachments,
+	// including support strands, in scene units (the cave cross-axis spans 1).
+	// It must be finite and nonnegative. Zero uses the default of 0.15.
+	SpiderWebMaxSize float64
+	// SpiderWebDensity is the probability of considering an eligible rock
+	// pocket for a web, from 0 (disabled) to 1 (all eligible pockets).
+	// The viewer default is 0.35. Placement remains deterministic for a seed.
+	SpiderWebDensity float64
 	// View selects the material. Diagnostic views disable texture, background
 	// effects, fog, and vegetation.
 	View View
@@ -59,7 +69,7 @@ type Config struct {
 // DefaultConfig returns the viewer's appearance with a deterministic seed of 0.
 func DefaultConfig() Config {
 	return Config{Texture: 8, BackgroundBlur: .002, ShadowOpacity: .65,
-		ShadowBlur: .008, ShadowOffset: V{X: .018, Y: .025}, Fog: 2, BatsPerMinute: 7.5, View: ViewShaded}
+		ShadowBlur: .008, ShadowOffset: V{X: .018, Y: .025}, Fog: 2, BatsPerMinute: 7.5, SpiderWebMaxSize: terrain.DefaultSpiderWebMaxSize, SpiderWebDensity: terrain.DefaultSpiderWebDensity, View: ViewShaded}
 }
 
 func (c Config) validate() error {
@@ -93,6 +103,12 @@ func (c Config) validate() error {
 	}
 	if math.IsNaN(c.BatsPerMinute) || math.IsInf(c.BatsPerMinute, 0) || c.BatsPerMinute < 0 {
 		return fmt.Errorf("infinicave: bats per minute must be finite and nonnegative")
+	}
+	if math.IsNaN(c.SpiderWebMaxSize) || math.IsInf(c.SpiderWebMaxSize, 0) || c.SpiderWebMaxSize < 0 {
+		return fmt.Errorf("infinicave: spider web maximum size must be finite and nonnegative")
+	}
+	if math.IsNaN(c.SpiderWebDensity) || math.IsInf(c.SpiderWebDensity, 0) || c.SpiderWebDensity < 0 || c.SpiderWebDensity > 1 {
+		return fmt.Errorf("infinicave: spider web density must be between 0 and 1")
 	}
 	return nil
 }

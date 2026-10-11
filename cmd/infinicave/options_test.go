@@ -1,6 +1,8 @@
 package main
 
 import (
+	"flag"
+	"os"
 	"testing"
 
 	infinicave "github.com/razzie/ebiten-infinicave"
@@ -27,6 +29,47 @@ func TestViewerModesAndWindowSizing(t *testing.T) {
 	for _, name := range []string{"", "horizontal", "vertical", "Landscape", "square"} {
 		if _, err := parseMode(name); err == nil {
 			t.Fatalf("accepted invalid mode %q", name)
+		}
+	}
+}
+
+func TestViewerSpiderWebMaximumSizeFlag(t *testing.T) {
+	oldFlags, oldArgs := flag.CommandLine, os.Args
+	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })
+	for _, tc := range []struct {
+		args []string
+		want float64
+	}{
+		{nil, .15},
+		{[]string{"-spider-web-max-size", "0.08"}, .08},
+		{[]string{"-spider-web-max-size", "0"}, 0},
+	} {
+		flag.CommandLine = flag.NewFlagSet("web-options", flag.ContinueOnError)
+		os.Args = append([]string{"infinicave"}, tc.args...)
+		options, err := parseOptions()
+		if err != nil || options.config.SpiderWebMaxSize != tc.want {
+			t.Fatalf("size flag: got %g, want %g, error %v", options.config.SpiderWebMaxSize, tc.want, err)
+		}
+	}
+}
+
+func TestViewerSpiderWebDensityFlag(t *testing.T) {
+	oldFlags, oldArgs := flag.CommandLine, os.Args
+	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })
+	for _, tc := range []struct {
+		args []string
+		want float64
+	}{
+		{nil, .35},
+		{[]string{"-spider-web-density", "0.1"}, .1},
+		{[]string{"-spider-web-density", "0"}, 0},
+		{[]string{"-spider-web-density", "1"}, 1},
+	} {
+		flag.CommandLine = flag.NewFlagSet("web-density", flag.ContinueOnError)
+		os.Args = append([]string{"infinicave"}, tc.args...)
+		options, err := parseOptions()
+		if err != nil || options.config.SpiderWebDensity != tc.want {
+			t.Fatalf("density flag: got %g, want %g, error %v", options.config.SpiderWebDensity, tc.want, err)
 		}
 	}
 }

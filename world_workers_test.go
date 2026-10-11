@@ -137,7 +137,7 @@ func TestConcurrentWorldSectionsMatchSerialPreparation(t *testing.T) {
 		mesh.Geometry.Vegetation = terrain.SectionVegetation(data)
 		want[id] = mesh
 	}
-	w := newWorld(42, ViewClay, 0, nil)
+	w := newWorld(42, ViewClay, 0, 0, terrain.DefaultSpiderWebDensity, nil)
 	defer w.close()
 	w.request(0)
 	w.request(1)

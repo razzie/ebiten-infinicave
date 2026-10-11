@@ -8,63 +8,41 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
 
-// SpiderWeb spans an acute pocket in the final rock silhouette. Its anchors
-// and thread geometry use the same padded section frame as the rock grid.
+// DefaultSpiderWebMaxSize is the maximum attachment span in scene units.
+const DefaultSpiderWebMaxSize = .15
+
+// DefaultSpiderWebDensity is the eligible-pocket selection probability.
+const DefaultSpiderWebDensity = .35
+
+func spiderWebMaxSize(options []float64) float64 {
+	if len(options) > 0 && options[0] > 0 {
+		return options[0]
+	}
+	return DefaultSpiderWebMaxSize
+}
+
+func spiderWebDensity(options []float64) float64 {
+	if len(options) > 1 {
+		return options[1]
+	}
+	return DefaultSpiderWebDensity
+}
+
+// SpiderWeb owns a settled silk network. Corner, A, and B identify its search
+// pocket; the network can have additional rock attachments beyond those sites.
+// All positions use the same padded section frame as the final rock grid.
 type SpiderWeb struct {
 	Corner, A, B geom.V
 	Variation    float64
-}
-
-// Frame follows the pocket walls and bows out into the clear opening.
-func (w SpiderWeb) Frame() []geom.V {
-	points := []geom.V{w.Corner}
-	for i := 0; i <= 24; i++ {
-		points = append(points, w.Point(float64(i)/24, 1))
-	}
-	return points
-}
-
-// Orb fits a circular capture area within the frame. Its hub lies in open
-// space; the rock corner is an attachment, not a fan-shaped hub.
-func (w SpiderWeb) Orb() (geom.V, float64) {
-	frame := w.Frame()
-	axis := w.Point(.5, 1).Sub(w.Corner)
-	var hub geom.V
-	var radius float64
-	for step := 1; step < 32; step++ {
-		p := w.Corner.Add(axis.Mul(float64(step) / 32))
-		r := math.Inf(1)
-		for i, a := range frame {
-			b := frame[(i+1)%len(frame)]
-			r = math.Min(r, geom.Cross(b.Sub(a), p.Sub(a))/b.Sub(a).Len())
-		}
-		if r > radius {
-			hub, radius = p, r
-		}
-	}
-	return hub, .86 * radius
-}
-
-// Point samples the pocket's envelope for clearance during decoration.
-// Rendering builds a complete orb inside this envelope.
-func (w SpiderWeb) Point(t, radius float64) geom.V {
-	a, b := w.A.Sub(w.Corner), w.B.Sub(w.Corner)
-	angle := math.Atan2(geom.Cross(a, b), a.Dot(b))
-	direction := geom.Rotate(a.Norm(), angle*t)
-	chord := b.Sub(a)
-	length := geom.Cross(a, b) / geom.Cross(direction, chord)
-	tip := direction.Mul(length)
-	u := geom.Clamp(tip.Sub(a).Dot(chord)/chord.Len2(), 0, 1)
-	depth := geom.Cross(a, b) / chord.Len()
-	bow := math.Min(.012, .45*depth) * math.Sin(math.Pi*u)
-	return w.Corner.Add(tip.Add(direction.Mul(bow)).Mul(radius))
+	Network      *WebNetwork
 }
 
 // Candidates follow the final polygon silhouette. Keep every supporting
 // face so decoration can reject a pocket with even one illuminated wall.
 type webCorner struct {
-	web   SpiderWeb
-	cells []int
+	web     SpiderWeb
+	anchors []geom.V
+	cells   []int
 }
 
 // Reduce contour noise only for choosing search vertices. The bounded-error
@@ -170,11 +148,13 @@ func webAnchor(corner geom.V, edge int, forward bool, length float64, edges []Ro
 	return p, cells
 }
 
-func findWebCorners(grid RockGrid, edges []RockEdge) []webCorner {
-	return findWebCornersContext(context.Background(), grid, edges)
+func findWebCorners(grid RockGrid, edges []RockEdge, maxSize ...float64) []webCorner {
+	return findWebCornersContext(context.Background(), grid, edges, maxSize...)
 }
 
-func findWebCornersContext(ctx context.Context, grid RockGrid, edges []RockEdge) []webCorner {
+func findWebCornersContext(ctx context.Context, grid RockGrid, edges []RockEdge, maxSize ...float64) []webCorner {
+	size := spiderWebMaxSize(maxSize)
+	reachScale := min(1, size/.18)
 	incoming, outgoing := make(map[[2]int64]int), make(map[[2]int64]int)
 	add := func(links map[[2]int64]int, p geom.V, index int) {
 		key := CollisionVertexKey(p)
@@ -188,13 +168,7 @@ func findWebCornersContext(ctx context.Context, grid RockGrid, edges []RockEdge)
 		add(incoming, e.B, i)
 		add(outgoing, e.A, i)
 	}
-	type faceBounds struct{ lo, hi geom.V }
-	bounds := make([]faceBounds, len(grid))
-	for i, c := range grid {
-		if len(c.Polygon) > 0 {
-			bounds[i].lo, bounds[i].hi = geom.PolygonBounds(c.Polygon)
-		}
-	}
+	clearance := newWebClearance(grid)
 	var corners []webCorner
 	var nearby []int
 	for _, i := range webSearchVertices(edges, incoming, outgoing) {
@@ -216,58 +190,61 @@ func findWebCornersContext(ctx context.Context, grid RockGrid, edges []RockEdge)
 		}
 		nearby = nearby[:0]
 		queried := false
-		insideRock := func(p geom.V) bool {
-			for _, face := range nearby {
-				b := bounds[face]
-				if p.X >= b.lo.X && p.X <= b.hi.X && p.Y >= b.lo.Y && p.Y <= b.hi.Y && geom.InsidePolygon(p, grid[face].Polygon) {
-					return true
-				}
-			}
-			return false
-		}
 		var fits []webCorner
-		for _, reach := range []float64{.032, .045, .065, .085, .11} {
+		for _, reach := range []float64{.045, .065, .09, .12, .16} {
+			reach *= reachScale
 			w := SpiderWeb{Corner: e.A, Variation: random(3)}
 			var left, right []int
-			w.A, left = webAnchor(e.A, previous, false, reach*(.9+.2*random(1)), edges, incoming)
-			w.B, right = webAnchor(e.A, i, true, reach*(.9+.2*random(2)), edges, outgoing)
+			w.A, left = webAnchor(e.A, previous, false, reach*(.65+.60*random(1)), edges, incoming)
+			w.B, right = webAnchor(e.A, i, true, reach*(.65+.60*random(2)), edges, outgoing)
 			a, b := w.A.Sub(w.Corner), w.B.Sub(w.Corner)
 			cosine := a.Norm().Dot(b.Norm())
-			// Measure the whole pocket instead of an individual contour join;
-			// only acute openings between 20 and 85 degrees support a web.
-			if a.Len() < .014 || b.Len() < .014 || geom.Cross(a, b) <= 0 || cosine < math.Cos(85*math.Pi/180) || cosine > math.Cos(20*math.Pi/180) {
+			// Fit the opening at the scale of the web, including broad recesses.
+			if a.Len() < .020 || b.Len() < .020 || geom.Cross(a, b) <= 0 || cosine < math.Cos(140*math.Pi/180) || cosine > math.Cos(20*math.Pi/180) {
 				continue
 			}
-			area := geom.Cross(a, b)
-			_, radius := w.Orb()
-			if area/b.Sub(a).Len() < .010 || radius < .006 {
+			if geom.Cross(a, b)/b.Sub(a).Len() < .015 {
 				continue
 			}
 			if !queried {
-				// All reaches, anchor jitter, and the bowed frame fit in this
-				// square. Select nearby final polygons once per viable pocket,
-				// instead of scanning every face for each clearance sample.
-				const extent = .11*1.1 + .012 + 1e-9
-				for face, b := range bounds {
-					if b.hi.X >= e.A.X-extent && b.lo.X <= e.A.X+extent &&
-						b.hi.Y >= e.A.Y-extent && b.lo.Y <= e.A.Y+extent {
-						nearby = append(nearby, face)
-					}
-				}
+				const extent = .26
+				nearby = clearance.nearby(e.A.Sub(geom.V{X: extent, Y: extent}), e.A.Add(geom.V{X: extent, Y: extent}), nearby)
 				queried = true
 			}
+			anchors := []geom.V{w.Corner, w.A, w.B}
+			// Shorter attachments along both walls keep the frame suspended
+			// away from jagged contours rather than pretending they are silk.
+			for _, wall := range []struct {
+				edge    int
+				forward bool
+				length  float64
+				links   map[[2]int64]int
+			}{
+				{previous, false, reach * (.65 + .60*random(1)) * .48, incoming},
+				{i, true, reach * (.65 + .60*random(2)) * .56, outgoing},
+			} {
+				p, _ := webAnchor(e.A, wall.edge, wall.forward, wall.length, edges, wall.links)
+				anchors = append(anchors, p)
+			}
+			center := w.Corner.Add(a.Add(b).Mul(.3))
 			clear := true
-			for spoke := 1; spoke < 12 && clear; spoke++ {
-				for ring := 1; ring <= 8; ring++ {
-					if insideRock(w.Point(float64(spoke)/12, float64(ring)/8)) {
-						clear = false
-						break
-					}
+			for _, p := range anchors {
+				if !clearance.segmentClear(center, p, nearby) {
+					clear = false
+					break
 				}
 			}
-			if clear {
-				fits = append(fits, webCorner{web: w, cells: append(left, right...)})
+			if !clear {
+				continue
 			}
+			supports := append(append([]int(nil), left...), right...)
+			// An exposed lip across the opening can carry an extended frame.
+			// Keep the wall-only fit as a fallback if that lip is illuminated
+			// or its finished capture threads cannot clear the surrounding rock.
+			if p, cell, ok := extraWebAnchor(w, reach, edges, clearance, nearby); ok {
+				fits = append(fits, webCorner{web: w, anchors: append(append([]geom.V(nil), anchors...), p), cells: append(append([]int(nil), supports...), cell)})
+			}
+			fits = append(fits, webCorner{web: w, anchors: anchors, cells: supports})
 		}
 		// Prefer the largest fit whose entire support is dark. A larger web
 		// reaching a pale face must not discard a smaller shaded fit here.
@@ -287,9 +264,22 @@ func darkWebSupport(c RockCell) bool {
 	return c.Raised && c.Color.A == 255 && luminance <= 55
 }
 
-func resolveSpiderWebs(appearance RockGrid, corners []webCorner) []SpiderWeb {
+func resolveSpiderWebs(appearance RockGrid, corners []webCorner, options ...float64) []SpiderWeb {
+	return resolveSpiderWebsContext(context.Background(), appearance, corners, options...)
+}
+
+func resolveSpiderWebsContext(ctx context.Context, appearance RockGrid, corners []webCorner, options ...float64) []SpiderWeb {
+	size, density := spiderWebMaxSize(options), spiderWebDensity(options)
+	if density <= 0 {
+		return nil
+	}
 	var webs []SpiderWeb
+	clearance := newWebClearance(appearance)
+	var nearbyFaces []int
 	for _, c := range corners {
+		if ctx.Err() != nil {
+			return nil
+		}
 		dark := true
 		for _, i := range c.cells {
 			if !darkWebSupport(appearance[i]) {
@@ -302,7 +292,7 @@ func resolveSpiderWebs(appearance RockGrid, corners []webCorner) []SpiderWeb {
 		}
 		w := c.web
 		key := CollisionVertexKey(RockMaterialPoint(appearance[c.cells[0]], w.Corner))
-		if SiteRandom(0x737069646572, key[0], key[1], 0) > .95 {
+		if SiteRandom(0x737069646572, key[0], key[1], 0) >= density {
 			continue
 		}
 		nearby := false
@@ -312,33 +302,67 @@ func resolveSpiderWebs(appearance RockGrid, corners []webCorner) []SpiderWeb {
 				break
 			}
 		}
-		if !nearby {
-			webs = append(webs, w)
+		if nearby {
+			continue
 		}
+		// Test attachment span before settling. All free nodes remain inside
+		// the anchors' convex hull, so the cap includes every strand.
+		if !webWithinSize(c.anchors, size) {
+			continue
+		}
+		w.Network = buildWebNetwork(c.anchors, w.Variation)
+		if w.Network == nil {
+			continue
+		}
+		lo, hi := geom.PolygonBounds(w.Network.Nodes[:w.Network.Anchors])
+		nearbyFaces = clearance.nearby(lo, hi, nearbyFaces)
+		if !clearance.networkClear(w.Network, nearbyFaces) || webOverlaps(w, webs) {
+			continue
+		}
+		webs = append(webs, w)
 	}
 	return webs
 }
 
 // PrepareSpiderWebs fits decorations after rock appearance is ready. It returns
 // a new snapshot so an already published rock layer never changes underneath it.
-func PrepareSpiderWebs(topology *RockTopology) *RockTopology {
-	t, _ := prepareSpiderWebsContext(context.Background(), topology)
+// Optional settings are maximum size followed by eligible-pocket density.
+// An omitted or zero maximum size uses DefaultSpiderWebMaxSize; omitted density
+// uses DefaultSpiderWebDensity, and explicit zero density disables webs.
+func PrepareSpiderWebs(topology *RockTopology, options ...float64) *RockTopology {
+	t, _ := prepareSpiderWebsContext(context.Background(), topology, options...)
 	return t
 }
 
-func prepareSpiderWebsContext(ctx context.Context, topology *RockTopology) (*RockTopology, bool) {
+func prepareSpiderWebsContext(ctx context.Context, topology *RockTopology, options ...float64) (*RockTopology, bool) {
+	size, density := spiderWebMaxSize(options), spiderWebDensity(options)
 	if ctx.Err() != nil {
 		return nil, false
 	}
-	if topology.websPrepared {
+	if topology.websPrepared && topology.webMaxSize == size && topology.webDensity == density {
 		return topology, true
 	}
 	t := *PrepareRockAppearance(topology)
-	t.webCorners = findWebCornersContext(ctx, t.Grid, t.Boundary)
-	if ctx.Err() != nil {
-		return nil, false
+	t.webCorners, t.SpiderWebs = nil, nil
+	if density > 0 {
+		t.webCorners = findWebCornersContext(ctx, t.Grid, t.Boundary, size)
+		if ctx.Err() != nil {
+			return nil, false
+		}
+		t.SpiderWebs = resolveSpiderWebsContext(ctx, t.Appearance, t.webCorners, size, density)
 	}
-	t.SpiderWebs = resolveSpiderWebs(t.Appearance, t.webCorners)
-	t.websPrepared = true
+	t.websPrepared, t.webMaxSize, t.webDensity = true, size, density
 	return &t, ctx.Err() == nil
+}
+
+// Maximum pairwise separation is independent of web rotation or scene mode.
+func webWithinSize(points []geom.V, size float64) bool {
+	for i, a := range points {
+		for _, b := range points[i+1:] {
+			if a.Sub(b).Len2() > size*size+1e-15 {
+				return false
+			}
+		}
+	}
+	return true
 }

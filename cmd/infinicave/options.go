@@ -27,6 +27,8 @@ func parseOptions() (viewerOptions, error) {
 	shadowY := flag.Float64("shadow-y", defaults.ShadowOffset.Y, "rock shadow vertical offset in scene units (positive is down, range -1 to 1)")
 	fog := flag.Float64("fog", defaults.Fog, "moving fog strength between background and foreground layers (0 disables it, values above 1 increase density)")
 	batsPerMinute := flag.Float64("bats-per-minute", defaults.BatsPerMinute, "average bat arrivals per minute (0 disables them, interactive viewer only)")
+	webDensity := flag.Float64("spider-web-density", defaults.SpiderWebDensity, "spider web occurrence probability per eligible pocket (0 disables webs, range 0-1)")
+	webMaxSize := flag.Float64("spider-web-max-size", defaults.SpiderWebMaxSize, "maximum spider web span including attachments in scene units (0 uses the default 0.15; cave cross-axis spans 1)")
 	view := flag.String("view", "shaded", "terrain view: shaded, clay, height, normals, shadows")
 	hover := flag.Bool("hover", false, "highlight foreground rocks and guide lines under the mouse")
 	tolerance := flag.Float64("collision-tolerance", 0, "collision polygon simplification tolerance in scene units (one section is 1 by 1)")
@@ -42,6 +44,8 @@ func parseOptions() (viewerOptions, error) {
 	config.ShadowOffset = infinicave.V{X: *shadowX, Y: *shadowY}
 	config.Fog = *fog
 	config.BatsPerMinute = *batsPerMinute
+	config.SpiderWebMaxSize = *webMaxSize
+	config.SpiderWebDensity = *webDensity
 	if *output != "" {
 		config.BatsPerMinute = 0
 	}

@@ -8,6 +8,8 @@ type GenerationOptions struct {
 	Seed               int64
 	Orientation        Orientation
 	CollisionTolerance float64
+	SpiderWebMaxSize   float64
+	SpiderWebDensity   float64
 	LoadSection        SectionLoader
 	OnCollisionReady   func(CollisionGeometry)
 }
@@ -21,7 +23,10 @@ func GenerateSection(config GenerationOptions, id int64) (Section, error) {
 	// Streaming uses nonnegative indices internally in the direction of growth.
 	index := -id
 	var collision CollisionGeometry
-	data := NewSectionBuilder(config.Seed, OrientedSectionLoader(config.Orientation, config.LoadSection), config.Orientation).BuildWithTerrain(index, func(data SectionData) {
+	builder := NewSectionBuilder(config.Seed, OrientedSectionLoader(config.Orientation, config.LoadSection), config.Orientation)
+	builder.SpiderWebMaxSize = config.SpiderWebMaxSize
+	builder.SpiderWebDensity = config.SpiderWebDensity
+	data := builder.BuildWithTerrain(index, func(data SectionData) {
 		collision = OrientedCollision(config.Orientation, PrepareTerrainGeometry(data, config.CollisionTolerance).Collision)
 		if config.OnCollisionReady != nil {
 			config.OnCollisionReady(CopyCollisionGeometry(collision))

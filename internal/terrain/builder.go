@@ -10,15 +10,19 @@ import (
 // Builder retains reusable generation workspaces and a bounded guide cache.
 // A builder has one caller at a time; concurrent sections use separate builders.
 type Builder struct {
-	seed        int64
-	loadSection SectionLoader
-	guides      *guideCache
-	fields      vineWorkspace
-	frontFields vineWorkspace
+	// SpiderWebMaxSize bounds decoration span; zero uses the default.
+	SpiderWebMaxSize float64
+	// SpiderWebDensity is the eligible-pocket probability; zero disables webs.
+	SpiderWebDensity float64
+	seed             int64
+	loadSection      SectionLoader
+	guides           *guideCache
+	fields           vineWorkspace
+	frontFields      vineWorkspace
 }
 
 func NewSectionBuilder(seed int64, loadSection SectionLoader, orientation ...Orientation) *Builder {
-	return &Builder{seed: seed, loadSection: loadSection, guides: newGuideCache(seed, orientation...)}
+	return &Builder{SpiderWebDensity: DefaultSpiderWebDensity, seed: seed, loadSection: loadSection, guides: newGuideCache(seed, orientation...)}
 }
 
 func (b *Builder) Build(id int64) SectionData {
