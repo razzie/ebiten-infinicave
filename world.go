@@ -79,7 +79,7 @@ type sectionTerrain struct {
 	ctx      context.Context
 }
 
-func newWorld(seed int64, view View, tolerance, webMaxSize, webDensity float64, forceGuidesUp bool, loadSection SectionLoader, orientation ...Orientation) *world {
+func newWorld(seed int64, view View, tolerance, webMaxSize, webDensity, mushroomDensity float64, forceGuidesUp bool, loadSection SectionLoader, orientation ...Orientation) *world {
 	limit := min(2, max(1, runtime.GOMAXPROCS(0)-1))
 	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan sectionJob, sectionQueueLimit),
 		results: make(chan render.SectionMesh, sectionQueueLimit*2), terrain: make(chan sectionTerrain, sectionQueueLimit),
@@ -175,6 +175,7 @@ func newWorld(seed int64, view View, tolerance, webMaxSize, webDensity float64, 
 		builder.ForceGuidesUp = forceGuidesUp
 		builder.SpiderWebMaxSize = webMaxSize
 		builder.SpiderWebDensity = webDensity
+		builder.MushroomDensity = mushroomDensity
 		return builder
 	}, advance)
 

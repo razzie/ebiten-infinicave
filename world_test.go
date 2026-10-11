@@ -14,7 +14,7 @@ import (
 func TestWorldCancelsObsoleteGenerationAndResumes(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	var first atomic.Bool
-	w := newWorld(42, ViewClay, 0, 0, terrain.DefaultSpiderWebDensity, false, func(int64) SectionContent {
+	w := newWorld(42, ViewClay, 0, 0, terrain.DefaultSpiderWebDensity, terrain.DefaultMushroomDensity, false, func(int64) SectionContent {
 		if first.CompareAndSwap(false, true) {
 			close(entered)
 			<-release
@@ -56,7 +56,7 @@ func TestWorldCancelsObsoleteGenerationAndResumes(t *testing.T) {
 }
 
 func TestWorldWorkerPreparesAllLayers(t *testing.T) {
-	w := newWorld(42, ViewShaded, 0, 0, terrain.DefaultSpiderWebDensity, false, nil)
+	w := newWorld(42, ViewShaded, 0, 0, terrain.DefaultSpiderWebDensity, terrain.DefaultMushroomDensity, false, nil)
 	defer w.close()
 	w.request(0)
 	var early *terrain.Geometry
@@ -100,7 +100,7 @@ func TestWorldWorkerPreparesAllLayers(t *testing.T) {
 }
 
 func TestDiagnosticWorkerRetainsTerrainGeometry(t *testing.T) {
-	w := newWorld(42, ViewClay, 0, 0, terrain.DefaultSpiderWebDensity, false, testLedgeSection)
+	w := newWorld(42, ViewClay, 0, 0, terrain.DefaultSpiderWebDensity, terrain.DefaultMushroomDensity, false, testLedgeSection)
 	defer w.close()
 	w.request(0)
 	select {
@@ -220,6 +220,52 @@ func TestSceneSpiderWebSizeSurvivesReset(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSceneMushroomDensityMatchesGenerationAfterReset(t *testing.T) {
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		for _, density := range []float64{0, .5, 1} {
+			config := Config{Seed: 42, Orientation: orientation, ForceGuidesUp: true, MushroomDensity: density, LoadSection: testLedgeSection}
+			expected, err := GenerateSectionWithConfig(config, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if density == 0 && len(expected.Mushrooms) != 0 {
+				t.Fatal("synchronous generation ignored zero mushroom density")
+			}
+			if density == 1 && len(expected.Mushrooms) == 0 {
+				t.Fatal("fixture generated no mushrooms at full density")
+			}
+			scene, err := NewScene(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var before []MushroomGroup
+			for attempt := 0; attempt < 2; attempt++ {
+				if attempt > 0 {
+					scene.Reset(config.Seed)
+				}
+				scene.world.request(0)
+				select {
+				case mesh := <-scene.world.results:
+					groups := mesh.Geometry.Vegetation.Mushrooms
+					if len(groups) != len(expected.Mushrooms) {
+						scene.Close()
+						t.Fatalf("orientation %v density %g: streamed %d clusters, synchronous generation returned %d", orientation, density, len(groups), len(expected.Mushrooms))
+					}
+					if attempt > 0 && !reflect.DeepEqual(before, groups) {
+						scene.Close()
+						t.Fatal("reset changed mushroom density or surviving clusters")
+					}
+					before = groups
+				case <-time.After(20 * time.Second):
+					scene.Close()
+					t.Fatal("streamed section did not complete")
+				}
+			}
+			scene.Close()
+		}
 	}
 }
 

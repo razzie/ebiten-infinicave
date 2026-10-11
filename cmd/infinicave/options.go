@@ -28,6 +28,7 @@ func parseOptions() (viewerOptions, error) {
 	shadowY := flag.Float64("shadow-y", defaults.ShadowOffset.Y, "rock shadow vertical offset in scene units (positive is down, range -1 to 1)")
 	fog := flag.Float64("fog", defaults.Fog, "moving fog strength between background and foreground layers (0 disables it, values above 1 increase density)")
 	batsPerMinute := flag.Float64("bats-per-minute", defaults.BatsPerMinute, "average bat arrivals per minute (0 disables them, interactive viewer only)")
+	mushroomDensity := flag.Float64("mushroom-density", defaults.MushroomDensity, "mushroom cluster occurrence probability (0 disables mushrooms, range 0-1)")
 	webDensity := flag.Float64("spider-web-density", defaults.SpiderWebDensity, "spider web occurrence probability per eligible pocket (0 disables webs, range 0-1)")
 	webMaxSize := flag.Float64("spider-web-max-size", defaults.SpiderWebMaxSize, "maximum spider web span including attachments in scene units (0 uses the default 0.15; cave cross-axis spans 1)")
 	view := flag.String("view", "shaded", "terrain view: shaded, clay, height, normals, shadows")
@@ -46,6 +47,7 @@ func parseOptions() (viewerOptions, error) {
 	config.ShadowOffset = infinicave.V{X: *shadowX, Y: *shadowY}
 	config.Fog = *fog
 	config.BatsPerMinute = *batsPerMinute
+	config.MushroomDensity = *mushroomDensity
 	config.SpiderWebMaxSize = *webMaxSize
 	config.SpiderWebDensity = *webDensity
 	if *output != "" {

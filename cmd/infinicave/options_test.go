@@ -40,7 +40,7 @@ func TestViewerForceGuidesUpFlag(t *testing.T) {
 		args []string
 		want bool
 	}{
-		{nil, false},
+		{nil, infinicave.DefaultConfig().ForceGuidesUp},
 		{[]string{"-force-guides-up"}, true},
 		{[]string{"-force-guides-up=false"}, false},
 	} {
@@ -90,6 +90,27 @@ func TestViewerSpiderWebDensityFlag(t *testing.T) {
 		options, err := parseOptions()
 		if err != nil || options.config.SpiderWebDensity != tc.want {
 			t.Fatalf("density flag: got %g, want %g, error %v", options.config.SpiderWebDensity, tc.want, err)
+		}
+	}
+}
+
+func TestViewerMushroomDensityFlag(t *testing.T) {
+	oldFlags, oldArgs := flag.CommandLine, os.Args
+	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })
+	for _, tc := range []struct {
+		args []string
+		want float64
+	}{
+		{nil, 1},
+		{[]string{"-mushroom-density", "0.5"}, .5},
+		{[]string{"-mushroom-density", "0"}, 0},
+		{[]string{"-mushroom-density", "1"}, 1},
+	} {
+		flag.CommandLine = flag.NewFlagSet("mushroom-density", flag.ContinueOnError)
+		os.Args = append([]string{"infinicave"}, tc.args...)
+		options, err := parseOptions()
+		if err != nil || options.config.MushroomDensity != tc.want {
+			t.Fatalf("density flag: got %g, want %g, error %v", options.config.MushroomDensity, tc.want, err)
 		}
 	}
 }

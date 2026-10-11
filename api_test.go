@@ -178,6 +178,7 @@ func TestPublicSceneConfigurationAndLifecycle(t *testing.T) {
 		{ShadowOffset: infinicave.V{X: math.NaN()}}, {ShadowOffset: infinicave.V{Y: math.Inf(1)}},
 		{View: infinicave.View(-1)}, {View: infinicave.View(999)},
 		{CollisionTolerance: -1}, {CollisionTolerance: math.NaN()}, {CollisionTolerance: math.Inf(1)},
+		{MushroomDensity: -1}, {MushroomDensity: 1.01}, {MushroomDensity: math.NaN()}, {MushroomDensity: math.Inf(1)}, {MushroomDensity: math.Inf(-1)},
 		{SpiderWebDensity: -1}, {SpiderWebDensity: 1.01}, {SpiderWebDensity: math.NaN()}, {SpiderWebDensity: math.Inf(1)}, {SpiderWebDensity: math.Inf(-1)},
 		{SpiderWebMaxSize: -1}, {SpiderWebMaxSize: math.NaN()}, {SpiderWebMaxSize: math.Inf(1)}, {SpiderWebMaxSize: math.Inf(-1)},
 		{BatsPerMinute: -1}, {BatsPerMinute: math.NaN()}, {BatsPerMinute: math.Inf(1)}, {BatsPerMinute: math.Inf(-1)},

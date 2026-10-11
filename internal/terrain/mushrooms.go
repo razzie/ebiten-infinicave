@@ -25,6 +25,9 @@ type MushroomGroup struct {
 
 const MushroomSink = .004
 
+// DefaultMushroomDensity is the eligible mushroom cluster occurrence probability (1 means all clusters are retained).
+const DefaultMushroomDensity = 0.5
+
 // StemWidth includes the dark border used when rendering the stalk.
 func (m Mushroom) StemWidth() float64 { return m.CapWidth * .19 }
 
@@ -42,7 +45,10 @@ var MushroomColors = [...]color.NRGBA{
 	{249, 192, 70, 255},
 }
 
-func MushroomsForGuides(guides []Guide, foreground RockGrid, orientation ...Orientation) []MushroomGroup {
+func MushroomsForGuides(guides []Guide, foreground RockGrid, density float64, orientation ...Orientation) []MushroomGroup {
+	if density <= 0 {
+		return nil
+	}
 	mode := OptionalOrientation(orientation)
 	up := InternalPoint(mode, geom.V{X: 0, Y: -1})
 	ground := mushroomGroundFromCells(foreground)
@@ -58,6 +64,7 @@ func MushroomsForGuides(guides []Guide, foreground RockGrid, orientation ...Orie
 			seed = SectionSeed(int64(math.Round(g.Pts[0].X*1e6)), int64(math.Round(g.Pts[0].Y*1e6)))
 		}
 		rng := rand.New(rand.NewSource(SectionSeed(seed, 0x6d757368)))
+		densityRNG := rand.New(rand.NewSource(SectionSeed(seed, 0x6d75736864656e)))
 		length := g.S[len(g.S)-1]
 		for s := geom.Lerp(.034, .074, rng.Float64()); s < length-.032; s += geom.Lerp(.155, .235, rng.Float64()) {
 			count := 3 + rng.Intn(3)
@@ -109,8 +116,12 @@ func MushroomsForGuides(guides []Guide, foreground RockGrid, orientation ...Orie
 				}
 			}
 			if len(group.Mushrooms) >= 3 {
-				groups = append(groups, group)
+				// Reserve all clusters for spacing so density only removes groups,
+				// without changing the geometry or placement of surviving mushrooms.
 				placed = append(placed, group.Mushrooms...)
+				if densityRNG.Float64() < density {
+					groups = append(groups, group)
+				}
 			}
 		}
 	}

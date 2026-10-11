@@ -93,7 +93,7 @@ func (b *Builder) Decorate(ctx context.Context, s *SectionBuild) bool {
 		},
 		func() {
 			if ctx.Err() == nil {
-				plants.Mushrooms = MushroomsForGuides(data.Guides, s.vegetationGrid, data.Orientation)
+				plants.Mushrooms = MushroomsForGuides(data.Guides, s.vegetationGrid, b.MushroomDensity, data.Orientation)
 			}
 		},
 		func() {

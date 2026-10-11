@@ -9,7 +9,7 @@ import (
 
 // Config controls generation and rendering. Start with DefaultConfig to use
 // the viewer's appearance. A zero Config disables texture, background effects,
-// fog, bats, and spider webs.
+// fog, bats, mushrooms, and spider webs.
 type Config struct {
 	Seed int64
 	// Orientation fixes the scrolling axis for the scene's lifetime. The zero
@@ -41,6 +41,10 @@ type Config struct {
 	// It must be finite and nonnegative; zero disables bats.
 	// Bats use world coordinates and are hidden outside ViewShaded.
 	BatsPerMinute float64
+	// MushroomDensity is the probability of retaining a mushroom cluster,
+	// from 0 (disabled) to 1 (the default appearance). Placement remains
+	// deterministic for a seed; lower density preserves surviving clusters.
+	MushroomDensity float64
 	// SpiderWebMaxSize limits the distance between any two web attachments,
 	// including support strands, in scene units (the cave cross-axis spans 1).
 	// It must be finite and nonnegative. Zero uses the default of 0.15.
@@ -82,6 +86,7 @@ func DefaultConfig() Config {
 		ShadowOffset:     V{X: .018, Y: .025},
 		Fog:              2,
 		BatsPerMinute:    7.5,
+		MushroomDensity:  terrain.DefaultMushroomDensity,
 		SpiderWebMaxSize: terrain.DefaultSpiderWebMaxSize,
 		SpiderWebDensity: terrain.DefaultSpiderWebDensity,
 		View:             ViewShaded,
@@ -125,6 +130,9 @@ func (c Config) validate() error {
 	}
 	if math.IsNaN(c.SpiderWebDensity) || math.IsInf(c.SpiderWebDensity, 0) || c.SpiderWebDensity < 0 || c.SpiderWebDensity > 1 {
 		return fmt.Errorf("infinicave: spider web density must be between 0 and 1")
+	}
+	if math.IsNaN(c.MushroomDensity) || math.IsInf(c.MushroomDensity, 0) || c.MushroomDensity < 0 || c.MushroomDensity > 1 {
+		return fmt.Errorf("infinicave: mushroom density must be between 0 and 1")
 	}
 	return nil
 }

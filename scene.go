@@ -35,6 +35,7 @@ type Scene struct {
 	collisionTolerance   float64
 	spiderWebMaxSize     float64
 	spiderWebDensity     float64
+	mushroomDensity      float64
 	loadSection          SectionLoader
 	onCollisionReady     func(CollisionGeometry)
 	closed               bool
@@ -46,7 +47,7 @@ func NewScene(config Config) (*Scene, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
-	g := &Scene{orientation: config.Orientation, forceGuidesUp: config.ForceGuidesUp, texture: config.Texture, view: config.View, collisionTolerance: config.CollisionTolerance, spiderWebMaxSize: config.SpiderWebMaxSize, spiderWebDensity: config.SpiderWebDensity, loadSection: config.LoadSection, onCollisionReady: config.OnCollisionReady}
+	g := &Scene{orientation: config.Orientation, forceGuidesUp: config.ForceGuidesUp, texture: config.Texture, view: config.View, collisionTolerance: config.CollisionTolerance, spiderWebMaxSize: config.SpiderWebMaxSize, spiderWebDensity: config.SpiderWebDensity, mushroomDensity: config.MushroomDensity, loadSection: config.LoadSection, onCollisionReady: config.OnCollisionReady}
 	if g.view != ViewShaded {
 		g.texture = 0
 	}
@@ -81,7 +82,7 @@ func NewScene(config Config) (*Scene, error) {
 			return nil, fmt.Errorf("infinicave: compile background shaders: %w", err)
 		}
 	}
-	g.world = newWorld(config.Seed, g.view, g.collisionTolerance, g.spiderWebMaxSize, g.spiderWebDensity, g.forceGuidesUp, terrain.OrientedSectionLoader(g.orientation, g.loadSection), g.orientation)
+	g.world = newWorld(config.Seed, g.view, g.collisionTolerance, g.spiderWebMaxSize, g.spiderWebDensity, g.mushroomDensity, g.forceGuidesUp, terrain.OrientedSectionLoader(g.orientation, g.loadSection), g.orientation)
 	if config.BatsPerMinute > 0 && g.view == ViewShaded {
 		g.bats = render.NewBatFlock(config.Seed, config.BatsPerMinute, g.orientation)
 	}
@@ -207,7 +208,7 @@ func (g *Scene) Reset(seed int64) {
 	pixels := g.world.renderWidth()
 	g.geometryRevisionBase = g.GeometryRevision() + 1
 	g.world.close()
-	g.world = newWorld(seed, g.view, g.collisionTolerance, g.spiderWebMaxSize, g.spiderWebDensity, g.forceGuidesUp, terrain.OrientedSectionLoader(g.orientation, g.loadSection), g.orientation)
+	g.world = newWorld(seed, g.view, g.collisionTolerance, g.spiderWebMaxSize, g.spiderWebDensity, g.mushroomDensity, g.forceGuidesUp, terrain.OrientedSectionLoader(g.orientation, g.loadSection), g.orientation)
 	g.world.pixels = pixels
 	if g.bats != nil {
 		g.bats = render.NewBatFlock(seed, g.bats.PerMinute, g.orientation)

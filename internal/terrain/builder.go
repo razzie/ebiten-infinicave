@@ -12,6 +12,8 @@ import (
 type Builder struct {
 	// ForceGuidesUp selects one overall upward-facing side per guide.
 	ForceGuidesUp bool
+	// MushroomDensity is the cluster retention probability; zero disables mushrooms.
+	MushroomDensity float64
 	// SpiderWebMaxSize bounds decoration span; zero uses the default.
 	SpiderWebMaxSize float64
 	// SpiderWebDensity is the eligible-pocket probability; zero disables webs.
@@ -24,7 +26,7 @@ type Builder struct {
 }
 
 func NewSectionBuilder(seed int64, loadSection SectionLoader, orientation ...Orientation) *Builder {
-	return &Builder{SpiderWebDensity: DefaultSpiderWebDensity, seed: seed, loadSection: loadSection, guides: newGuideCache(seed, orientation...)}
+	return &Builder{MushroomDensity: DefaultMushroomDensity, SpiderWebDensity: DefaultSpiderWebDensity, seed: seed, loadSection: loadSection, guides: newGuideCache(seed, orientation...)}
 }
 
 func (b *Builder) Build(id int64) SectionData {

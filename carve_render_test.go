@@ -128,7 +128,7 @@ func TestAuthoredAndRuntimeHolesProduceTheSamePlants(t *testing.T) {
 		t.Fatal("authored holes regrew or reshuffled vegetation instead of applying the same damage")
 	}
 	// Public section geometry carries the same clipped paths and whole plants.
-	section, err := GenerateSectionWithConfig(Config{Seed: 42, LoadSection: load}, 0)
+	section, err := GenerateSectionWithConfig(Config{Seed: 42, MushroomDensity: 1, LoadSection: load}, 0)
 	if err != nil || !reflect.DeepEqual(section.Vines, want.Vines) || !reflect.DeepEqual(section.ForegroundVines, want.ForegroundVines) || !reflect.DeepEqual(section.Mushrooms, want.Mushrooms) {
 		t.Fatalf("public authored section lost vegetation edits: %v", err)
 	}

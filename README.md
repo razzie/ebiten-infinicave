@@ -106,12 +106,13 @@ before its workers exit.
 `DefaultConfig` uses texture strength 8, background blur 0.002, dynamic shadow
 opacity 0.65, shadow softness 0.008, shadow offset (0.018, 0.025), fog strength 1, 7.5 bats per minute, shaded rendering,
 seed 0, and exact collision geometry. A zero `Config` is also valid and disables
-texture, background effects, fog, and bats. `View`
+texture, background effects, fog, bats, mushrooms, and spider webs. `View`
 is a typed enum:
 
 ```go
 config.Fog = 2 // moving mist strength; 0 disables it, 1 is default, >1 is denser
 config.BatsPerMinute = 7.5 // average bat arrivals per minute; 0 disables them
+config.MushroomDensity = 0.5 // retain half of mushroom clusters; 0 disables them
 config.BackgroundBlur = 0.002 // blur background rock and vines together
 config.ShadowOpacity = 0.65 // dynamic rock shadows; 0 disables them
 config.ShadowBlur = 0.008 // 0 gives a hard shadow
@@ -150,6 +151,13 @@ world coordinates as you scroll or resize. `Scene.Reset` clears existing bats
 and starts a fresh, seed-reproducible arrival sequence at the configured frequency.
 The frequency must be finite and nonnegative; zero disables bats. Arrival
 intervals vary randomly around the configured average, and fractional rates are supported.
+
+`Config.MushroomDensity` and the viewer flag `-mushroom-density` set the probability
+of retaining each mushroom cluster, from `0` (disabled) to `1` (the current
+appearance and `DefaultConfig()` value). For example, `-mushroom-density 0.5`
+keeps about half the clusters. Surviving clusters retain their placement, size,
+and color as density changes, and the same seed and density reproduce the same
+mushrooms after reloads and `Scene.Reset`. A zero `Config` disables mushrooms.
 
 Set `Config.LoadSection` to supply authored guides and holes per section:
 

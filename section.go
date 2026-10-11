@@ -70,6 +70,7 @@ func GenerateSectionWithConfig(config Config, id int64) (Section, error) {
 		Seed:               config.Seed,
 		Orientation:        config.Orientation,
 		ForceGuidesUp:      config.ForceGuidesUp,
+		MushroomDensity:    config.MushroomDensity,
 		CollisionTolerance: config.CollisionTolerance,
 		SpiderWebMaxSize:   config.SpiderWebMaxSize,
 		SpiderWebDensity:   config.SpiderWebDensity,

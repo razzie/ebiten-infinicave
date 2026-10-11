@@ -8,6 +8,58 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
 
+func TestMushroomDensityPreservesSurvivingClusters(t *testing.T) {
+	for _, mode := range []Orientation{Vertical, Horizontal} {
+		fullCount, sparseCount := 0, 0
+		for seed := int64(1); seed <= 10; seed++ {
+			guide := SplineGuide([]geom.V{{X: .3, Y: .9}, {X: .3, Y: .1}}, 1)
+			guide.Seed = seed
+			guides := []Guide{guide}
+			ground := RockGrid{terrainRect(.3, .05, .4, .9)}
+			full := MushroomsForGuides(guides, ground, 1, mode)
+			fullCount += len(full)
+			if len(full) < 2 {
+				t.Fatal("fixture generated too few clusters to check density")
+			}
+			var previous []MushroomGroup
+			for _, density := range []float64{0, .25, .5, .75, 1} {
+				groups := MushroomsForGuides(guides, ground, density, mode)
+				if density == .5 {
+					sparseCount += len(groups)
+				}
+				if density == 0 && len(groups) != 0 {
+					t.Fatal("zero density generated mushrooms")
+				}
+				if !reflect.DeepEqual(groups, MushroomsForGuides(guides, ground, density, mode)) {
+					t.Fatal("density selection is not deterministic")
+				}
+				contains := func(haystack []MushroomGroup, needle MushroomGroup) bool {
+					for _, group := range haystack {
+						if reflect.DeepEqual(group, needle) {
+							return true
+						}
+					}
+					return false
+				}
+				for _, group := range groups {
+					if !contains(full, group) {
+						t.Fatal("density changed cluster geometry or placement")
+					}
+				}
+				for _, group := range previous {
+					if !contains(groups, group) {
+						t.Fatal("increasing density removed a surviving cluster")
+					}
+				}
+				previous = groups
+			}
+		}
+		if sparseCount == 0 || sparseCount >= fullCount {
+			t.Fatalf("mode %v: half density retained %d of %d clusters", mode, sparseCount, fullCount)
+		}
+	}
+}
+
 func TestMushroomSpacingRejectsCrossingStalksWithSeparateRoots(t *testing.T) {
 	a := Mushroom{CapWidth: .01, Stem: []geom.V{{X: .2, Y: .5}, {X: .3, Y: .4}, {X: .4, Y: .3}}}
 	b := Mushroom{CapWidth: .015, Stem: []geom.V{{X: .4, Y: .5}, {X: .3, Y: .4}, {X: .2, Y: .3}}}
@@ -36,7 +88,7 @@ func TestMushroomStalksKeepClearanceAcrossGuides(t *testing.T) {
 				guides = append(guides, g)
 				ground = append(ground, terrainRect(x, .05, .4, .9))
 			}
-			groups := MushroomsForGuides(guides, ground, mode)
+			groups := MushroomsForGuides(guides, ground, DefaultMushroomDensity, mode)
 			var all []Mushroom
 			for _, group := range groups {
 				if len(group.Mushrooms) < 3 || len(group.Mushrooms) > 5 {
@@ -60,7 +112,7 @@ func TestMushroomStalksKeepClearanceAcrossGuides(t *testing.T) {
 					}
 				}
 			}
-			if again := MushroomsForGuides(guides, ground, mode); !reflect.DeepEqual(groups, again) {
+			if again := MushroomsForGuides(guides, ground, DefaultMushroomDensity, mode); !reflect.DeepEqual(groups, again) {
 				t.Fatalf("seed %d mode %v: spaced mushrooms are not deterministic", seed, mode)
 			}
 		}
@@ -72,7 +124,7 @@ func TestHorizontalMushroomsAndLighting(t *testing.T) {
 	guide := SplineGuide([]geom.V{{X: .5, Y: .1}, {X: .5, Y: .9}}, -1)
 	guide.Seed = 42
 	ground := RockGrid{terrainRect(.5, .05, .4, .9)}
-	groups := MushroomsForGuides([]Guide{guide}, ground, Horizontal)
+	groups := MushroomsForGuides([]Guide{guide}, ground, DefaultMushroomDensity, Horizontal)
 	count := 0
 	for _, group := range groups {
 		for _, m := range group.Mushrooms {
@@ -104,7 +156,7 @@ func TestMushroomsFollowGuidesAndKeepCapsUpright(t *testing.T) {
 		{Center: geom.V{X: 0.5, Y: 0.45}, Polygon: []geom.V{{X: 0.018, Y: 0.3}, {X: 0.982, Y: 0.3}, {X: 0.982, Y: 0.6}, {X: 0.018, Y: 0.6}}},
 		{Center: geom.V{X: 0.325, Y: 0.45}, Polygon: []geom.V{{X: 0.15, Y: 0.018}, {X: 0.5, Y: 0.018}, {X: 0.5, Y: 0.982}, {X: 0.15, Y: 0.982}}},
 	}
-	groups := MushroomsForGuides(guides, ground)
+	groups := MushroomsForGuides(guides, ground, DefaultMushroomDensity)
 	if len(groups) < 4 {
 		t.Fatalf("expected mushroom groups along both guides, got %d", len(groups))
 	}
@@ -150,7 +202,7 @@ func TestMushroomsFollowGuidesAndKeepCapsUpright(t *testing.T) {
 	if len(widths) < 3 {
 		t.Fatal("mushrooms do not vary in size")
 	}
-	if again := MushroomsForGuides(guides, ground); !reflect.DeepEqual(groups, again) {
+	if again := MushroomsForGuides(guides, ground, DefaultMushroomDensity); !reflect.DeepEqual(groups, again) {
 		t.Fatal("mushroom groups are not deterministic")
 	}
 }
@@ -158,17 +210,17 @@ func TestMushroomsFollowGuidesAndKeepCapsUpright(t *testing.T) {
 func TestMushroomsSkipUnsupportedAndScreenEdgeGuides(t *testing.T) {
 	guide := SplineGuide([]geom.V{{X: 0.004, Y: 0.3}, {X: 0.4, Y: 0.3}}, 1)
 	guide.Seed = 42
-	if groups := MushroomsForGuides([]Guide{guide}, nil); len(groups) != 0 {
+	if groups := MushroomsForGuides([]Guide{guide}, nil, DefaultMushroomDensity); len(groups) != 0 {
 		t.Fatal("mushrooms were generated without foreground support")
 	}
 	ground := RockGrid{{Center: geom.V{X: 0.2, Y: 0.3}, Polygon: []geom.V{{X: 0.018, Y: 0.28}, {X: 0.3, Y: 0.28}, {X: 0.3, Y: 0.32}, {X: 0.018, Y: 0.32}}}}
-	if groups := MushroomsForGuides([]Guide{guide}, ground); len(groups) != 0 {
+	if groups := MushroomsForGuides([]Guide{guide}, ground, DefaultMushroomDensity); len(groups) != 0 {
 		t.Fatal("mushrooms were generated along an unsupported screen-edge section")
 	}
 	guide = SplineGuide([]geom.V{{X: 0.1, Y: 0.3}, {X: 0.5, Y: 0.3}, {X: 0.9, Y: 0.3}}, -1)
 	guide.Seed = 43
 	ground = RockGrid{{Center: geom.V{X: 0.5, Y: 0.3}, Polygon: []geom.V{{X: 0.018, Y: 0.28}, {X: 0.982, Y: 0.28}, {X: 0.982, Y: 0.32}, {X: 0.018, Y: 0.32}}}}
-	if groups := MushroomsForGuides([]Guide{guide}, ground); len(groups) != 0 {
+	if groups := MushroomsForGuides([]Guide{guide}, ground, DefaultMushroomDensity); len(groups) != 0 {
 		t.Fatal("mushrooms were generated with their air side pointing down")
 	}
 }
