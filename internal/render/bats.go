@@ -128,8 +128,9 @@ func (f *BatFlock) Draw(dst *ebiten.Image, viewport Viewport) {
 		if x+size < 0 || x-size > float64(dst.Bounds().Dx()) || y+size < 0 || y-size > float64(dst.Bounds().Dy()) {
 			continue
 		}
+		alpha := uint8(math.Round(255 * horizontalFade(position.X)))
 		options.ColorScale.Reset()
-		options.ColorScale.ScaleWithColor(color.NRGBA{R: 45, G: 35, B: 40, A: uint8(math.Round(255 * horizontalFade(position.X)))})
+		options.ColorScale.ScaleWithColor(color.NRGBA{R: 45, G: 35, B: 40, A: alpha})
 		shade := 1 + b.shade
 		options.ColorScale.Scale(shade, shade, shade, 1)
 		flap := float32(math.Sin(b.Age*2*math.Pi*6 + b.phase))
@@ -141,6 +142,12 @@ func (f *BatFlock) Draw(dst *ebiten.Image, viewport Viewport) {
 		var screenPath vector.Path
 		screenPath.AddPath(&path, transform)
 		vector.FillPath(dst, &screenPath, nil, options)
+		// Keep the eyes attached to the head as the bat banks and turns.
+		eyes := color.NRGBA{R: 255, G: 255, B: 255, A: alpha}
+		for _, eyeX := range []float64{-.065, .065} {
+			ex, ey := transform.GeoM.Apply(eyeX, -.15)
+			vector.FillCircle(dst, float32(ex), float32(ey), float32(size*.045), eyes, true)
+		}
 	}
 }
 
