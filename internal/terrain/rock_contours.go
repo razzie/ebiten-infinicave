@@ -11,11 +11,16 @@ const rockContourHeight = .008
 // Clip the outer footprint through existing faces instead of exposing a row
 // of complete Voronoi tiles. Keep the original face normal and material so
 // clipping/triangulation cannot introduce extra wedges of light.
-func contourRockGrid(grid RockGrid, heightAt func(geom.V) float64) RockGrid {
+func contourRockGrid(grid RockGrid, heightAt func(geom.V) float64, guides ...[]Guide) RockGrid {
+	grid = splitRockJunctions(grid)
+	var boundaries []Guide
+	if len(guides) > 0 {
+		boundaries = guides[0]
+	}
 	parts := make([]RockGrid, len(grid))
 	parallelFor(len(grid), func(n int) {
 		c := grid[n]
-		for _, poly := range contourRockFace(c.Polygon, c.Center, heightAt) {
+		for _, poly := range contourRockFace(c.Polygon, c.Center, heightAt, boundaries) {
 			if len(poly) < 3 || geom.PolygonArea(poly) < .000006 {
 				continue
 			}
@@ -35,7 +40,7 @@ func contourRockGrid(grid RockGrid, heightAt func(geom.V) float64) RockGrid {
 	return out
 }
 
-func contourRockFace(poly []geom.V, center geom.V, heightAt func(geom.V) float64) [][]geom.V {
+func contourRockFace(poly []geom.V, center geom.V, heightAt func(geom.V) float64, guides ...[]Guide) [][]geom.V {
 	if len(poly) < 3 {
 		return nil
 	}
@@ -43,11 +48,18 @@ func contourRockFace(poly []geom.V, center geom.V, heightAt func(geom.V) float64
 	inside := 0
 	for i, p := range poly {
 		// On a guide the height is discontinuous. Sample just inside this
-		// face so the two sides retain their own boundary elevation.
-		q := geom.LerpVector(p, center, 1e-6)
-		if !geom.InsidePolygon(q, poly) {
-			prev, next := poly[(i+len(poly)-1)%len(poly)], poly[(i+1)%len(poly)]
-			q = geom.LerpVector(p, prev.Add(next).Mul(.5), 1e-6)
+		// face so the two sides retain their own boundary elevation. Elsewhere
+		// sample the shared vertex itself, independent of either face's center.
+		q := p
+		if len(guides) > 0 && len(guides[0]) > 0 {
+			_, pr := nearestGuide(p, guides[0])
+			if pr.Dist < mergeTolerance {
+				q = geom.LerpVector(p, center, 1e-6)
+				if !geom.InsidePolygon(q, poly) {
+					prev, next := poly[(i+len(poly)-1)%len(poly)], poly[(i+1)%len(poly)]
+					q = geom.LerpVector(p, prev.Add(next).Mul(.5), 1e-6)
+				}
+			}
 		}
 		values[i] = heightAt(q) - rockContourHeight
 		if values[i] >= 0 {
@@ -141,6 +153,7 @@ func clipHeightTriangle(points []geom.V, values []float64) []geom.V {
 // interpolation through a wide facet can otherwise leave small triangular
 // teeth. Shared junctions move together, while guide lips stay exactly put.
 func polishRockContours(grid RockGrid, guides []Guide, heightAt func(geom.V) float64) {
+	copy(grid, splitRockJunctions(grid))
 	type key [2]int64
 	keyAt := func(p geom.V) key { return key{int64(math.Round(p.X * 1e7)), int64(math.Round(p.Y * 1e7))} }
 	points := make(map[key]geom.V)

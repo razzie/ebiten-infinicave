@@ -59,6 +59,43 @@ func ExposedRockEdges(grid RockGrid) []RockEdge {
 	return RockBoundaryEdges(grid, RockNeighbors(grid), false)
 }
 
+// Merged faces can omit a collinear vertex retained by their neighbor. Make
+// those junctions explicit before sampling heights or moving contour points,
+// so both faces use the same edge intervals and move their shared endpoints.
+func splitRockJunctions(grid RockGrid) RockGrid {
+	neighbors := RockNeighbors(grid)
+	out := append(RockGrid(nil), grid...)
+	parallelFor(len(grid), func(i int) {
+		var poly []geom.V
+		for j, a := range grid[i].Polygon {
+			b := grid[i].Polygon[(j+1)%len(grid[i].Polygon)]
+			d := b.Sub(a)
+			poly = append(poly, a)
+			if d.Len2() < mergeTolerance*mergeTolerance {
+				continue
+			}
+			var ts []float64
+			for _, k := range neighbors[i] {
+				for _, p := range grid[k].Polygon {
+					t := p.Sub(a).Dot(d) / d.Len2()
+					if t > 0 && t < 1 && p.Sub(a.Add(d.Mul(t))).Len() < mergeTolerance {
+						ts = append(ts, t)
+					}
+				}
+			}
+			sort.Float64s(ts)
+			for _, t := range ts {
+				p := a.Add(d.Mul(t))
+				if p.Sub(poly[len(poly)-1]).Len() > mergeTolerance && p.Sub(b).Len() > mergeTolerance {
+					poly = append(poly, p)
+				}
+			}
+		}
+		out[i].Polygon = poly
+	})
+	return out
+}
+
 func RockBoundaryEdges(grid RockGrid, neighbors [][]int, includeWindow bool) []RockEdge {
 	type entry struct {
 		edge  RockEdge

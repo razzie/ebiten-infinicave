@@ -105,7 +105,7 @@ func (b *Builder) Begin(ctx context.Context, id int64) *SectionBuild {
 	if ctx.Err() != nil {
 		return nil
 	}
-	foreground = contourRockGrid(foreground, func(p geom.V) float64 { return reliefHeight(p, guides, noise, branches) })
+	foreground = contourRockGrid(foreground, func(p geom.V) float64 { return reliefHeight(p, guides, noise, branches) }, guides)
 	if ctx.Err() != nil {
 		return nil
 	}

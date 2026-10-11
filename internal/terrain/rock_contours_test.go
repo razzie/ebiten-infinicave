@@ -73,3 +73,91 @@ func TestContourPolishKeepsSharedJunctionsTogether(t *testing.T) {
 		}
 	}
 }
+
+func TestContourPolishPreservesPartialSharedEdge(t *testing.T) {
+	// The corner at (.2, .2) lies inside the left face's long edge. Moving
+	// only the right face's vertex would tear open a highlighted interior seam.
+	grid := RockGrid{terrainRect(.1, .1, .1, .16), terrainRect(.2, .1, .06, .1)}
+	polishRockContours(grid, nil, func(p geom.V) float64 { return rockContourHeight + .2 - p.Y })
+	if shared := mergeableBorder(grid[0].Polygon, grid[1].Polygon, nil); shared < .09 {
+		t.Fatalf("polishing tore the partial shared edge: shared=%g", shared)
+	}
+	moved := false
+	for _, p := range grid[1].Polygon {
+		if math.Abs(p.Y-.2) < 1e-9 && p.X > .201 && p.X < .21 {
+			moved = true
+			found := false
+			for _, q := range grid[0].Polygon {
+				if p.Sub(q).Len() < mergeTolerance {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal("the moved junction is missing from its neighboring face")
+			}
+		}
+	}
+	if !moved {
+		t.Fatal("fixture did not move the shared contour junction")
+	}
+}
+
+func TestContourSamplesContinuousSharedVertices(t *testing.T) {
+	grid := RockGrid{terrainRect(.1, .1, .1, .1), terrainRect(.2, .1, .1, .14)}
+	height := func(p geom.V) float64 { return rockContourHeight + .16 - p.Y }
+	clipped := contourRockGrid(grid, height)
+	if len(clipped) != 2 {
+		t.Fatalf("expected two clipped neighbors, got %d", len(clipped))
+	}
+	if shared := mergeableBorder(clipped[0].Polygon, clipped[1].Polygon, nil); math.Abs(shared-.06) > 1e-12 {
+		t.Fatalf("continuous height sampling cracked the shared edge: %g", shared)
+	}
+	for _, c := range clipped {
+		for _, p := range c.Polygon {
+			if p.Y > .14 && math.Abs(p.Y-.16) > 1e-12 {
+				t.Fatalf("contour crossing depends on the face's center: %v", p)
+			}
+		}
+	}
+}
+
+func TestContourSamplesPartialSharedEdgesAtSameJunctions(t *testing.T) {
+	grid := RockGrid{
+		terrainRect(.1, .1, .1, .2),
+		terrainRect(.2, .1, .1, .1),
+		terrainRect(.2, .2, .1, .1),
+	}
+	height := func(p geom.V) float64 { return rockContourHeight + .23*.23 - p.Y*p.Y }
+	clipped := contourRockGrid(grid, height)
+	if len(clipped) != 3 {
+		t.Fatalf("expected three clipped neighbors, got %d", len(clipped))
+	}
+	// Nonlinear relief must still interpolate through the same junctions on
+	// the long merged edge and both shorter neighboring edges.
+	want := .2 + (.23*.23-.2*.2)/(.3*.3-.2*.2)*.1
+	for _, i := range []int{0, 2} {
+		found := false
+		for _, p := range clipped[i].Polygon {
+			if math.Abs(p.X-.2) < 1e-12 && math.Abs(p.Y-want) < 1e-12 {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("face %d has a different shared contour crossing", i)
+		}
+	}
+}
+
+func TestContourKeepsGuideHeightDiscontinuity(t *testing.T) {
+	guide := SplineGuide([]geom.V{{X: .1, Y: .2}, {X: .3, Y: .2}}, 1)
+	height := func(p geom.V) float64 {
+		if p.Y > .2 {
+			return .04
+		}
+		return 0
+	}
+	grid := contourRockGrid(RockGrid{terrainRect(.1, .2, .2, .1)}, height, []Guide{guide})
+	if len(grid) != 1 || math.Abs(geom.PolygonArea(grid[0].Polygon)-.02) > 1e-12 {
+		t.Fatal("sampling on the guide eroded its raised side")
+	}
+}
