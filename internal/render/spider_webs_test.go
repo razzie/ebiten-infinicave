@@ -101,16 +101,43 @@ func TestSpiderWebMeshUsesPreparedTerrainSites(t *testing.T) {
 		t.Fatal("missing translucent silk mesh")
 	}
 	for _, view := range []View{ViewShaded, ViewClay, ViewHeight, ViewNormals, ViewShadows} {
-		mesh := PrepareGridWithTopology(nil, view, topology)
+		rock := PrepareForeground(terrain.SectionData{ForegroundTopology: topology}, view)
+		bare := *topology
+		bare.SpiderWebs = nil
+		if !reflect.DeepEqual(rock.Foreground, PrepareForeground(terrain.SectionData{ForegroundTopology: &bare}, view).Foreground) {
+			t.Fatal("rock mesh includes web decoration")
+		}
+		decoration := PrepareVegetation(terrain.SectionData{ForegroundTopology: topology}, view)
 		if view == ViewShaded {
-			if len(mesh.Outlines) == 0 || !reflect.DeepEqual(mesh.Outlines[len(mesh.Outlines)-1], want) {
-				t.Fatal("renderer did not use the precomputed web sites")
+			expected := SectionMesh{SpiderWebs: prepareSpiderWebs(topology.SpiderWebs, true)}
+			FinishSectionMesh(&expected)
+			if !reflect.DeepEqual(decoration.SpiderWebs, expected.SpiderWebs) || decoration.SpiderWebsBounds != expected.SpiderWebsBounds {
+				t.Fatal("decoration renderer did not use the precomputed web sites")
 			}
-		} else if len(mesh.Outlines) != 0 {
+		} else if len(decoration.SpiderWebs.Indices) != 0 {
 			t.Fatalf("web appeared in %s diagnostic view", view)
 		}
 	}
 	if !reflect.DeepEqual(want, prepareSpiderWebs(topology.SpiderWebs, false)) {
 		t.Fatal("prepared web changed on redraw")
+	}
+}
+
+func TestSpiderWebImagesClipToOwnedBandAcrossSeams(t *testing.T) {
+	for _, y := range []float64{-.02, .98} {
+		web := terrain.SpiderWeb{Corner: geom.V{X: .3, Y: y}, A: geom.V{X: .36, Y: y}, B: geom.V{X: .33, Y: y + .05}}
+		mesh := PrepareVegetation(terrain.SectionData{ForegroundTopology: &terrain.RockTopology{SpiderWebs: []terrain.SpiderWeb{web}}}, ViewShaded)
+		if mesh.SpiderWebsBounds.Empty() {
+			t.Fatal("seam-crossing web was culled")
+		}
+		if mesh.SpiderWebsBounds.Min.Y < RasterPixelsPerUnit || mesh.SpiderWebsBounds.Max.Y > 2*RasterPixelsPerUnit {
+			t.Fatal("web image overlaps a neighboring section's owned band")
+		}
+		for _, pixels := range []int{1, 501, 1920} {
+			scaled := ScaleVegetationMesh(mesh, pixels)
+			if scaled.SpiderWebsBounds.Min.Y < pixels || scaled.SpiderWebsBounds.Max.Y > 2*pixels {
+				t.Fatal("scaled web image overlaps a neighboring band")
+			}
+		}
 	}
 }

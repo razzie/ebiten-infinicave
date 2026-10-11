@@ -3,11 +3,13 @@ package infinicave
 import (
 	"fmt"
 	"image"
+	"reflect"
 	"testing"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 	"github.com/razzie/ebiten-infinicave/internal/render"
+	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
 func TestResizeUsesNativeImagesAndDefersOffscreenSections(t *testing.T) {
@@ -330,14 +332,28 @@ func TestIndependentLayersMergeWithoutReuploadingForeground(t *testing.T) {
 	if s.terrain == nil || s.foreground != image || w.revision != revision {
 		t.Fatal("background replaced foreground or query geometry")
 	}
-	plants := mesh
-	plants.Layers = render.VegetationLayer
+	web := terrain.SpiderWeb{Corner: V{X: .3, Y: .3}, A: V{X: .36, Y: .3}, B: V{X: .33, Y: .35}}
+	plants := render.PrepareVegetation(terrain.SectionData{
+		ForegroundTopology: &terrain.RockTopology{SpiderWebs: []terrain.SpiderWeb{web}},
+	}, ViewShaded)
+	plants.Geometry = mesh.Geometry
 	w.startUpload(plants)
 	for tick := 0; tick < 20 && w.upload != nil; tick++ {
 		w.receive(g)
 	}
-	if s.foreground != image || s.vegetationPending || s.mesh.LayerMask() != render.AllLayers {
-		t.Fatal("vegetation completion lost an independent layer")
+	if s.foreground != image || s.spiderWebs == nil || s.vegetationPending || s.mesh.LayerMask() != render.AllLayers {
+		t.Fatal("decoration completion lost an independent layer")
+	}
+	if !reflect.DeepEqual(s.mesh.SpiderWebs, plants.SpiderWebs) || s.mesh.SpiderWebsBounds != plants.SpiderWebsBounds {
+		t.Fatal("decoration publication lost cached webs")
+	}
+	w.pixels = 501
+	w.startUpload(*s.mesh)
+	for tick := 0; tick < 20 && w.upload != nil; tick++ {
+		w.receive(g)
+	}
+	if s.spiderWebs == nil || s.vegetationWidth() != 501 || s.spiderWebsBounds.Min.Y < 501 || s.spiderWebsBounds.Max.Y > 1002 {
+		t.Fatal("resize lost the independent web layer or its band alignment")
 	}
 }
 

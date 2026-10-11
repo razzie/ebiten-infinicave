@@ -16,9 +16,10 @@ import (
 
 type worldSection struct {
 	terrain, vines, mushrooms, foreground               *ebiten.Image
-	foregroundVines                                     *ebiten.Image
+	foregroundVines, spiderWebs                         *ebiten.Image
 	geometry                                            *terrain.Geometry
 	vinesBounds, foregroundVinesBounds, mushroomsBounds image.Rectangle
+	spiderWebsBounds                                    image.Rectangle
 	vegetationPending                                   bool
 	mesh                                                *render.SectionMesh
 	pixels                                              int
@@ -144,7 +145,7 @@ func newWorld(seed int64, view View, tolerance float64, loadSection SectionLoade
 				ok = builder.Decorate(ctx, job.build)
 				if ok {
 					mesh := render.PrepareVegetation(job.build.Data(), view)
-					complete := *job.geometry
+					complete := *terrain.BindTerrainMaterial(job.geometry, job.build.Data())
 					complete.Vegetation = terrain.SectionVegetation(job.build.Data())
 					mesh.Geometry = &complete
 					mesh = render.MergeSectionMeshes(job.mesh, mesh)
@@ -398,7 +399,7 @@ func (w *world) prune(y float64, height float64, velocity float64) {
 }
 
 func (s *worldSection) deallocate() {
-	for _, img := range []*ebiten.Image{s.terrain, s.foreground, s.vines, s.foregroundVines, s.mushrooms} {
+	for _, img := range []*ebiten.Image{s.terrain, s.foreground, s.vines, s.foregroundVines, s.mushrooms, s.spiderWebs} {
 		if img != nil {
 			img.Deallocate()
 		}

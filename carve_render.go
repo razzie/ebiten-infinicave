@@ -13,11 +13,16 @@ import (
 // in place, so an already cropped mesh must never be finished a second time.
 func (g *Scene) prepareCarvedVegetation(mesh *render.SectionMesh) {
 	mesh.Vines, mesh.ForegroundVines, mesh.Mushrooms = nil, nil, render.TriangleMesh{}
+	mesh.SpiderWebs = render.TriangleMesh{}
 	if g.view == ViewShaded {
+		geometry := *mesh.Geometry
+		geometry.Topology = terrain.PrepareSpiderWebs(geometry.Topology)
+		mesh.Geometry = &geometry
 		plants := mesh.Geometry.Vegetation
 		mesh.Vines = render.PrepareVines(plants.Vines)
 		mesh.ForegroundVines = render.PrepareForegroundVines(plants.ForegroundVines, g.orientation)
 		mesh.Mushrooms = render.PrepareOwnedMushrooms(plants.Mushrooms)
+		mesh.SpiderWebs = render.PrepareOwnedSpiderWebs(mesh.Geometry.Topology.SpiderWebs)
 	}
 	render.FinishSectionMesh(mesh)
 }
@@ -28,9 +33,11 @@ func (g *Scene) redrawCarvedVegetation(section *worldSection, id int64) {
 	}
 	mesh := render.SectionMesh{ID: id, Geometry: section.geometry}
 	g.prepareCarvedVegetation(&mesh)
+	section.geometry = mesh.Geometry
 	if section.mesh != nil {
 		section.mesh.Geometry = section.geometry
 		section.mesh.Vines, section.mesh.ForegroundVines, section.mesh.Mushrooms = mesh.Vines, mesh.ForegroundVines, mesh.Mushrooms
+		section.mesh.SpiderWebs, section.mesh.SpiderWebsBounds = mesh.SpiderWebs, mesh.SpiderWebsBounds
 		section.mesh.VinesBounds, section.mesh.ForegroundVinesBounds, section.mesh.MushroomsBounds = mesh.VinesBounds, mesh.ForegroundVinesBounds, mesh.MushroomsBounds
 	}
 	pixels := section.vegetationWidth()
@@ -39,7 +46,7 @@ func (g *Scene) redrawCarvedVegetation(section *worldSection, id int64) {
 		g.world.white = ebiten.NewImage(1, 1)
 		g.world.white.Fill(color.White)
 	}
-	for _, layer := range []*ebiten.Image{section.vines, section.foregroundVines, section.mushrooms} {
+	for _, layer := range []*ebiten.Image{section.vines, section.foregroundVines, section.mushrooms, section.spiderWebs} {
 		if layer != nil {
 			layer.Deallocate()
 		}
@@ -57,6 +64,8 @@ func (g *Scene) redrawCarvedVegetation(section *worldSection, id int64) {
 	section.vines = draw(mesh.Vines, mesh.VinesBounds)
 	section.foregroundVines = draw(mesh.ForegroundVines, mesh.ForegroundVinesBounds)
 	section.mushrooms = draw([]render.TriangleMesh{mesh.Mushrooms}, mesh.MushroomsBounds)
+	section.spiderWebs = draw([]render.TriangleMesh{mesh.SpiderWebs}, mesh.SpiderWebsBounds)
+	section.spiderWebsBounds = mesh.SpiderWebsBounds
 	section.vinesBounds, section.foregroundVinesBounds, section.mushroomsBounds = mesh.VinesBounds, mesh.ForegroundVinesBounds, mesh.MushroomsBounds
 	top := terrain.SectionWindowTop(id)
 	section.vines = g.finishVinesAt(section.vines, section.vinesBounds, top, pixels)
@@ -126,7 +135,7 @@ func (g *Scene) applyStoredCuts(mesh *render.SectionMesh) {
 	if changed && mesh.LayerMask()&render.ForegroundLayer != 0 {
 		mesh.Foreground = render.PrepareOwnedGridWithTopology(nil, g.view, mesh.Geometry.Topology)
 	}
-	if plantsChanged && mesh.LayerMask()&render.VegetationLayer != 0 {
+	if (changed || plantsChanged) && mesh.LayerMask()&render.VegetationLayer != 0 {
 		g.prepareCarvedVegetation(mesh)
 	}
 }
@@ -161,15 +170,15 @@ func (g *Scene) carveSectionUpload(u *sectionUpload, cut terrain.RockCut) {
 			u.stage, u.next = uploadForegroundFaces, 0
 		}
 	}
-	if plantsChanged && u.data.LayerMask()&render.VegetationLayer != 0 {
+	if (changed || plantsChanged) && u.data.LayerMask()&render.VegetationLayer != 0 {
 		g.prepareCarvedVegetation(&u.data)
 		if u.initialized && u.stage >= uploadVines {
-			for _, img := range []*ebiten.Image{u.vines, u.foregroundVines, u.mushrooms} {
+			for _, img := range []*ebiten.Image{u.vines, u.foregroundVines, u.mushrooms, u.spiderWebs} {
 				if img != nil {
 					img.Deallocate()
 				}
 			}
-			u.vines, u.foregroundVines, u.mushrooms = nil, nil, nil
+			u.vines, u.foregroundVines, u.mushrooms, u.spiderWebs = nil, nil, nil, nil
 			u.clearSurface()
 			u.needed |= render.VegetationLayer
 			u.stage, u.next = uploadVines, 0

@@ -78,6 +78,8 @@ func ScaleVegetationMesh(mesh SectionMesh, pixels int) SectionMesh {
 	mesh.ForegroundVines, mesh.ForegroundVinesBounds = scaleVegetationMeshes(mesh.ForegroundVines, mesh.ForegroundVinesBounds, pixels)
 	mushrooms, bounds := scaleVegetationMeshes([]TriangleMesh{mesh.Mushrooms}, mesh.MushroomsBounds, pixels)
 	mesh.Mushrooms, mesh.MushroomsBounds = mushrooms[0], bounds
+	webs, bounds := scaleVegetationMeshes([]TriangleMesh{mesh.SpiderWebs}, mesh.SpiderWebsBounds, pixels)
+	mesh.SpiderWebs, mesh.SpiderWebsBounds = webs[0], bounds
 	return mesh
 }
 

@@ -94,11 +94,11 @@ func (g *Scene) carve(cut terrain.RockCut) (CarveResult, error) {
 		old := section.geometry
 		updated, parents, changed := cut.Geometry(id, old, g.collisionTolerance)
 		updated, plantsChanged := cut.Plants(updated)
-		if plantsChanged {
-			section.geometry = updated
-			g.redrawCarvedVegetation(section, id)
-		}
 		if !changed {
+			if plantsChanged {
+				section.geometry = updated
+				g.redrawCarvedVegetation(section, id)
+			}
 			for _, face := range old.Faces {
 				origins[face.Key] = q.faceIDs[face.Key]
 			}
@@ -116,6 +116,7 @@ func (g *Scene) carve(cut terrain.RockCut) (CarveResult, error) {
 		}
 		section.geometry = updated
 		g.redrawCarvedSection(section)
+		g.redrawCarvedVegetation(section, id)
 		result.SectionIDs = append(result.SectionIDs, -id)
 	}
 	delete(affected, 0) // padding-only geometry has no query ID

@@ -20,17 +20,18 @@ type RockTopology struct {
 	allBoundary []RockEdge // includes generation-window edges for collision
 	Cuts        []RockCut
 	Top         float64
-	// Appearance and SpiderWebs are bound after materialization. The early
-	// collision snapshot retains only geometry and potential corner pockets.
-	Appearance RockGrid
-	SpiderWebs []SpiderWeb
-	webCorners []webCorner
+	// Appearance is bound during materialization; web fitting belongs to the
+	// later decoration phase. Published snapshots remain immutable.
+	Appearance   RockGrid
+	SpiderWebs   []SpiderWeb
+	webCorners   []webCorner
+	websPrepared bool
 }
 
 // Neighbors returns immutable adjacency in Grid order. Callers must not modify it.
 func (t *RockTopology) Neighbors() [][]int { return t.neighbors }
 
-// NewRockTopology prepares the inset silhouette and its potential web pockets.
+// NewRockTopology prepares the inset silhouette without decoration.
 func NewRockTopology(grid RockGrid) *RockTopology {
 	t := &RockTopology{Grid: InsetForegroundGrid(grid)}
 	t.neighbors = RockNeighbors(t.Grid)
@@ -45,7 +46,6 @@ func (t *RockTopology) prepareBoundary() {
 			t.Boundary = append(t.Boundary, edge)
 		}
 	}
-	t.webCorners = findWebCorners(t.Grid, t.Boundary)
 }
 
 func rockWindowEdge(a, b geom.V) bool {

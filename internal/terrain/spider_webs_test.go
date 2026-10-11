@@ -189,11 +189,11 @@ func TestSpiderWebsPreferTheLargestFullyShadedFit(t *testing.T) {
 	}
 }
 
-func TestCarvingRebuildsWebSitesWithoutChangingThePublishedTopology(t *testing.T) {
+func TestCarvingDefersWebSitesWithoutChangingThePublishedTopology(t *testing.T) {
 	grid, p := acuteWebFixture(t, math.Pi/3)
 	topology := NewRockTopology(grid)
 	topology.Appearance = append(RockGrid(nil), topology.Grid...)
-	topology.SpiderWebs = resolveSpiderWebs(topology.Appearance, topology.webCorners)
+	topology = PrepareSpiderWebs(topology)
 	if len(topology.SpiderWebs) != 1 {
 		t.Fatal("fixture has no web to remove")
 	}
@@ -207,7 +207,11 @@ func TestCarvingRebuildsWebSitesWithoutChangingThePublishedTopology(t *testing.T
 	if !changed || updated.Topology.Appearance == nil {
 		t.Fatal("cut did not rebuild the prepared appearance")
 	}
-	for _, w := range updated.Topology.SpiderWebs {
+	if updated.Topology.webCorners != nil || updated.Topology.SpiderWebs != nil || updated.Topology.websPrepared {
+		t.Fatal("carving fitted decorations while rebuilding rock geometry")
+	}
+	decorated := PrepareSpiderWebs(updated.Topology)
+	for _, w := range decorated.SpiderWebs {
 		if w.Corner.Sub(p).Len() < .04 {
 			t.Fatal("web retained a removed rock corner")
 		}
@@ -215,8 +219,8 @@ func TestCarvingRebuildsWebSitesWithoutChangingThePublishedTopology(t *testing.T
 	if !reflect.DeepEqual(topology.SpiderWebs, original) {
 		t.Fatal("cut changed the previously published web sites")
 	}
-	full := PrepareRockAppearance(CarvedTopology(updated.Grid, updated.Cuts, updated.Top))
-	if !reflect.DeepEqual(updated.Topology.SpiderWebs, full.SpiderWebs) || !reflect.DeepEqual(updated.Topology.Appearance, full.Appearance) {
+	full := PrepareSpiderWebs(CarvedTopology(updated.Grid, updated.Cuts, updated.Top))
+	if !reflect.DeepEqual(decorated.SpiderWebs, full.SpiderWebs) || !reflect.DeepEqual(updated.Topology.Appearance, full.Appearance) {
 		t.Fatal("incremental carving differs from a full web/lighting rebuild")
 	}
 }
@@ -229,14 +233,32 @@ func TestSpiderWebsBindAfterFinalLightingAndSurviveSectionOverlap(t *testing.T) 
 		for id := int64(0); id < 4; id++ {
 			s := builder.Begin(context.Background(), id)
 			early := s.Data().ForegroundTopology
-			if early.Appearance != nil || early.SpiderWebs != nil {
+			if early.Appearance != nil || early.SpiderWebs != nil || early.webCorners != nil || early.websPrepared {
 				t.Fatal("webs were placed before final lighting")
 			}
 			if !s.Materialize(context.Background()) {
 				t.Fatal("materialization failed")
 			}
+			materialized := s.Data().ForegroundTopology
+			if materialized.webCorners != nil || materialized.SpiderWebs != nil || materialized.websPrepared {
+				t.Fatal("materialization waited for web fitting")
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			if builder.Decorate(ctx, s) || s.Data().ForegroundTopology != materialized {
+				t.Fatal("canceled decoration changed the rock snapshot")
+			}
+			if !builder.Decorate(context.Background(), s) {
+				t.Fatal("decoration failed")
+			}
 			topology := s.Data().ForegroundTopology
-			if early.Appearance != nil || early.SpiderWebs != nil {
+			if materialized.webCorners != nil || materialized.SpiderWebs != nil || materialized.websPrepared {
+				t.Fatal("decoration modified the published rock snapshot")
+			}
+			if PrepareSpiderWebs(topology) != topology {
+				t.Fatal("prepared webs were regenerated")
+			}
+			if early.Appearance != nil || early.SpiderWebs != nil || early.webCorners != nil || early.websPrepared {
 				t.Fatal("materialization modified the published shape snapshot")
 			}
 			if PrepareRockAppearance(topology) != topology {
@@ -260,7 +282,7 @@ func TestSpiderWebsBindAfterFinalLightingAndSurviveSectionOverlap(t *testing.T) 
 					}
 				}
 				if !found {
-					t.Fatal("web was not precomputed during shaping")
+					t.Fatal("web was not fitted during decoration")
 				}
 				if w.Corner.Y >= 0 && w.Corner.Y < 1 {
 					total++

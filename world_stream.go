@@ -50,12 +50,12 @@ func (w *world) savePending(data render.SectionMesh) {
 }
 
 func (u *sectionUpload) deallocate() {
-	for _, img := range []*ebiten.Image{u.img, u.foreground, u.vines, u.foregroundVines, u.mushrooms, u.surface} {
+	for _, img := range []*ebiten.Image{u.img, u.foreground, u.vines, u.foregroundVines, u.mushrooms, u.spiderWebs, u.surface} {
 		if img != nil {
 			img.Deallocate()
 		}
 	}
-	u.img, u.foreground, u.vines, u.foregroundVines, u.mushrooms, u.surface = nil, nil, nil, nil, nil, nil
+	u.img, u.foreground, u.vines, u.foregroundVines, u.mushrooms, u.spiderWebs, u.surface = nil, nil, nil, nil, nil, nil, nil
 }
 
 // Resize/offscreen abandonment keeps CPU data and all published layers.
@@ -95,6 +95,7 @@ const (
 	uploadBackgroundPublish
 	uploadVines
 	uploadVineFinish
+	uploadSpiderWebs
 	uploadMushrooms
 	uploadForegroundVines
 	uploadPlantsPublish
@@ -105,6 +106,7 @@ type sectionUpload struct {
 	data, raster                                       render.SectionMesh
 	pixels                                             int
 	img, foreground, vines, foregroundVines, mushrooms *ebiten.Image
+	spiderWebs                                         *ebiten.Image
 	stage, next                                        int
 	initialized                                        bool
 	needed                                             render.MeshLayers
@@ -442,6 +444,7 @@ func (w *world) receive(g *Scene) {
 				u.raster.Vines, u.raster.VinesBounds = plants.Vines, plants.VinesBounds
 				u.raster.ForegroundVines, u.raster.ForegroundVinesBounds = plants.ForegroundVines, plants.ForegroundVinesBounds
 				u.raster.Mushrooms, u.raster.MushroomsBounds = plants.Mushrooms, plants.MushroomsBounds
+				u.raster.SpiderWebs, u.raster.SpiderWebsBounds = plants.SpiderWebs, plants.SpiderWebsBounds
 				if !plants.VinesBounds.Empty() {
 					u.vines = render.NewVegetationImage(plants.VinesBounds)
 				}
@@ -456,6 +459,18 @@ func (w *world) receive(g *Scene) {
 			u.vines = g.finishVinesAt(u.vines, u.raster.VinesBounds, top, u.pixels)
 			if u.data.Geometry != nil {
 				render.EraseVineCutsAt(u.vines, u.raster.VinesBounds, top, u.data.Geometry.Vegetation.Cuts, u.pixels)
+			}
+		case uploadSpiderWebs:
+			if !u.raster.SpiderWebsBounds.Empty() {
+				if !budget.available() {
+					return
+				}
+				if u.spiderWebs == nil {
+					u.spiderWebs = render.NewVegetationImage(u.raster.SpiderWebsBounds)
+				}
+				if !w.uploadFaces(g, u.spiderWebs, u.raster.SpiderWebs, top, false, &budget) {
+					return
+				}
 			}
 		case uploadMushrooms:
 			if !u.raster.MushroomsBounds.Empty() {
@@ -486,13 +501,15 @@ func (w *world) receive(g *Scene) {
 			}
 		case uploadPlantsPublish:
 			section := w.sectionForUpload(u)
-			for _, img := range []*ebiten.Image{section.vines, section.foregroundVines, section.mushrooms} {
+			for _, img := range []*ebiten.Image{section.vines, section.foregroundVines, section.mushrooms, section.spiderWebs} {
 				if img != nil {
 					img.Deallocate()
 				}
 			}
 			section.vines, section.foregroundVines, section.mushrooms = u.vines, u.foregroundVines, u.mushrooms
 			u.vines, u.foregroundVines, u.mushrooms = nil, nil, nil
+			section.spiderWebs, u.spiderWebs = u.spiderWebs, nil
+			section.spiderWebsBounds = u.raster.SpiderWebsBounds
 			section.vinesBounds, section.foregroundVinesBounds, section.mushroomsBounds = u.raster.VinesBounds, u.raster.ForegroundVinesBounds, u.raster.MushroomsBounds
 			section.vegetationPixels = u.pixels
 			section.vegetationPending = false

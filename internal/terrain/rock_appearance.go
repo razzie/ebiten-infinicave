@@ -157,3 +157,14 @@ func shadeBackgroundRockFaces(grid RockGrid, adjacency ...[][]int) RockGrid {
 	})
 	return faces
 }
+
+// PrepareRockAppearance binds final lighting without fitting decorations or changing
+// the published shape snapshot. Renderers reuse this immutable CPU result.
+func PrepareRockAppearance(topology *RockTopology) *RockTopology {
+	if topology.Appearance != nil {
+		return topology
+	}
+	t := *topology
+	t.Appearance = ShadeRockFaces(t.Grid, t.Boundary, t.neighbors)
+	return &t
+}

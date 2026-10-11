@@ -88,14 +88,16 @@ func (s *SectionBuild) Materialize(ctx context.Context) bool {
 }
 
 // Decorate can be canceled at stage and vine-trial boundaries, then retried
-// deterministically on another builder. It never exposes incomplete plants.
+// deterministically on another builder. It never exposes incomplete decorations.
 func (b *Builder) Decorate(ctx context.Context, s *SectionBuild) bool {
 	if ctx.Err() != nil || !s.materialized {
 		return false
 	}
 	data := s.data
 	var plants Vegetation
+	var topology *RockTopology
 	parallel.Run(
+		func() { topology, _ = prepareSpiderWebsContext(ctx, data.ForegroundTopology) },
 		func() {
 			if ctx.Err() == nil {
 				plants.Mushrooms = MushroomsForGuides(data.Guides, s.vegetationGrid, data.Orientation)
@@ -126,6 +128,7 @@ func (b *Builder) Decorate(ctx context.Context, s *SectionBuild) bool {
 	if ctx.Err() != nil {
 		return false
 	}
+	s.data.ForegroundTopology = topology
 	s.data.Vines, s.data.ForegroundVines, s.data.Mushrooms = plants.Vines, plants.ForegroundVines, plants.Mushrooms
 	s.data.vegetationCuts = plants.Cuts
 	return true

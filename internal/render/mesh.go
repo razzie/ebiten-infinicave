@@ -42,9 +42,10 @@ type SectionMesh struct {
 	Background, Foreground                              GridMesh
 	Vines                                               []TriangleMesh
 	ForegroundVines                                     []TriangleMesh
-	Mushrooms                                           TriangleMesh
+	Mushrooms, SpiderWebs                               TriangleMesh
 	Geometry                                            *terrain.Geometry
 	VinesBounds, ForegroundVinesBounds, MushroomsBounds image.Rectangle
+	SpiderWebsBounds                                    image.Rectangle
 }
 
 func PrepareSection(data terrain.SectionData, view View) SectionMesh {
@@ -70,6 +71,9 @@ func PrepareSection(data terrain.SectionData, view View) SectionMesh {
 			}
 		},
 	)
+	if view == ViewShaded && data.ForegroundTopology != nil {
+		mesh.SpiderWebs = prepareSpiderWebs(data.ForegroundTopology.SpiderWebs, false)
+	}
 	return mesh
 }
 
@@ -93,6 +97,11 @@ func PrepareVegetation(data terrain.SectionData, view View) SectionMesh {
 			func() { mesh.Vines = PrepareVines(data.Vines) },
 			func() { mesh.ForegroundVines = PrepareForegroundVines(data.ForegroundVines, data.Orientation) },
 			func() { mesh.Mushrooms = PrepareOwnedMushrooms(data.Mushrooms) },
+			func() {
+				if data.ForegroundTopology != nil {
+					mesh.SpiderWebs = prepareSpiderWebs(data.ForegroundTopology.SpiderWebs, true)
+				}
+			},
 		)
 	}
 	FinishSectionMesh(&mesh)
@@ -274,11 +283,6 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 			})
 		}
 	}
-	if raised && view == ViewShaded {
-		if webs := prepareSpiderWebs(topology.SpiderWebs, owned); len(webs.Indices) > 0 {
-			mesh.Outlines = append(mesh.Outlines, webs)
-		}
-	}
 	return mesh
 }
 
@@ -305,6 +309,7 @@ func MergeSectionMeshes(previous, next SectionMesh) SectionMesh {
 	if mask&VegetationLayer != 0 {
 		previous.Vines, previous.ForegroundVines, previous.Mushrooms = next.Vines, next.ForegroundVines, next.Mushrooms
 		previous.VinesBounds, previous.ForegroundVinesBounds, previous.MushroomsBounds = next.VinesBounds, next.ForegroundVinesBounds, next.MushroomsBounds
+		previous.SpiderWebs, previous.SpiderWebsBounds = next.SpiderWebs, next.SpiderWebsBounds
 	}
 	previous.ID = next.ID
 	previous.Layers = previous.LayerMask() | mask

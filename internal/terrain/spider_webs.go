@@ -1,6 +1,7 @@
 package terrain
 
 import (
+	"context"
 	"math"
 	"sort"
 
@@ -44,7 +45,7 @@ func (w SpiderWeb) Orb() (geom.V, float64) {
 	return hub, .86 * radius
 }
 
-// Point samples the pocket's envelope for clearance during terrain shaping.
+// Point samples the pocket's envelope for clearance during decoration.
 // Rendering builds a complete orb inside this envelope.
 func (w SpiderWeb) Point(t, radius float64) geom.V {
 	a, b := w.A.Sub(w.Corner), w.B.Sub(w.Corner)
@@ -59,8 +60,8 @@ func (w SpiderWeb) Point(t, radius float64) geom.V {
 	return w.Corner.Add(tip.Add(direction.Mul(bow)).Mul(radius))
 }
 
-// Candidates belong to shaped terrain, before shading. Keep every supporting
-// face so materialization can reject a pocket with even one illuminated wall.
+// Candidates follow the final polygon silhouette. Keep every supporting
+// face so decoration can reject a pocket with even one illuminated wall.
 type webCorner struct {
 	web   SpiderWeb
 	cells []int
@@ -170,6 +171,10 @@ func webAnchor(corner geom.V, edge int, forward bool, length float64, edges []Ro
 }
 
 func findWebCorners(grid RockGrid, edges []RockEdge) []webCorner {
+	return findWebCornersContext(context.Background(), grid, edges)
+}
+
+func findWebCornersContext(ctx context.Context, grid RockGrid, edges []RockEdge) []webCorner {
 	incoming, outgoing := make(map[[2]int64]int), make(map[[2]int64]int)
 	add := func(links map[[2]int64]int, p geom.V, index int) {
 		key := CollisionVertexKey(p)
@@ -190,16 +195,12 @@ func findWebCorners(grid RockGrid, edges []RockEdge) []webCorner {
 			bounds[i].lo, bounds[i].hi = geom.PolygonBounds(c.Polygon)
 		}
 	}
-	insideRock := func(p geom.V) bool {
-		for i, b := range bounds {
-			if p.X >= b.lo.X && p.X <= b.hi.X && p.Y >= b.lo.Y && p.Y <= b.hi.Y && geom.InsidePolygon(p, grid[i].Polygon) {
-				return true
-			}
-		}
-		return false
-	}
 	var corners []webCorner
+	var nearby []int
 	for _, i := range webSearchVertices(edges, incoming, outgoing) {
+		if ctx.Err() != nil {
+			return nil
+		}
 		e := edges[i]
 		if !grid[e.Cell].Raised || grid[e.Cell].Color.A == 0 {
 			continue
@@ -212,6 +213,17 @@ func findWebCorners(grid RockGrid, edges []RockEdge) []webCorner {
 		worldKey := CollisionVertexKey(RockMaterialPoint(grid[e.Cell], e.A))
 		random := func(channel int64) float64 {
 			return SiteRandom(0x737069646572, worldKey[0], worldKey[1], channel)
+		}
+		nearby = nearby[:0]
+		queried := false
+		insideRock := func(p geom.V) bool {
+			for _, face := range nearby {
+				b := bounds[face]
+				if p.X >= b.lo.X && p.X <= b.hi.X && p.Y >= b.lo.Y && p.Y <= b.hi.Y && geom.InsidePolygon(p, grid[face].Polygon) {
+					return true
+				}
+			}
+			return false
 		}
 		var fits []webCorner
 		for _, reach := range []float64{.032, .045, .065, .085, .11} {
@@ -230,6 +242,19 @@ func findWebCorners(grid RockGrid, edges []RockEdge) []webCorner {
 			_, radius := w.Orb()
 			if area/b.Sub(a).Len() < .010 || radius < .006 {
 				continue
+			}
+			if !queried {
+				// All reaches, anchor jitter, and the bowed frame fit in this
+				// square. Select nearby final polygons once per viable pocket,
+				// instead of scanning every face for each clearance sample.
+				const extent = .11*1.1 + .012 + 1e-9
+				for face, b := range bounds {
+					if b.hi.X >= e.A.X-extent && b.lo.X <= e.A.X+extent &&
+						b.hi.Y >= e.A.Y-extent && b.lo.Y <= e.A.Y+extent {
+						nearby = append(nearby, face)
+					}
+				}
+				queried = true
 			}
 			clear := true
 			for spoke := 1; spoke < 12 && clear; spoke++ {
@@ -294,14 +319,26 @@ func resolveSpiderWebs(appearance RockGrid, corners []webCorner) []SpiderWeb {
 	return webs
 }
 
-// PrepareRockAppearance binds final lighting and web placement without changing
-// the published shape snapshot. Renderers reuse this immutable CPU result.
-func PrepareRockAppearance(topology *RockTopology) *RockTopology {
-	if topology.Appearance != nil {
-		return topology
+// PrepareSpiderWebs fits decorations after rock appearance is ready. It returns
+// a new snapshot so an already published rock layer never changes underneath it.
+func PrepareSpiderWebs(topology *RockTopology) *RockTopology {
+	t, _ := prepareSpiderWebsContext(context.Background(), topology)
+	return t
+}
+
+func prepareSpiderWebsContext(ctx context.Context, topology *RockTopology) (*RockTopology, bool) {
+	if ctx.Err() != nil {
+		return nil, false
 	}
-	t := *topology
-	t.Appearance = ShadeRockFaces(t.Grid, t.Boundary, t.neighbors)
+	if topology.websPrepared {
+		return topology, true
+	}
+	t := *PrepareRockAppearance(topology)
+	t.webCorners = findWebCornersContext(ctx, t.Grid, t.Boundary)
+	if ctx.Err() != nil {
+		return nil, false
+	}
 	t.SpiderWebs = resolveSpiderWebs(t.Appearance, t.webCorners)
-	return &t
+	t.websPrepared = true
+	return &t, ctx.Err() == nil
 }

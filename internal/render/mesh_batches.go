@@ -71,10 +71,15 @@ func translateTriangleMeshes(meshes []TriangleMesh, origin image.Point) {
 func FinishSectionMesh(mesh *SectionMesh) {
 	mesh.VinesBounds = triangleMeshesBounds(mesh.Vines)
 	mesh.ForegroundVinesBounds = triangleMeshesBounds(mesh.ForegroundVines)
+	// Webs use the same owned band as the rock image, so neighboring padded
+	// snapshots cannot draw the same translucent thread twice.
+	mesh.SpiderWebsBounds = triangleMeshesBounds([]TriangleMesh{mesh.SpiderWebs}).Intersect(
+		image.Rect(0, RasterPixelsPerUnit, RasterPixelsPerUnit, 2*RasterPixelsPerUnit))
 	mesh.MushroomsBounds = triangleMeshesBounds([]TriangleMesh{mesh.Mushrooms})
 	mesh.Vines = batchTriangleMeshes(mesh.Vines)
 	mesh.ForegroundVines = batchTriangleMeshes(mesh.ForegroundVines)
 	translateTriangleMeshes(mesh.Vines, mesh.VinesBounds.Min)
 	translateTriangleMeshes(mesh.ForegroundVines, mesh.ForegroundVinesBounds.Min)
 	translateTriangleMeshes([]TriangleMesh{mesh.Mushrooms}, mesh.MushroomsBounds.Min)
+	translateTriangleMeshes([]TriangleMesh{mesh.SpiderWebs}, mesh.SpiderWebsBounds.Min)
 }

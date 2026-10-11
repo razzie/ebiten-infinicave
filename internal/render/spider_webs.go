@@ -120,3 +120,9 @@ func prepareSpiderWebs(webs []terrain.SpiderWeb, owned bool) TriangleMesh {
 	}
 	return mesh
 }
+
+// PrepareOwnedSpiderWebs emits threads for the section's owned rock band.
+// FinishSectionMesh clips its image bounds to that band before publication.
+func PrepareOwnedSpiderWebs(webs []terrain.SpiderWeb) TriangleMesh {
+	return prepareSpiderWebs(webs, true)
+}

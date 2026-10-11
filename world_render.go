@@ -62,6 +62,11 @@ func (w *world) draw(dst *ebiten.Image, y, height float64, fog *render.FogRender
 		}
 	}
 	w.DrawForegroundRocks(dst, y, height, 0, view)
+	for id := low; id <= high; id++ {
+		if section := w.sections[id]; section != nil {
+			w.drawSupportedVegetation(dst, section.spiderWebs, section.spiderWebsBounds, terrain.SectionWindowTop(id), y, height, section.vegetationWidth(), view, false)
+		}
+	}
 	// Keep complete foreground stems in their owner's padded window.
 	for id := max(0, low-1); id <= high+1; id++ {
 		if section := w.sections[id]; section != nil {
