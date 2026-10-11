@@ -66,7 +66,7 @@ func TestSectionStatsStable(t *testing.T) {
 }
 
 func BenchmarkBuildSection(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		BuildSection(42, int64(i%3))
 	}
 }
@@ -93,7 +93,7 @@ func TestSection10GenerationCompletes(t *testing.T) {
 }
 
 func BenchmarkBuildSection10(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		BuildSection(42, 10)
 	}
 }
@@ -164,7 +164,7 @@ func TestSectionGeometryIndependentOfWorkersCacheAndBufferReuse(t *testing.T) {
 func BenchmarkBuildStreamSection(b *testing.B) {
 	builder := NewSectionBuilder(42, nil)
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		builder.Build(int64(i % 3))
 	}
 }

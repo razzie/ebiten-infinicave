@@ -9,8 +9,8 @@ func BenchmarkFindWebCorners(b *testing.B) {
 	build := NewSectionBuilder(42, nil).Begin(context.Background(), 0)
 	topology := build.Data().ForegroundTopology
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		findWebCorners(topology.Grid, topology.Boundary)
 	}
 }
@@ -23,8 +23,8 @@ func BenchmarkResolveSpiderWebNetworks(b *testing.B) {
 	appearance := PrepareRockAppearance(topology).Appearance
 	corners := findWebCorners(topology.Grid, topology.Boundary)
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		resolveSpiderWebs(appearance, corners)
 	}
 }
