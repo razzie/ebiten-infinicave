@@ -17,8 +17,8 @@ func TestMushroomOwnershipUsesHalfOpenAnchorBand(t *testing.T) {
 		{Anchor: geom.V{X: .5, Y: 1}, CapCenter: geom.V{X: .5, Y: .99}, CapWidth: .01, CapHeight: .005},
 	}
 	groups := []terrain.MushroomGroup{{Mushrooms: mushrooms}}
-	got := PrepareOwnedMushrooms(groups)
-	want := PrepareMushrooms([]terrain.MushroomGroup{{Mushrooms: mushrooms[1:3]}})
+	got := PrepareOwnedMushrooms(groups, nil)
+	want := PrepareMushrooms([]terrain.MushroomGroup{{Mushrooms: mushrooms[1:3]}}, nil)
 	if !reflect.DeepEqual(got, want) || len(groups[0].Mushrooms) != 4 {
 		t.Fatal("ownership altered padded input or included another anchor band")
 	}

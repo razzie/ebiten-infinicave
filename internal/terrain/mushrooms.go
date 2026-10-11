@@ -82,7 +82,7 @@ func MushroomsForGuides(guides []Guide, foreground RockGrid, orientation ...Orie
 				stemLength := geom.Lerp(.013, .023, rng.Float64()) * size
 				capWidth := geom.Lerp(.009, .015, rng.Float64()) * size
 				capHeight := capWidth * geom.Lerp(.38, .53, rng.Float64())
-				// The root is buried in the rock; the foreground is drawn over it.
+				// Bury the root so rendering can clip the stalk to the rock silhouette.
 				root := anchor.Sub(air.Mul(MushroomSink))
 				stemEnd := anchor.Add(air.Mul(stemLength * .38)).Add(up.Mul(stemLength * .72))
 				capBack := capWidth*.5*math.Abs(worldAir.X) + capHeight*(1.18*math.Max(worldAir.Y, 0)+.02*math.Max(-worldAir.Y, 0))

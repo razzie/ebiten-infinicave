@@ -106,7 +106,7 @@ func TestPrepareSectionMatchesSerialLayers(t *testing.T) {
 		if view == ViewShaded {
 			want.Vines = PrepareVines(data.Vines)
 			want.ForegroundVines = PrepareForegroundVines(data.ForegroundVines)
-			want.Mushrooms = PrepareMushrooms(data.Mushrooms)
+			want.Mushrooms = PrepareMushrooms(data.Mushrooms, terrain.NewRockTopology(data.Foreground))
 		}
 		for _, procs := range []int{1, 2, 4, 8} {
 			t.Run(fmt.Sprintf("%s/procs%d", view, procs), func(t *testing.T) {

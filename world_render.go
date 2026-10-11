@@ -56,12 +56,12 @@ func (w *world) draw(dst *ebiten.Image, y, height float64, fog *render.FogRender
 			fog.DrawSection(dst, terrain.SectionTop(id), y, view)
 		}
 	}
+	w.DrawForegroundRocks(dst, y, height, 0, view)
 	for id := max(0, low-1); id <= high+1; id++ {
 		if section := w.sections[id]; section != nil {
 			w.drawSupportedVegetation(dst, section.mushrooms, section.mushroomsBounds, terrain.SectionWindowTop(id), y, height, section.vegetationWidth(), view, false)
 		}
 	}
-	w.DrawForegroundRocks(dst, y, height, 0, view)
 	for id := low; id <= high; id++ {
 		if section := w.sections[id]; section != nil {
 			w.drawSupportedVegetation(dst, section.spiderWebs, section.spiderWebsBounds, terrain.SectionWindowTop(id), y, height, section.vegetationWidth(), view, false)

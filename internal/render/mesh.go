@@ -67,7 +67,7 @@ func PrepareSection(data terrain.SectionData, view View) SectionMesh {
 		},
 		func() {
 			if view == ViewShaded {
-				mesh.Mushrooms = PrepareMushrooms(data.Mushrooms)
+				mesh.Mushrooms = PrepareMushrooms(data.Mushrooms, mushroomSectionTopology(data))
 			}
 		},
 	)
@@ -96,7 +96,7 @@ func PrepareVegetation(data terrain.SectionData, view View) SectionMesh {
 		parallel.Run(
 			func() { mesh.Vines = PrepareVines(data.Vines) },
 			func() { mesh.ForegroundVines = PrepareForegroundVines(data.ForegroundVines, data.Orientation) },
-			func() { mesh.Mushrooms = PrepareOwnedMushrooms(data.Mushrooms) },
+			func() { mesh.Mushrooms = PrepareOwnedMushrooms(data.Mushrooms, mushroomSectionTopology(data)) },
 			func() {
 				if data.ForegroundTopology != nil {
 					mesh.SpiderWebs = prepareSpiderWebs(data.ForegroundTopology.SpiderWebs, true)
@@ -332,7 +332,7 @@ func PrepareBackground(data terrain.SectionData, view View) SectionMesh {
 
 // A padded guide can generate the same mushroom in neighboring sections.
 // Only the anchor's half-open band owns its render mesh; generation stays padded.
-func PrepareOwnedMushrooms(groups []terrain.MushroomGroup) TriangleMesh {
+func PrepareOwnedMushrooms(groups []terrain.MushroomGroup, topology *terrain.RockTopology) TriangleMesh {
 	owned := make([]terrain.MushroomGroup, 0, len(groups))
 	for _, group := range groups {
 		mushrooms := make([]terrain.Mushroom, 0, len(group.Mushrooms))
@@ -345,7 +345,7 @@ func PrepareOwnedMushrooms(groups []terrain.MushroomGroup) TriangleMesh {
 			owned = append(owned, terrain.MushroomGroup{Mushrooms: mushrooms})
 		}
 	}
-	return PrepareMushrooms(owned)
+	return PrepareMushrooms(owned, topology)
 }
 
 // DrawUnaliased is used when batching into a persistent supersampled surface.

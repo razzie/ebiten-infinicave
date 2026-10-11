@@ -21,7 +21,7 @@ func (g *Scene) prepareCarvedVegetation(mesh *render.SectionMesh) {
 		plants := mesh.Geometry.Vegetation
 		mesh.Vines = render.PrepareVines(plants.Vines)
 		mesh.ForegroundVines = render.PrepareForegroundVines(plants.ForegroundVines, g.orientation)
-		mesh.Mushrooms = render.PrepareOwnedMushrooms(plants.Mushrooms)
+		mesh.Mushrooms = render.PrepareOwnedMushrooms(plants.Mushrooms, mesh.Geometry.Topology)
 		mesh.SpiderWebs = render.PrepareOwnedSpiderWebs(mesh.Geometry.Topology.SpiderWebs)
 	}
 	render.FinishSectionMesh(mesh)

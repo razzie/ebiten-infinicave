@@ -23,27 +23,34 @@ func appendRockQuad(vertices []ebiten.Vertex, indices []uint32, points [4]geom.V
 
 // A shallow oblique view exposes the drop below a silhouette. Draw walls
 // before the top faces; their inward portions are naturally hidden by rock.
+func rockWallPoints(c terrain.RockCell, edge terrain.RockEdge) ([4]geom.V, bool) {
+	outward := edge.B.Sub(edge.A).Perp().Norm().Mul(-1)
+	view := terrain.InternalPoint(terrain.RockOrientation(c), geom.V{X: .045, Y: .08})
+	if outward.Dot(view) <= 0 {
+		return [4]geom.V{}, false
+	}
+	za, zb := math.Max(0, terrain.RockDepthAt(c, edge.A)+.008), math.Max(0, terrain.RockDepthAt(c, edge.B)+.008)
+	return [4]geom.V{edge.A, edge.B, edge.B.Add(view.Mul(zb)), edge.A.Add(view.Mul(za))}, true
+}
+
 func appendRockWalls(vertices []ebiten.Vertex, indices []uint32, grid terrain.RockGrid, edges []terrain.RockEdge, viewMode View, owned ...bool) ([]ebiten.Vertex, []uint32) {
 	if len(grid) == 0 || !grid[0].Raised {
 		return vertices, indices
 	}
 	for _, edge := range edges {
 		c := grid[edge.Cell]
+		points, visible := rockWallPoints(c, edge)
+		if !visible {
+			continue
+		}
+		if len(owned) > 0 && owned[0] && !inTerrainBand(points[:]...) {
+			continue
+		}
 		outward := edge.B.Sub(edge.A).Perp().Norm().Mul(-1)
-		view := terrain.InternalPoint(terrain.RockOrientation(c), geom.V{X: .045, Y: .08})
-		if outward.Dot(view) <= 0 {
-			continue
-		}
-		za, zb := math.Max(0, terrain.RockDepthAt(c, edge.A)+.008), math.Max(0, terrain.RockDepthAt(c, edge.B)+.008)
-		a := edge.A.Add(view.Mul(za))
-		b := edge.B.Add(view.Mul(zb))
-		if len(owned) > 0 && owned[0] && !inTerrainBand(edge.A, edge.B, b, a) {
-			continue
-		}
 		normal := (geom.V3{X: outward.X, Y: outward.Y, Z: .1}).Norm()
 		clr := terrain.RockSurfaceColor(normal, c.Shadow*.65, c.Ambient*.55, terrain.RockOrientation(c))
 		clr = rockViewColor(terrain.RockCell{Color: clr, Raised: true}, viewMode)
-		vertices, indices = appendRockQuad(vertices, indices, [4]geom.V{edge.A, edge.B, b, a}, clr)
+		vertices, indices = appendRockQuad(vertices, indices, points, clr)
 	}
 	return vertices, indices
 }
