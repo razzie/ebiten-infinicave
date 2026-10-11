@@ -337,7 +337,8 @@ must be finite and sizes positive. Cut boundaries drive collision, exact queries
 hover, and rendering together. Shaded and clay views add dark recessed walls and
 uneven warm mineral rims to suggest chipped rock and depth. Background rock
 remains in place. Mushrooms are removed individually when
-their buried roots lose contact with rock. Both vine layers are cut through the
+a cut contains their root attachment point on a guide. Cuts through caps or stalks
+alone leave the mushroom intact. Both vine layers are cut through the
 hole, retaining the pieces on either side and remapping surviving branches.
 Vine shading stays with its original family; ribbons and contact shadows are
 clipped to the opening after blur. Authored holes and runtime cuts use the same

@@ -6,7 +6,7 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
 
-// Retain CPU plants for support checks, branch remapping, and section reuploads.
+// Retain CPU plants for root checks, branch remapping, and section reuploads.
 // Slices are immutable once published; edits create replacements.
 type Vegetation struct {
 	Vines, ForegroundVines []Vine
@@ -18,32 +18,15 @@ func SectionVegetation(data SectionData) Vegetation {
 	return Vegetation{data.Vines, data.ForegroundVines, data.Mushrooms, data.vegetationCuts}
 }
 
-func (cut RockCut) vegetation(source Vegetation, ground RockGrid, top float64) (Vegetation, bool) {
+func (cut RockCut) vegetation(source Vegetation, top float64) (Vegetation, bool) {
 	for _, previous := range source.Cuts {
 		if sameRockCut(cut, previous) {
 			return source, false
 		}
 	}
 	updated := source
-	groundFaces := mushroomGroundFromCells(ground)
-	var mushrooms []MushroomGroup
-	removed := false
-	for _, group := range source.Mushrooms {
-		var kept []Mushroom
-		for _, mushroom := range group.Mushrooms {
-			if !cut.affectsMushroomSupport(mushroom, top) || mushroomSupported(mushroom, groundFaces) {
-				kept = append(kept, mushroom)
-			} else {
-				removed = true
-			}
-		}
-		if len(kept) > 0 {
-			mushrooms = append(mushrooms, MushroomGroup{Mushrooms: kept})
-		}
-	}
-	if removed {
-		updated.Mushrooms = mushrooms
-	}
+	var removed bool
+	updated.Mushrooms, removed = cut.mushrooms(source.Mushrooms, top)
 	// Ribbons and contact shadows can overlap a hole even when their
 	// centerline stays outside it. Keep the mask for the full rendered width.
 	var backHit, frontHit bool
@@ -55,25 +38,52 @@ func (cut RockCut) vegetation(source Vegetation, ground RockGrid, top float64) (
 	return updated, removed || backHit || frontHit
 }
 
-// Only a cut near the buried root/anchor can remove existing support. Caps and
-// distant mushrooms need no search through every remaining terrain face.
-func (cut RockCut) affectsMushroomSupport(m Mushroom, top float64) bool {
-	root := m.Anchor
-	if len(m.Stem) > 0 {
-		root = m.Stem[0]
+// The guide attachment is the authoritative root. Test it against the actual
+// cut polygon; a cap/stalk hit or a bounds-only overlap leaves the plant intact.
+// Copy only after a hit so missed cuts allocate nothing and snapshots stay immutable.
+func (cut RockCut) mushrooms(source []MushroomGroup, top float64) ([]MushroomGroup, bool) {
+	var groups []MushroomGroup
+	removed := false
+	for i, group := range source {
+		var kept []Mushroom
+		groupHit := false
+		for j, mushroom := range group.Mushrooms {
+			root := mushroom.Anchor.Add(geom.V{Y: top})
+			hit := root.X >= cut.Min.X && root.X <= cut.Max.X && root.Y >= cut.Min.Y && root.Y <= cut.Max.Y && geom.InsidePolygon(root, cut.Poly)
+			if hit {
+				if !groupHit {
+					kept = make([]Mushroom, j, len(group.Mushrooms)-1)
+					copy(kept, group.Mushrooms[:j])
+					groupHit = true
+				}
+			} else if groupHit {
+				kept = append(kept, mushroom)
+			}
+		}
+		if groupHit {
+			if !removed {
+				groups = make([]MushroomGroup, i, len(source))
+				copy(groups, source[:i])
+				removed = true
+			}
+			if len(kept) > 0 {
+				groups = append(groups, MushroomGroup{Mushrooms: kept})
+			}
+		} else if removed {
+			groups = append(groups, group)
+		}
 	}
-	const contact = .002 // same allowance as mushroomSupported
-	return math.Max(root.X, m.Anchor.X)+contact >= cut.Min.X &&
-		math.Min(root.X, m.Anchor.X)-contact <= cut.Max.X &&
-		math.Max(root.Y, m.Anchor.Y)+top+contact >= cut.Min.Y &&
-		math.Min(root.Y, m.Anchor.Y)+top-contact <= cut.Max.Y
+	if !removed {
+		return source, false
+	}
+	return groups, true
 }
 
 func (cut RockCut) Plants(old *Geometry) (*Geometry, bool) {
 	if old == nil {
 		return old, false
 	}
-	vegetation, changed := cut.vegetation(old.Vegetation, old.Grid, old.Top)
+	vegetation, changed := cut.vegetation(old.Vegetation, old.Top)
 	if !changed {
 		return old, false
 	}
@@ -92,31 +102,6 @@ func sameRockCut(a, b RockCut) bool {
 		}
 	}
 	return true
-}
-
-func mushroomSupported(m Mushroom, ground []mushroomGround) bool {
-	root := m.Anchor
-	if len(m.Stem) > 0 {
-		root = m.Stem[0]
-	}
-	// The generated root is sunk into rock. Include the same small contact
-	// allowance used by initial placement for jagged guide/contour borders.
-	const contact = .002
-	for _, cell := range ground {
-		if math.Max(root.X, m.Anchor.X)+contact < cell.lo.X || math.Min(root.X, m.Anchor.X)-contact > cell.hi.X ||
-			math.Max(root.Y, m.Anchor.Y)+contact < cell.lo.Y || math.Min(root.Y, m.Anchor.Y)-contact > cell.hi.Y {
-			continue
-		}
-		if geom.InsidePolygon(root, cell.poly) || geom.InsidePolygon(m.Anchor, cell.poly) {
-			return true
-		}
-		for i, a := range cell.poly {
-			if geom.SegmentDistanceSquared(root, m.Anchor, a, cell.poly[(i+1)%len(cell.poly)]) <= contact*contact {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // Clip a centerline segment against the convex cut. Boundary-only tangencies

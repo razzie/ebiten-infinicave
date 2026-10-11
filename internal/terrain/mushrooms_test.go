@@ -1,11 +1,71 @@
 package terrain
 
 import (
+	"math"
 	"reflect"
 	"testing"
 
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
+
+func TestMushroomSpacingRejectsCrossingStalksWithSeparateRoots(t *testing.T) {
+	a := Mushroom{CapWidth: .01, Stem: []geom.V{{X: .2, Y: .5}, {X: .3, Y: .4}, {X: .4, Y: .3}}}
+	b := Mushroom{CapWidth: .015, Stem: []geom.V{{X: .4, Y: .5}, {X: .3, Y: .4}, {X: .2, Y: .3}}}
+	if !mushroomStemsOverlap(a, []Mushroom{b}) {
+		t.Fatal("widely spaced roots allowed crossing stalks")
+	}
+	// Keep the roots separate but move one curve clear of the other.
+	for i := range b.Stem {
+		b.Stem[i].X += .3
+	}
+	if mushroomStemsOverlap(a, []Mushroom{b}) {
+		t.Fatal("separate stalks were rejected")
+	}
+}
+
+func TestMushroomStalksKeepClearanceAcrossGuides(t *testing.T) {
+	for _, mode := range []Orientation{Vertical, Horizontal} {
+		for seed := int64(1); seed <= 30; seed++ {
+			// Close parallel ledges force spacing checks across different guides.
+			var guides []Guide
+			var ground RockGrid
+			for i := 0; i < 2; i++ {
+				x := .3 + float64(i)*.001
+				g := SplineGuide([]geom.V{{X: x, Y: .9}, {X: x, Y: .1}}, 1)
+				g.Seed = seed + int64(i)
+				guides = append(guides, g)
+				ground = append(ground, terrainRect(x, .05, .4, .9))
+			}
+			groups := MushroomsForGuides(guides, ground, mode)
+			var all []Mushroom
+			for _, group := range groups {
+				if len(group.Mushrooms) < 3 || len(group.Mushrooms) > 5 {
+					t.Fatalf("seed %d: invalid cluster size %d", seed, len(group.Mushrooms))
+				}
+				all = append(all, group.Mushrooms...)
+			}
+			if len(all) < 6 {
+				t.Fatalf("seed %d mode %v: spacing eliminated too many clusters (%d mushrooms)", seed, mode, len(all))
+			}
+			for i, a := range all {
+				for _, b := range all[i+1:] {
+					minDistance := math.Inf(1)
+					for j := 1; j < len(a.Stem); j++ {
+						for k := 1; k < len(b.Stem); k++ {
+							minDistance = math.Min(minDistance, math.Sqrt(geom.SegmentDistanceSquared(a.Stem[j-1], a.Stem[j], b.Stem[k-1], b.Stem[k])))
+						}
+					}
+					if gap := minDistance - (a.CapWidth+b.CapWidth)*.19/2; gap < .0006-1e-12 {
+						t.Fatalf("seed %d mode %v: stalks overlap or crowd each other (gap %g)", seed, mode, gap)
+					}
+				}
+			}
+			if again := MushroomsForGuides(guides, ground, mode); !reflect.DeepEqual(groups, again) {
+				t.Fatalf("seed %d mode %v: spaced mushrooms are not deterministic", seed, mode)
+			}
+		}
+	}
+}
 
 func TestHorizontalMushroomsAndLighting(t *testing.T) {
 	// In this section frame, a vertical guide maps to a horizontal ledge.

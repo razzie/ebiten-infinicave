@@ -17,16 +17,10 @@ type SectionBuild struct {
 	raw                   RockGrid
 	uncut                 *RockTopology
 	parents, uncutParents []int
-	cuts                  []sectionCutStage
+	cuts                  []RockCut
 	vegetationGrid        RockGrid
 	growthGrid            RockGrid
 	materialized          bool
-}
-
-type sectionCutStage struct {
-	cut     RockCut
-	grid    RockGrid
-	parents []int
 }
 
 func (s *SectionBuild) Data() SectionData { return s.data }
@@ -73,9 +67,6 @@ func (s *SectionBuild) Materialize(ctx context.Context) bool {
 		return false
 	}
 	s.vegetationGrid = apply(s.uncut.Grid, s.uncutParents)
-	for i := range s.cuts {
-		s.cuts[i].grid = apply(s.cuts[i].grid, s.cuts[i].parents)
-	}
 	s.growthGrid = foreground
 	s.data.Background, s.data.BackgroundNeighbors = background, neighbors
 	s.data.Foreground = foreground
@@ -122,8 +113,8 @@ func (b *Builder) Decorate(ctx context.Context, s *SectionBuild) bool {
 	if ctx.Err() != nil {
 		return false
 	}
-	for _, stage := range s.cuts {
-		plants, _ = stage.cut.vegetation(plants, stage.grid, SectionTop(data.ID))
+	for _, cut := range s.cuts {
+		plants, _ = cut.vegetation(plants, SectionTop(data.ID))
 	}
 	if ctx.Err() != nil {
 		return false

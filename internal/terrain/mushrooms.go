@@ -11,7 +11,7 @@ import (
 type Mushroom struct {
 	orientation   Orientation // Cap and growth directions in the section frame.
 	Stem          []geom.V
-	Anchor        geom.V
+	Anchor        geom.V // Root attachment on the guide; carving this point removes the mushroom.
 	RootDirection geom.V
 	CapCenter     geom.V
 	CapWidth      float64
@@ -24,6 +24,11 @@ type MushroomGroup struct {
 }
 
 const MushroomSink = .004
+
+// StemWidth includes the dark border used when rendering the stalk.
+func (m Mushroom) StemWidth() float64 { return m.CapWidth * .19 }
+
+const mushroomStemGap = .0006
 
 type mushroomGround struct {
 	poly []geom.V
@@ -42,6 +47,7 @@ func MushroomsForGuides(guides []Guide, foreground RockGrid, orientation ...Orie
 	up := InternalPoint(mode, geom.V{X: 0, Y: -1})
 	ground := mushroomGroundFromCells(foreground)
 	var groups []MushroomGroup
+	var placed []Mushroom
 	for i := range guides {
 		g := &guides[i]
 		if len(g.Pts) < 2 || len(g.S) != len(g.Pts) || g.S[len(g.S)-1] < .090 {
@@ -56,7 +62,9 @@ func MushroomsForGuides(guides []Guide, foreground RockGrid, orientation ...Orie
 		for s := geom.Lerp(.034, .074, rng.Float64()); s < length-.032; s += geom.Lerp(.155, .235, rng.Float64()) {
 			count := 3 + rng.Intn(3)
 			group := MushroomGroup{Mushrooms: make([]Mushroom, 0, count)}
-			for j := 0; j < count; j++ {
+			// Retry crowded candidates while keeping clusters at three to five
+			// mushrooms. The fixed budget bounds work on cramped or curled guides.
+			for attempt := 0; attempt < count*4 && len(group.Mushrooms) < count; attempt++ {
 				along := s + geom.Lerp(-.031, .031, rng.Float64())
 				if along < .018 || along > length-.018 {
 					continue
@@ -96,16 +104,39 @@ func MushroomsForGuides(guides []Guide, foreground RockGrid, orientation ...Orie
 					CapWidth:  capWidth, CapHeight: capHeight,
 					Color: MushroomColors[rng.Intn(len(MushroomColors))],
 				}
-				if MushroomWithinForegroundInset(mushroom) {
+				if MushroomWithinForegroundInset(mushroom) && !mushroomStemsOverlap(mushroom, group.Mushrooms) && !mushroomStemsOverlap(mushroom, placed) {
 					group.Mushrooms = append(group.Mushrooms, mushroom)
 				}
 			}
 			if len(group.Mushrooms) >= 3 {
 				groups = append(groups, group)
+				placed = append(placed, group.Mushrooms...)
 			}
 		}
 	}
 	return groups
+}
+
+// Check the sampled curves, including their rendered borders, rather than
+// just root spacing: stalks on bends can converge or cross above the guide.
+func mushroomStemsOverlap(m Mushroom, others []Mushroom) bool {
+	lo, hi := geom.PolygonBounds(m.Stem)
+	for _, other := range others {
+		clearance := (m.StemWidth()+other.StemWidth())*.5 + mushroomStemGap
+		otherLo, otherHi := geom.PolygonBounds(other.Stem)
+		if hi.X+clearance < otherLo.X || lo.X-clearance > otherHi.X ||
+			hi.Y+clearance < otherLo.Y || lo.Y-clearance > otherHi.Y {
+			continue
+		}
+		for i := 1; i < len(m.Stem); i++ {
+			for j := 1; j < len(other.Stem); j++ {
+				if geom.SegmentDistanceSquared(m.Stem[i-1], m.Stem[i], other.Stem[j-1], other.Stem[j]) < clearance*clearance {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func mushroomGroundFromCells(foreground RockGrid) []mushroomGround {

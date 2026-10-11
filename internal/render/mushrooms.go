@@ -42,7 +42,7 @@ func PrepareMushrooms(groups []terrain.MushroomGroup) TriangleMesh {
 	}
 	for _, group := range groups {
 		for _, m := range group.Mushrooms {
-			ribbon(m.Stem, m.CapWidth*.19, color.NRGBA{R: 108, G: 70, B: 32, A: 255})
+			ribbon(m.Stem, m.StemWidth(), color.NRGBA{R: 108, G: 70, B: 32, A: 255})
 			ribbon(m.Stem, m.CapWidth*.11, color.NRGBA{R: 255, G: 233, B: 167, A: 255})
 			outline := terrain.MushroomCapOutline(m)
 			center := m.CapCenter.Add(terrain.InternalPoint(terrain.MushroomOrientation(m), geom.V{X: 0, Y: -m.CapHeight * .4}))

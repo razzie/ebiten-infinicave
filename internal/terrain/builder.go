@@ -142,7 +142,7 @@ func (b *Builder) Begin(ctx context.Context, id int64) *SectionBuild {
 			parents = mapped
 			topology = CarvedTopology(grid, append(append([]RockCut(nil), topology.Cuts...), cut), top)
 		}
-		s.cuts = append(s.cuts, sectionCutStage{cut: cut, grid: topology.Grid, parents: parents})
+		s.cuts = append(s.cuts, cut)
 	}
 	s.data.ForegroundTopology = topology
 	s.parents = parents

@@ -369,7 +369,7 @@ func TestCarveDuringEveryUploadStage(t *testing.T) {
 	}
 }
 
-func TestCarveRemovesWholeUnsupportedMushroomsIndividually(t *testing.T) {
+func TestCarveRemovesWholeRootHitMushroomsIndividually(t *testing.T) {
 	group := MushroomGroup{Mushrooms: []Mushroom{
 		testGroundedMushroom(.3, .4), testGroundedMushroom(.5, .4), testGroundedMushroom(.7, .4),
 	}}
@@ -379,7 +379,7 @@ func TestCarveRemovesWholeUnsupportedMushroomsIndividually(t *testing.T) {
 	}
 	plants := scene.world.sections[0].geometry.Vegetation
 	if len(plants.Mushrooms) != 1 || !reflect.DeepEqual(plants.Mushrooms[0].Mushrooms, group.Mushrooms[1:]) {
-		t.Fatalf("unsupported mushroom was not removed independently: %+v", plants.Mushrooms)
+		t.Fatalf("root-hit mushroom was not removed independently: %+v", plants.Mushrooms)
 	}
 	if len(group.Mushrooms) != 3 || group.Mushrooms[0].Stem[0] != (V{X: .3, Y: .404}) {
 		t.Fatal("carving modified source plant slices")
@@ -392,21 +392,29 @@ func TestCarveRemovesWholeUnsupportedMushroomsIndividually(t *testing.T) {
 	}
 }
 
-func TestCarveRetainsMushroomWhileBuriedRootStillTouchesRock(t *testing.T) {
+func TestCarveRemovesMushroomWhenGuideRootIsCut(t *testing.T) {
 	m := testGroundedMushroom(.5, .4)
 	scene := queryScene(terrain.SectionData{Foreground: RockGrid{terrainRect(.1, .4, .8, .3)}, Mushrooms: []MushroomGroup{{Mushrooms: []Mushroom{m}}}})
-	// Anchor is removed, but the buried root still has support.
+	// The guide attachment is removed even though the buried stalk still touches rock.
 	if _, err := scene.CarveCircle(V{X: .5, Y: -.6}, .0025); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(scene.world.sections[0].geometry.Vegetation.Mushrooms, []MushroomGroup{{Mushrooms: []Mushroom{m}}}) {
-		t.Fatal("mushroom with remaining root contact was removed or partially cut")
+	if len(scene.world.sections[0].geometry.Vegetation.Mushrooms) != 0 {
+		t.Fatal("cut guide root retained a mushroom with buried stalk contact")
 	}
+	if _, err := scene.CarveCircle(V{X: .5, Y: -.6}, .0025); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCarveRetainsMushroomWhenOnlyCapIsCut(t *testing.T) {
+	m := testGroundedMushroom(.5, .4)
+	scene := queryScene(terrain.SectionData{Foreground: RockGrid{terrainRect(.1, .4, .8, .3)}, Mushrooms: []MushroomGroup{{Mushrooms: []Mushroom{m}}}})
 	// A cut through the cap alone does not remove a supported mushroom.
 	if _, err := scene.CarveCircle(m.CapCenter.Add(V{Y: -1}), .009); err != nil {
 		t.Fatal(err)
 	}
-	if len(scene.world.sections[0].geometry.Vegetation.Mushrooms) != 1 {
+	if !reflect.DeepEqual(scene.world.sections[0].geometry.Vegetation.Mushrooms, []MushroomGroup{{Mushrooms: []Mushroom{m}}}) {
 		t.Fatal("cap overlap removed a grounded mushroom")
 	}
 }
