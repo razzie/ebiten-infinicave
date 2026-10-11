@@ -14,7 +14,7 @@ import (
 func TestWorldCancelsObsoleteGenerationAndResumes(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	var first atomic.Bool
-	w := newWorld(42, ViewClay, 0, 0, terrain.DefaultSpiderWebDensity, func(int64) SectionContent {
+	w := newWorld(42, ViewClay, 0, 0, terrain.DefaultSpiderWebDensity, false, func(int64) SectionContent {
 		if first.CompareAndSwap(false, true) {
 			close(entered)
 			<-release
@@ -56,7 +56,7 @@ func TestWorldCancelsObsoleteGenerationAndResumes(t *testing.T) {
 }
 
 func TestWorldWorkerPreparesAllLayers(t *testing.T) {
-	w := newWorld(42, ViewShaded, 0, 0, terrain.DefaultSpiderWebDensity, nil)
+	w := newWorld(42, ViewShaded, 0, 0, terrain.DefaultSpiderWebDensity, false, nil)
 	defer w.close()
 	w.request(0)
 	var early *terrain.Geometry
@@ -100,7 +100,7 @@ func TestWorldWorkerPreparesAllLayers(t *testing.T) {
 }
 
 func TestDiagnosticWorkerRetainsTerrainGeometry(t *testing.T) {
-	w := newWorld(42, ViewClay, 0, 0, terrain.DefaultSpiderWebDensity, testLedgeSection)
+	w := newWorld(42, ViewClay, 0, 0, terrain.DefaultSpiderWebDensity, false, testLedgeSection)
 	defer w.close()
 	w.request(0)
 	select {
@@ -217,6 +217,39 @@ func TestSceneSpiderWebSizeSurvivesReset(t *testing.T) {
 					}
 				case <-time.After(20 * time.Second):
 					t.Fatal("streamed section did not complete")
+				}
+			}
+		})
+	}
+}
+
+func TestSceneForceGuidesUpSurvivesReset(t *testing.T) {
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		t.Run(orientation.String(), func(t *testing.T) {
+			scene, err := NewScene(Config{Seed: 42, Orientation: orientation, ForceGuidesUp: true, LoadSection: func(id int64) SectionContent {
+				if id == 0 {
+					return SectionContent{Guides: []Guide{{Pts: []V{{X: .8, Y: .4}, {X: .2, Y: .4}}}}}
+				}
+				return SectionContent{}
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer scene.Close()
+			for _, seed := range []int64{42, 43} {
+				if seed != 42 {
+					scene.Reset(seed)
+				}
+				scene.world.request(0)
+				select {
+				case result := <-scene.world.terrain:
+					collision := terrain.OrientedCollision(orientation, result.geometry.Collision)
+					origin := collision.Origin
+					if !collision.Contains(V{X: .5, Y: .43}.Add(origin)) || collision.Contains(V{X: .5, Y: .37}.Add(origin)) {
+						t.Fatalf("seed %d: scene or reset ignored ForceGuidesUp", seed)
+					}
+				case <-time.After(20 * time.Second):
+					t.Fatal("streamed terrain did not complete")
 				}
 			}
 		})

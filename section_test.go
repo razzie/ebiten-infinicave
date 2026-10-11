@@ -2,12 +2,51 @@ package infinicave
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 	"github.com/razzie/ebiten-infinicave/internal/render"
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
+
+func TestForceGuidesUpShapesRockBelowAuthoredGuide(t *testing.T) {
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		for _, reverse := range []bool{false, true} {
+			points := []V{{X: .2, Y: .4}, {X: .8, Y: .4}}
+			if reverse {
+				slices.Reverse(points)
+			}
+			original := slices.Clone(points)
+			for _, forced := range []bool{false, true} {
+				config := Config{Seed: 42, Orientation: orientation, ForceGuidesUp: forced, LoadSection: func(id int64) SectionContent {
+					if id == 0 {
+						return SectionContent{Guides: []Guide{{Pts: points}}}
+					}
+					return SectionContent{}
+				}}
+				section, err := GenerateSectionWithConfig(config, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				below := section.Collision.Contains(V{X: .5, Y: .43}.Add(section.Origin))
+				above := section.Collision.Contains(V{X: .5, Y: .37}.Add(section.Origin))
+				wantBelow := forced || !reverse
+				if below != wantBelow || above == wantBelow {
+					t.Fatalf("%v reverse=%v forced=%v: rock below=%v above=%v, want below=%v", orientation, reverse, forced, below, above, wantBelow)
+				}
+				if len(section.Guides) != 1 || !reflect.DeepEqual(points, original) {
+					t.Fatal("forcing up mutated loader content")
+				}
+				for i, p := range section.Guides[0].Pts {
+					if p.Sub(original[i]).Len() > 1e-12 {
+						t.Fatal("forcing up changed guide shape or point order")
+					}
+				}
+			}
+		}
+	}
+}
 
 func TestSynchronousCollisionReadyOwnershipAndEmptySections(t *testing.T) {
 	for _, empty := range []bool{false, true} {

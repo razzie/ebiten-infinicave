@@ -7,6 +7,7 @@ import "fmt"
 type GenerationOptions struct {
 	Seed               int64
 	Orientation        Orientation
+	ForceGuidesUp      bool
 	CollisionTolerance float64
 	SpiderWebMaxSize   float64
 	SpiderWebDensity   float64
@@ -24,6 +25,7 @@ func GenerateSection(config GenerationOptions, id int64) (Section, error) {
 	index := -id
 	var collision CollisionGeometry
 	builder := NewSectionBuilder(config.Seed, OrientedSectionLoader(config.Orientation, config.LoadSection), config.Orientation)
+	builder.ForceGuidesUp = config.ForceGuidesUp
 	builder.SpiderWebMaxSize = config.SpiderWebMaxSize
 	builder.SpiderWebDensity = config.SpiderWebDensity
 	data := builder.BuildWithTerrain(index, func(data SectionData) {

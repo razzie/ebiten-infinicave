@@ -15,6 +15,10 @@ type Config struct {
 	// Orientation fixes the scrolling axis for the scene's lifetime. The zero
 	// value is Vertical. Horizontal grows rightward and keeps plants upright.
 	Orientation Orientation
+	// ForceGuidesUp selects the overall upward-facing exposed side of each guide,
+	// regardless of point order or BrightSign, in both orientations. The rock side
+	// stays continuous through bends and curls. False preserves authored sides.
+	ForceGuidesUp bool
 	// Texture is surface grain strength, from 0 (disabled) to 16.
 	Texture float64
 	// BackgroundBlur is Gaussian blur softness in scene units (0 disables it,
@@ -68,8 +72,20 @@ type Config struct {
 
 // DefaultConfig returns the viewer's appearance with a deterministic seed of 0.
 func DefaultConfig() Config {
-	return Config{Texture: 8, BackgroundBlur: .002, ShadowOpacity: .65,
-		ShadowBlur: .008, ShadowOffset: V{X: .018, Y: .025}, Fog: 2, BatsPerMinute: 7.5, SpiderWebMaxSize: terrain.DefaultSpiderWebMaxSize, SpiderWebDensity: terrain.DefaultSpiderWebDensity, View: ViewShaded}
+	return Config{
+		Orientation:      Vertical,
+		ForceGuidesUp:    true,
+		Texture:          8,
+		BackgroundBlur:   .002,
+		ShadowOpacity:    .65,
+		ShadowBlur:       .008,
+		ShadowOffset:     V{X: .018, Y: .025},
+		Fog:              2,
+		BatsPerMinute:    7.5,
+		SpiderWebMaxSize: terrain.DefaultSpiderWebMaxSize,
+		SpiderWebDensity: terrain.DefaultSpiderWebDensity,
+		View:             ViewShaded,
+	}
 }
 
 func (c Config) validate() error {

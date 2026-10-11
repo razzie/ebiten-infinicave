@@ -17,6 +17,7 @@ type viewerOptions struct {
 func parseOptions() (viewerOptions, error) {
 	defaults := infinicave.DefaultConfig()
 	mode := flag.String("mode", "portrait", "scrolling mode: portrait (vertical) or landscape (horizontal)")
+	forceGuidesUp := flag.Bool("force-guides-up", defaults.ForceGuidesUp, "force exposed guide sides to face upward regardless of point order")
 	seed := flag.Int64("seed", rand.Int63(), "random seed (random by default)")
 	output := flag.String("output", "", "save the first 2400 pixels along the scrolling axis as a PNG and exit")
 	texture := flag.Float64("texture", 8, "surface texture strength (0 disables it, range 0-16)")
@@ -39,6 +40,7 @@ func parseOptions() (viewerOptions, error) {
 		return viewerOptions{}, err
 	}
 	config.Orientation = orientation
+	config.ForceGuidesUp = *forceGuidesUp
 	config.Seed, config.Texture = *seed, *texture
 	config.BackgroundBlur, config.ShadowOpacity, config.ShadowBlur = *backgroundBlur, *shadowOpacity, *shadowBlur
 	config.ShadowOffset = infinicave.V{X: *shadowX, Y: *shadowY}

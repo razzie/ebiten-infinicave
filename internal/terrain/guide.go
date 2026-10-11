@@ -102,6 +102,25 @@ func (g *Guide) segmentTangent(i int, u float64) geom.V {
 	return geom.LerpVector(a, b, u).Norm()
 }
 
+// Choose one continuous rock side for the entire guide. The arc-length-weighted
+// mean perpendicular is the endpoint displacement's perpendicular. Pointing it
+// down makes the exposed side face up overall, without flipping at vertical
+// tangents and introducing relief discontinuities away from the guide.
+func (g *Guide) faceUp(orientation Orientation) {
+	direction := g.Pts[len(g.Pts)-1].Sub(g.Pts[0])
+	if direction.Len2() < 1e-24 {
+		// A closed guide has no mean direction. Its middle tangent provides a
+		// reference that reverses with point order and preserves the curl.
+		_, direction, _ = g.frameAt(g.S[len(g.S)-1] / 2)
+	}
+	normal := WorldPoint(orientation, direction.Perp())
+	g.BrightSign = 1
+	// If the guide is vertical overall, choose the left-facing exposed side.
+	if normal.Y < -1e-12 || math.Abs(normal.Y) <= 1e-12 && normal.X < 0 {
+		g.BrightSign = -1
+	}
+}
+
 func (g *Guide) frameAt(s float64) (q, t, n geom.V) {
 	s = geom.Clamp(s, 0, g.S[len(g.S)-1])
 	i := sort.Search(len(g.S)-2, func(i int) bool { return g.S[i+1] >= s })

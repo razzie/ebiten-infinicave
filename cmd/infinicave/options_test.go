@@ -33,6 +33,26 @@ func TestViewerModesAndWindowSizing(t *testing.T) {
 	}
 }
 
+func TestViewerForceGuidesUpFlag(t *testing.T) {
+	oldFlags, oldArgs := flag.CommandLine, os.Args
+	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{nil, false},
+		{[]string{"-force-guides-up"}, true},
+		{[]string{"-force-guides-up=false"}, false},
+	} {
+		flag.CommandLine = flag.NewFlagSet("guide-options", flag.ContinueOnError)
+		os.Args = append([]string{"infinicave"}, tc.args...)
+		options, err := parseOptions()
+		if err != nil || options.config.ForceGuidesUp != tc.want {
+			t.Fatalf("guide flag: got %v, want %v, error %v", options.config.ForceGuidesUp, tc.want, err)
+		}
+	}
+}
+
 func TestViewerSpiderWebMaximumSizeFlag(t *testing.T) {
 	oldFlags, oldArgs := flag.CommandLine, os.Args
 	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })

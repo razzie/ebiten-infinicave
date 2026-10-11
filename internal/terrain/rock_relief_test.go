@@ -65,6 +65,25 @@ func TestReliefProfileHasBevelCrestAndBroadFlank(t *testing.T) {
 	}
 }
 
+func TestForcedGuideReliefContinuousAcrossVerticalBend(t *testing.T) {
+	// At the middle knot the curve turns through a vertical tangent. Flipping
+	// its rock side there introduces a height step away from the guide itself,
+	// where no face was split to accommodate an exposed edge.
+	for _, mode := range []Orientation{Vertical, Horizontal} {
+		knots := []geom.V{{X: .25, Y: .25}, {X: .55, Y: .3}, {X: .6, Y: .5}, {X: .55, Y: .7}}
+		MapPoints(knots, mode.internalLocal)
+		g := SplineGuide(knots, 1)
+		g.faceUp(mode)
+		g.prepareProjection()
+		noise := NewPerlin(rand.New(rand.NewSource(42)))
+		before := reliefHeight(mode.internalLocal(geom.V{X: .57, Y: .49}), []Guide{g}, noise, nil)
+		after := reliefHeight(mode.internalLocal(geom.V{X: .57, Y: .51}), []Guide{g}, noise, nil)
+		if before <= rockContourHeight || after <= rockContourHeight || math.Abs(before-after) > .005 {
+			t.Fatalf("%v: vertical bend tears the rock surface: height %g / %g", mode, before, after)
+		}
+	}
+}
+
 func TestReliefHeightAndSiteDeformationUseWorldCoordinates(t *testing.T) {
 	a := []Guide{SplineGuide([]geom.V{{X: 0.1, Y: 0.4}, {X: 0.5, Y: 0.35}, {X: 0.9, Y: 0.4}}, 1)}
 	b := []Guide{SplineGuide([]geom.V{{X: 0.1, Y: 0.4}, {X: 0.5, Y: 0.35}, {X: 0.9, Y: 0.4}}, 1)}

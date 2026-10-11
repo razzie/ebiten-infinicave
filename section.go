@@ -69,6 +69,7 @@ func GenerateSectionWithConfig(config Config, id int64) (Section, error) {
 	return terrain.GenerateSection(terrain.GenerationOptions{
 		Seed:               config.Seed,
 		Orientation:        config.Orientation,
+		ForceGuidesUp:      config.ForceGuidesUp,
 		CollisionTolerance: config.CollisionTolerance,
 		SpiderWebMaxSize:   config.SpiderWebMaxSize,
 		SpiderWebDensity:   config.SpiderWebDensity,

@@ -118,6 +118,7 @@ config.ShadowBlur = 0.008 // 0 gives a hard shadow
 config.ShadowOffset = infinicave.V{X: 0.018, Y: 0.025} // positive Y is down
 config.View = infinicave.ViewShaded // or ViewClay, ViewHeight, ViewNormals, ViewShadows
 config.CollisionTolerance = 0.002 // approximation tolerance in scene units
+config.ForceGuidesUp = true // keep exposed guide sides facing world-up
 ```
 
 `Texture` accepts 0–16. Diagnostic views disable texture, background effects, fog, and bats and hide vegetation.
@@ -183,6 +184,14 @@ only `Pts` is required. `BrightSign` defaults to 1; use -1 to reverse the lit
 side. Zero guide seeds receive stable seeds derived from the world seed,
 section ID, and guide index. Supplied guides keep their shapes and placement;
 custom layouts are responsible for spacing.
+
+Set `Config.ForceGuidesUp = true` or pass `-force-guides-up` to the viewer to
+choose each guide's overall upward-facing exposed side (negative Y).
+This overrides `BrightSign` once per guide using its overall direction,
+independent of point order, in both portrait and landscape modes. The chosen
+rock side stays continuous through bends and curls, which can naturally turn
+downward locally. Guides that are vertical overall expose their left side.
+The toggle defaults to false and survives `Scene.Reset`.
 
 Holes carve the shaped foreground and damage its generated vegetation. Circles use `Center`
 and `Radius`; segments use `Start`, `End`, and full `Width`, with flat ends.

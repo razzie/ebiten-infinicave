@@ -10,6 +10,8 @@ import (
 // Builder retains reusable generation workspaces and a bounded guide cache.
 // A builder has one caller at a time; concurrent sections use separate builders.
 type Builder struct {
+	// ForceGuidesUp selects one overall upward-facing side per guide.
+	ForceGuidesUp bool
 	// SpiderWebMaxSize bounds decoration span; zero uses the default.
 	SpiderWebMaxSize float64
 	// SpiderWebDensity is the eligible-pocket probability; zero disables webs.
@@ -94,6 +96,9 @@ func (b *Builder) Begin(ctx context.Context, id int64) *SectionBuild {
 		return nil
 	}
 	for i := range guides {
+		if b.ForceGuidesUp {
+			guides[i].faceUp(orientation)
+		}
 		guides[i].prepareProjection()
 	}
 	seeds := artisticRockSeeds(worldSeeds(seed, top, noise), guides, seed, top)
