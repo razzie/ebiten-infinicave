@@ -127,5 +127,9 @@ func carveTopology(old *RockTopology, grid RockGrid, parents []int, cuts []RockC
 			t.Boundary = append(t.Boundary, edge)
 		}
 	}
+	t.webCorners = findWebCorners(t.Grid, t.Boundary)
+	if old.Appearance != nil {
+		t = PrepareRockAppearance(t)
+	}
 	return t
 }

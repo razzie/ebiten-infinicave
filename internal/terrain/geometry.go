@@ -34,7 +34,7 @@ func PrepareTerrainGeometry(data SectionData, tolerance float64) *Geometry {
 	var grid RockGrid
 	source := data.ForegroundTopology
 	if source == nil {
-		source = newRockTopology(data.Foreground)
+		source = NewRockTopology(data.Foreground)
 	}
 	h.source = source
 	h.Cuts = source.Cuts

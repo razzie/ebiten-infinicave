@@ -125,11 +125,13 @@ func prepareGridWithNeighbors(grid terrain.RockGrid, view View, topology *terrai
 }
 
 func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTopology, neighbors [][]int, owned bool) GridMesh {
+	if topology == nil && len(grid) > 0 && grid[0].Raised {
+		topology = terrain.NewRockTopology(grid)
+	}
 	if topology != nil {
+		topology = terrain.PrepareRockAppearance(topology)
 		grid = topology.Grid
 		neighbors = topology.Neighbors()
-	} else if len(grid) > 0 && grid[0].Raised {
-		grid = terrain.InsetForegroundGrid(grid)
 	}
 	capacity := len(grid) * 18
 	if owned {
@@ -146,7 +148,11 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 			boundary = terrain.ExposedRockEdges(grid)
 		}
 	}
-	grid = terrain.ShadeRockFaces(grid, boundary, neighbors)
+	if topology != nil {
+		grid = topology.Appearance
+	} else {
+		grid = terrain.ShadeRockFaces(grid, boundary, neighbors)
+	}
 	if raised {
 		if view == ViewShaded || view == ViewClay {
 			vertices, indices = appendRockWalls(vertices, indices, grid, boundary, view, owned)
@@ -266,6 +272,11 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 				Vertices: vs, Indices: indices,
 				fillRule: ebiten.FillRuleNonZero, premultiplied: true,
 			})
+		}
+	}
+	if raised && view == ViewShaded {
+		if webs := prepareSpiderWebs(topology.SpiderWebs, owned); len(webs.Indices) > 0 {
+			mesh.Outlines = append(mesh.Outlines, webs)
 		}
 	}
 	return mesh

@@ -68,6 +68,10 @@ func (s *SectionBuild) Materialize(ctx context.Context) bool {
 	}
 	topology := *s.data.ForegroundTopology
 	topology.Grid = apply(topology.Grid, s.parents)
+	topology = *PrepareRockAppearance(&topology)
+	if ctx.Err() != nil {
+		return false
+	}
 	s.vegetationGrid = apply(s.uncut.Grid, s.uncutParents)
 	for i := range s.cuts {
 		s.cuts[i].grid = apply(s.cuts[i].grid, s.cuts[i].parents)
