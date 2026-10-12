@@ -59,7 +59,7 @@ func TestTinyVineBranchesFollowExactCellEdges(t *testing.T) {
 		if !v.EdgeAligned || v.Parent != 0 || v.Depth != 1 || v.Points[0].P != parent.Points[v.Joint].P {
 			t.Fatal("fine branch has an invalid attachment")
 		}
-		if length < vineMinEdgeBranchLength || length > .068+1e-9 || v.Points[0].Radius > .00095 || v.Points[len(v.Points)-1].Radius != 0 {
+		if length < vineMinEdgeBranchLength || length > .085+1e-9 || v.Points[0].Radius > .00070 || v.Points[len(v.Points)-1].Radius != 0 {
 			t.Fatalf("branch is not tiny and tapered: length %.2f", length)
 		}
 		along, onSeam := 0.0, false

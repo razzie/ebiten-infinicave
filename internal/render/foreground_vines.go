@@ -1,31 +1,10 @@
 package render
 
 import (
-	"image/color"
-	"math"
-
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
-
-func foregroundVinePalette(vines []terrain.Vine, index int) [len(vineColors)]color.NRGBA {
-	// Copper highlights and rust bodies sit inside a dark bark outline.
-	tints := [...][3]float64{{1, 1, 1}, {.97, .95, 1.04}, {1, 1.05, .96}, {.96, .98, 1.06}}
-	tint := tints[terrain.VineStyleFamily(vines, index)%len(tints)]
-	palette := [len(vineColors)]color.NRGBA{
-		{34, 22, 18, 255}, {34, 22, 18, 255}, {183, 104, 60, 255}, {183, 104, 60, 255},
-		{115, 55, 33, 255}, {115, 55, 33, 255}, {34, 22, 18, 255}, {34, 22, 18, 255},
-	}
-	for i, c := range palette {
-		palette[i] = color.NRGBA{
-			uint8(math.Round(float64(c.R) * tint[0])),
-			uint8(math.Round(float64(c.G) * tint[1])),
-			uint8(math.Round(float64(c.B) * tint[2])), 255,
-		}
-	}
-	return palette
-}
 
 func PrepareForegroundVines(vines []terrain.Vine, orientation ...terrain.Orientation) []TriangleMesh {
 	shadowOffset := terrain.InternalPoint(terrain.OptionalOrientation(orientation), geom.V{X: 1, Y: 1.5})

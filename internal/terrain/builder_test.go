@@ -52,10 +52,11 @@ func statsOf(s SectionData) sectionStats {
 // Procedural guide lips survive edge fade and omit short final spline knots.
 // Open tips taper before their endpoints; spurs retain a sampled solid width.
 // Shared contour junctions are sampled and polished together across faces.
+// Background counts use sparse forks and retain every other viable seam offshoot.
 func TestSectionStatsStable(t *testing.T) {
 	want := map[int64]sectionStats{
-		1:  {9710, 1546, 117, .7767881837},
-		42: {9651, 1157, 147, .6315938436},
+		1:  {9710, 1546, 122, .7767881837},
+		42: {9651, 1157, 137, .6315938436},
 	}
 	for seed, w := range want {
 		got := statsOf(BuildSection(seed, 0))

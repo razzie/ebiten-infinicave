@@ -160,6 +160,13 @@ func OrientedSection(o Orientation, s Section) Section {
 			for j := range vines[i].Points {
 				vines[i].Points[j].P = o.local(vines[i].Points[j].P)
 			}
+			for j := range vines[i].Leaves {
+				leaf := &vines[i].Leaves[j]
+				leaf.Anchor = o.local(leaf.Anchor)
+				for k := range leaf.Polygon {
+					leaf.Polygon[k] = o.local(leaf.Polygon[k])
+				}
+			}
 		}
 	}
 	for _, group := range s.Mushrooms {

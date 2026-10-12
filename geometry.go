@@ -40,6 +40,20 @@ type VinePoint = terrain.VinePoint
 // Vine holds a generated stem and its attachment to a parent stem.
 type Vine = terrain.Vine
 
+// VineStyle describes a vine family's hues and transition distances.
+type VineStyle = terrain.VineStyle
+
+// VineHue selects a pastel vine material.
+type VineHue = terrain.VineHue
+
+const (
+	VineSage  = terrain.VineSage
+	VineStraw = terrain.VineStraw
+)
+
+// VineLeaf is a pointed leaf attached at an original stem distance.
+type VineLeaf = terrain.VineLeaf
+
 // A small CPU field composites both grids in drawing order. Its clearance
 // measures distance from light faces and black voids, including vine width.
 type VineTerrain = terrain.VineTerrain

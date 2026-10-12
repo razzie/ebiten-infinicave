@@ -48,6 +48,9 @@ func TestForegroundVinesStayOnVisibleRock(t *testing.T) {
 			t.Fatal("foreground vine lost its material or tapered tips")
 		}
 		for _, p := range v.Points {
+			if p.Radius > foregroundVineMaxRadius {
+				t.Fatal("foreground vine exceeds its reduced thickness cap")
+			}
 			if field.growthSpace(p.P)+1e-6 < p.Radius {
 				t.Fatalf("vine ribbon exceeds its supporting rock: %+v", p)
 			}

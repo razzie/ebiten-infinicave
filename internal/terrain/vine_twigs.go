@@ -105,18 +105,22 @@ func addVineEdgeBranches(field *VineTerrain, vines []Vine, rng *rand.Rand) []Vin
 	}
 	used := make([]bool, len(g.edges))
 	parents := len(vines)
+	stride, spacing, minimumRadius := 5, 3, .0007
+	if field.onForeground {
+		stride, spacing, minimumRadius = 3, 2, .00045
+	}
 	for parent := 0; parent < parents; parent++ {
 		stem := vines[parent]
-		// Sample every 12.5 pixels, staggered by seed. New twigs never become
+		// Foreground attachments are closer together. New twigs never become
 		// independent roots or recursively fill every seam in the rock grid.
-		for joint := 4 + rng.Intn(5); joint < len(stem.Points)-4; joint += 5 {
+		for joint := 4 + rng.Intn(stride); joint < len(stem.Points)-4; joint += stride {
 			base := stem.Points[joint]
-			if base.Radius < .0007 {
+			if base.Radius < minimumRadius {
 				continue
 			}
 			bin := vineEdgeBin(base.P)
-			radius := math.Min(.00095, base.Radius*geom.Lerp(.32, .46, rng.Float64()))
-			reach := geom.Lerp(.022, .068, rng.Float64())
+			radius := math.Min(.00070, base.Radius*geom.Lerp(.28, .40, rng.Float64()))
+			reach := geom.Lerp(.022, .085, rng.Float64())
 			best, bestScore := Vine{}, 0.0
 			var bestEdges []int
 			checked := make(map[int]bool)
@@ -152,16 +156,18 @@ func addVineEdgeBranches(field *VineTerrain, vines []Vine, rng *rand.Rand) []Vin
 			for _, edge := range bestEdges {
 				used[edge] = true
 			}
-			joint += 3 // Leave breathing room around each successful fork.
+			joint += spacing
 		}
 	}
-	// Keep every other completed offshoot. This halves their density while
-	// preserving the seeded seam paths and spacing of the original growth.
-	thinned := vines[:parents]
-	for i := parents; i < len(vines); i += 2 {
-		thinned = append(thinned, vines[i])
+	if !field.onForeground {
+		// Sparse background tendrils leave the dense networks to raised rock.
+		kept := vines[:parents]
+		for i := parents; i < len(vines); i += 2 {
+			kept = append(kept, vines[i])
+		}
+		return kept
 	}
-	return thinned
+	return vines
 }
 
 func traceVineEdgeBranch(field *VineTerrain, occupied vineTwigOccupancy, used []bool, root, seam geom.V, edge, end int, radius, reach float64) (Vine, []int, float64) {

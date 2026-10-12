@@ -14,20 +14,21 @@ const (
 	vineFieldWidth  = int(generationWidth / vineFieldStep)
 	vineFieldHeight = int(GenerationHeight / vineFieldStep)
 	// Prefer charcoal faces, allowing only shallow trips across voids/ridges.
-	vineVoidTone        = 3.0
-	vineLightTone       = 72.0
-	vineMaxIntrusion    = 0.018
-	vineForegroundTouch = 0.008
-	vineForegroundTuck  = 0.024
-	vineMaxExcursion    = 0.065
-	vineMinTrunkLength  = 0.32
-	vineMinTrunkSpan    = 0.19
-	vineMinBranchLength = 0.085
-	vineMinTwigLength   = 0.06
-	vineThinRadius      = 0.003
-	vineMaxRadius       = 0.0045
-	vineThickLength     = 0.7
-	vineFullWidthLength = 1.2
+	vineVoidTone            = 3.0
+	vineLightTone           = 72.0
+	vineMaxIntrusion        = 0.018
+	vineForegroundTouch     = 0.008
+	vineForegroundTuck      = 0.024
+	vineMaxExcursion        = 0.065
+	vineMinTrunkLength      = 0.32
+	vineMinTrunkSpan        = 0.19
+	vineMinBranchLength     = 0.085
+	vineMinTwigLength       = 0.06
+	vineThinRadius          = 0.003
+	vineMaxRadius           = 0.0045
+	foregroundVineMaxRadius = .0025
+	vineThickLength         = 0.7
+	vineFullWidthLength     = 1.2
 )
 
 // A small CPU field composites both grids in drawing order. Its clearance
@@ -104,6 +105,10 @@ type VinePoint struct {
 
 type Vine struct {
 	Points []VinePoint
+	// Along retains original material distances when carving splits a stem.
+	Along  []float64
+	Style  VineStyle
+	Leaves []VineLeaf
 	Depth  int
 	// Parent and Joint identify the exact attachment on the preceding stem.
 	// Trunks have Parent == -1.
@@ -264,16 +269,25 @@ func generateVinesInBand(field *VineTerrain, rng *rand.Rand, bottom, top float64
 func generateVinesInBandContext(ctx context.Context, field *VineTerrain, rng *rand.Rand, bottom, top float64, count int) []Vine {
 	minLength, minSpan := vineMinTrunkLength, vineMinTrunkSpan
 	radiusLow, radiusHigh := .006, .009
-	forks := 5
+	forks := 3
 	if field.onForeground {
 		minLength, minSpan = .190, .115
-		radiusLow, radiusHigh = .0032, .0045
-		forks = 2
+		radiusLow, radiusHigh = .0018, foregroundVineMaxRadius
+		forks = 5
 	}
 	var vines []Vine
 	for rootIndex := 0; rootIndex < count; rootIndex++ {
 		if ctx.Err() != nil {
 			return nil
+		}
+		// Small foreground formations favor fine, densely attached families.
+		fine := field.onForeground && rng.Float64() < .65
+		familyForks := forks
+		low, high, rootSpace := radiusLow, radiusHigh, .015
+		branchScale, twigForks := .65, 1
+		if fine {
+			low, high, rootSpace = .0009, .0015, .009
+			familyForks, branchScale, twigForks = 8, .55, 2
 		}
 		type candidate struct {
 			p     geom.V
@@ -283,7 +297,7 @@ func generateVinesInBandContext(ctx context.Context, field *VineTerrain, rng *ra
 		for attempt := 0; attempt < 240; attempt++ {
 			p := geom.V{X: .020 + rng.Float64()*(generationWidth-.040), Y: bottom + rng.Float64()*(top-bottom)}
 			space := field.space(p)
-			if space < .015 {
+			if space < rootSpace {
 				continue
 			}
 			distance := .260
@@ -302,7 +316,7 @@ func generateVinesInBandContext(ctx context.Context, field *VineTerrain, rng *ra
 			angle -= math.Pi / 2 // Prefer world-up growth in either mode.
 		}
 		heading := geom.V{X: math.Cos(angle), Y: math.Sin(angle)}
-		radius := geom.Lerp(radiusLow, radiusHigh, rng.Float64())
+		radius := geom.Lerp(low, high, rng.Float64())
 		phase := rng.Float64() * 2 * math.Pi
 		curl := 1.0
 		if rng.Intn(2) == 0 {
@@ -364,53 +378,47 @@ func generateVinesInBandContext(ctx context.Context, field *VineTerrain, rng *ra
 		vines = append(vines, trunk)
 		// Invest in long, attached limbs before starting another independent
 		// trunk. Short blocked offshoots are discarded with their descendants.
-		for fork := 0; fork < forks; fork++ {
-			u := (float64(fork) + geom.Lerp(.25, .75, rng.Float64())) / float64(forks)
+		for fork := 0; fork < familyForks; fork++ {
+			u := (float64(fork) + geom.Lerp(.25, .75, rng.Float64())) / float64(familyForks)
 			i := int(geom.Lerp(12, float64(len(trunk.Points)-13), u))
-			base := trunk.Points[i]
-			if base.Radius < .0018 {
-				continue
+			if ctx.Err() != nil {
+				return nil
 			}
-			direction := trunk.Points[i+1].P.Sub(trunk.Points[i-1].P).Norm()
 			side := 1.0
 			if fork%2 == 0 {
 				side = -1
 			}
-			if i < rootAt {
-				direction = direction.Mul(-1)
-			}
-			// Try both sides so a blocked fork can spread into the open side.
-			branch := Vine{}
-			branchLength := 0.0
 			reach := geom.Lerp(.250, .420, rng.Float64())
-			for _, sign := range []float64{side, -side} {
-				v := growVine(field, base.P, geom.Rotate(direction, sign*.32), base.Radius*.65, reach, phase+float64(fork), sign, 1)
-				length, _ := v.extent()
-				if length > branchLength {
-					branch, branchLength, side = v, length, sign
-				}
-			}
+			branch, joint, side := growVineBranch(ctx, field, trunk, i, rootAt, branchScale, reach, phase+float64(fork), side, 1, vineMinBranchLength)
+			branchLength, _ := branch.extent()
 			if branchLength < vineMinBranchLength {
 				continue
 			}
 			branch.limitThickness()
-			branch.Parent, branch.Joint = trunkIndex, i
+			branch.Parent, branch.Joint = trunkIndex, joint
 			branchIndex := len(vines)
 			vines = append(vines, branch)
-			if fork%2 == 0 && branchLength > .150 {
-				j := len(branch.Points) / 2
-				b := branch.Points[j]
-				d := branch.Points[j+1].P.Sub(branch.Points[j-1].P).Norm()
-				twig := growVine(field, b.P, geom.Rotate(d, -side*.4), b.Radius*.6, geom.Lerp(.140, .220, rng.Float64()), phase, -side, 2)
+			if !field.onForeground && fork%2 != 0 {
+				continue
+			}
+			for twigIndex := 0; branchLength > .120 && twigIndex < twigForks; twigIndex++ {
+				u := float64(twigIndex+1) / float64(twigForks+1)
+				j := int(float64(len(branch.Points)-1) * u)
+				twig, twigJoint, _ := growVineBranch(ctx, field, branch, j, 0, .6, geom.Lerp(.140, .220, rng.Float64()), phase, -side, 2, vineMinTwigLength)
 				if length, _ := twig.extent(); length >= vineMinTwigLength {
 					twig.limitThickness()
-					twig.Parent, twig.Joint = branchIndex, j
+					twig.Parent, twig.Joint = branchIndex, twigJoint
 					vines = append(vines, twig)
 				}
 			}
 		}
 	}
-	return addVineEdgeBranches(field, vines, rng)
+	if ctx.Err() != nil {
+		return nil
+	}
+	vines = addVineEdgeBranches(field, vines, rng)
+	decorateVines(field, vines)
+	return vines
 }
 
 // Join two growth directions at one full-width root. If either direction is

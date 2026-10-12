@@ -17,15 +17,22 @@ func PrepareVines(vines []terrain.Vine) []TriangleMesh {
 		vine := vines[index]
 		var vertices []ebiten.Vertex
 		var indices []uint32
-		palette := vinePalette(vines, index)
+		along := 0.0
 		for i, point := range vine.Points {
+			if i > 0 {
+				along += point.P.Sub(vine.Points[i-1].P).Len()
+			}
+			distance := along
+			if len(vine.Along) == len(vine.Points) {
+				distance = vine.Along[i]
+			}
+			palette := vinePaletteAt(vines, index, distance)
 			before, after := vine.Points[max(0, i-1)].P, vine.Points[min(len(vine.Points)-1, i+1)].P
 			n := after.Sub(before).Norm().Perp()
 			for j, band := range vineBands {
 				p := point.P.Add(n.Mul(band * point.Radius))
 				clr := weatherVineColor(vineJoinColor(vines, index, p, palette[j]), p, terrain.VineStyleFamily(vines, index))
-				a := float32(clr.A) / 255
-				vertices = append(vertices, ebiten.Vertex{DstX: float32(p.X * RasterPixelsPerUnit), DstY: float32((p.Y - terrain.GenerationMinY) * RasterPixelsPerUnit), SrcX: .5, SrcY: .5, ColorR: float32(clr.R) / 255 * a, ColorG: float32(clr.G) / 255 * a, ColorB: float32(clr.B) / 255 * a, ColorA: a})
+				vertices = append(vertices, vineVertex(p, clr))
 				if i > 0 && j > 0 && vineBands[j] != vineBands[j-1] {
 					k := uint32(len(vertices) - 1)
 					b := uint32(len(vineBands))
@@ -33,6 +40,7 @@ func PrepareVines(vines []terrain.Vine) []TriangleMesh {
 				}
 			}
 		}
+		appendVineLeaves(vines, index, &vertices, &indices)
 		meshes = append(meshes, TriangleMesh{Vertices: vertices, Indices: indices})
 	}
 	// Generation stores each parent before its children.
@@ -46,53 +54,64 @@ func PrepareVines(vines []terrain.Vine) []TriangleMesh {
 // crisp instead of interpolating a rounded, glossy cylinder across the stem.
 var vineBands = [...]float64{-1, -.78, -.78, -.30, -.30, .78, .78, 1}
 
-var vineColors = [...]color.NRGBA{
-	{34, 0, 3, 255}, {34, 0, 3, 255},
-	{245, 16, 23, 255}, {245, 16, 23, 255},
-	{155, 1, 8, 255}, {155, 1, 8, 255},
-	{34, 0, 3, 255}, {34, 0, 3, 255},
+// Sage and straw highlights sit over dusty bodies and tinted bark.
+var vineMaterials = [...][3]color.NRGBA{
+	{{48, 61, 47, 255}, {166, 185, 154, 255}, {103, 126, 91, 255}},
+	{{68, 57, 39, 255}, {213, 193, 138, 255}, {153, 130, 86, 255}},
 }
 
-func vinePalette(vines []terrain.Vine, index int) [len(vineColors)]color.NRGBA {
-	if vines[terrain.VineFamily(vines, index)].Foreground {
-		return foregroundVinePalette(vines, index)
+var vineColors = expandVineMaterial(vineMaterials[0])
+
+func expandVineMaterial(material [3]color.NRGBA) [len(vineBands)]color.NRGBA {
+	return [len(vineBands)]color.NRGBA{material[0], material[0], material[1], material[1], material[2], material[2], material[0], material[0]}
+}
+
+func vinePalette(vines []terrain.Vine, index int) [len(vineBands)]color.NRGBA {
+	return vinePaletteAt(vines, index, 0)
+}
+
+func vinePaletteAt(vines []terrain.Vine, index int, distance float64) [len(vineBands)]color.NRGBA {
+	style := terrain.VineMaterial(vines, index)
+	from, to, blend := style.Hues(distance)
+	a := expandVineMaterial(vineMaterials[from%2])
+	b := expandVineMaterial(vineMaterials[to%2])
+	// Keep depth readable without washing both hues into charcoal.
+	dim := 1.0
+	if !vines[terrain.VineFamily(vines, index)].Foreground {
+		dim = .20
 	}
-	type paletteStyle struct {
-		tint                   [3]int
-		grayMix, brownMix, dim float64
-	}
-	styles := [...]paletteStyle{
-		{[3]int{0, 0, 0}, .92, 0, .36},
-		{[3]int{7, 2, -3}, .92, 0, .36},
-		{[3]int{-4, 1, 5}, .92, 0, .36},
-		{[3]int{12, -4, -6}, .92, 0, .36},
-		{[3]int{-8, 5, 11}, .92, 0, .36},
-		{[3]int{5, 2, -3}, .92, 0, .36},
-		{[3]int{-5, -2, 10}, .92, 0, .36},
-		{[3]int{9, -3, 0}, .92, 0, .36},
-		{[3]int{0, 0, 0}, .92, .31, .36},
-		{[3]int{0, 0, 0}, .92, .42, .36},
-		{[3]int{0, 0, 0}, 1, 0, .34},
-		{[3]int{0, 0, 0}, 1, 0, .39},
-	}
-	var palette [len(vineColors)]color.NRGBA
-	family := terrain.VineStyleFamily(vines, index)
-	style := styles[family%len(styles)]
-	for i, base := range vineColors {
-		gray := .30*float64(base.R) + .59*float64(base.G) + .11*float64(base.B)
-		shade := func(channel uint8, tint int, sepia float64) uint8 {
-			value := geom.Lerp(float64(channel), gray, style.grayMix)
-			value = geom.Lerp(value, gray*sepia, style.brownMix)
-			return uint8(geom.Clamp(math.Round((value+float64(tint))*style.dim), 0, 255))
+	for i := range a {
+		c := mixVineColor(a[i], b[i], blend)
+		shade := func(channel uint8) uint8 {
+			return uint8(geom.Clamp(math.Round(float64(channel)*dim*(1+style.Tint)), 0, 255))
 		}
-		palette[i] = color.NRGBA{
-			R: shade(base.R, style.tint[0], 1.12),
-			G: shade(base.G, style.tint[1], .82),
-			B: shade(base.B, style.tint[2], .58),
-			A: 255,
+		a[i] = color.NRGBA{shade(c.R), shade(c.G), shade(c.B), 255}
+	}
+	return a
+}
+
+func vineVertex(p geom.V, clr color.NRGBA) ebiten.Vertex {
+	a := float32(clr.A) / 255
+	return ebiten.Vertex{DstX: float32(p.X * RasterPixelsPerUnit), DstY: float32((p.Y - terrain.GenerationMinY) * RasterPixelsPerUnit), SrcX: .5, SrcY: .5, ColorR: float32(clr.R) / 255 * a, ColorG: float32(clr.G) / 255 * a, ColorB: float32(clr.B) / 255 * a, ColorA: a}
+}
+
+func appendVineLeaves(vines []terrain.Vine, index int, vertices *[]ebiten.Vertex, indices *[]uint32) {
+	for _, leaf := range vines[index].Leaves {
+		palette := vinePaletteAt(vines, index, leaf.Along)
+		// Two flat halves meet at a root-to-tip vein, like folded paper.
+		for half := range 2 {
+			shoulder, shade := 1, palette[2]
+			if half == 1 {
+				shoulder, shade = 3, palette[4]
+			}
+			base := uint32(len(*vertices))
+			for _, point := range []int{0, shoulder, 2} {
+				p := leaf.Polygon[point]
+				*vertices = append(*vertices, vineVertex(p, weatherVineColor(shade, p, terrain.VineStyleFamily(vines, index))))
+			}
+			*indices = append(*indices, base, base+1, base+2)
 		}
 	}
-	return palette
 }
 
 func weatherVineColor(clr color.NRGBA, p geom.V, family int) color.NRGBA {
@@ -150,6 +169,6 @@ func vineJoinColor(vines []terrain.Vine, index int, p geom.V, own color.NRGBA) c
 	after := parent.Points[min(len(parent.Points)-1, vine.Joint+1)].P
 	normal := after.Sub(before).Norm().Perp()
 	band := p.Sub(root.P).Dot(normal) / root.Radius
-	inherited := vineJoinColor(vines, vine.Parent, p, vineBandColorFrom(vinePalette(vines, vine.Parent), band))
+	inherited := vineJoinColor(vines, vine.Parent, p, vineBandColorFrom(vinePaletteAt(vines, vine.Parent, terrain.VineDistance(parent, vine.Joint)), band))
 	return mixVineColor(inherited, own, blend)
 }

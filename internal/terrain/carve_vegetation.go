@@ -136,6 +136,7 @@ func vineCutInterval(a, b geom.V, hole []geom.V) (float64, float64, bool) {
 
 type vineFragment struct {
 	points []VinePoint
+	along  []float64
 	first  bool // retains the original branch attachment
 }
 
@@ -143,44 +144,53 @@ func splitVine(vine Vine, hole []geom.V) []vineFragment {
 	holeMin, holeMax := geom.PolygonBounds(hole)
 	var fragments []vineFragment
 	var current []VinePoint
+	var along []float64
 	first := true
 	flush := func() {
 		if len(current) >= 2 {
-			fragments = append(fragments, vineFragment{current, first})
+			fragments = append(fragments, vineFragment{current, along, first})
 		}
 		current = nil
+		along = nil
 		first = false
 	}
-	appendPoint := func(p VinePoint) {
+	appendPoint := func(p VinePoint, distance float64) {
 		if len(current) == 0 || p.P.Sub(current[len(current)-1].P).Len2() > 1e-24 {
 			current = append(current, p)
+			along = append(along, distance)
 		}
 	}
+	distance := 0.0
 	for i := 1; i < len(vine.Points); i++ {
 		a, b := vine.Points[i-1], vine.Points[i]
+		da, db := distance, distance+b.P.Sub(a.P).Len()
+		if len(vine.Along) == len(vine.Points) {
+			da, db = vine.Along[i-1], vine.Along[i]
+		}
+		distance = db
 		if math.Max(a.P.X, b.P.X) < holeMin.X || math.Min(a.P.X, b.P.X) > holeMax.X ||
 			math.Max(a.P.Y, b.P.Y) < holeMin.Y || math.Min(a.P.Y, b.P.Y) > holeMax.Y {
-			appendPoint(a)
-			appendPoint(b)
+			appendPoint(a, da)
+			appendPoint(b, db)
 			continue
 		}
 		lo, hi, hit := vineCutInterval(a.P, b.P, hole)
 		if !hit {
-			appendPoint(a)
-			appendPoint(b)
+			appendPoint(a, da)
+			appendPoint(b, db)
 			continue
 		}
 		point := func(t float64) VinePoint {
 			return VinePoint{P: geom.LerpVector(a.P, b.P, t), Radius: geom.Lerp(a.Radius, b.Radius, t)}
 		}
 		if lo > 1e-12 {
-			appendPoint(a)
-			appendPoint(point(lo))
+			appendPoint(a, da)
+			appendPoint(point(lo), geom.Lerp(da, db, lo))
 		}
 		flush()
 		if hi < 1-1e-12 {
-			appendPoint(point(hi))
-			appendPoint(b)
+			appendPoint(point(hi), geom.Lerp(da, db, hi))
+			appendPoint(b, db)
 		}
 	}
 	flush()
@@ -190,6 +200,13 @@ func splitVine(vine Vine, hole []geom.V) []vineFragment {
 func (cut RockCut) Vines(source []Vine, top float64) ([]Vine, bool) {
 	hit := false
 	for _, vine := range source {
+		for _, leaf := range vine.Leaves {
+			lo, hi := geom.PolygonBounds(leaf.Polygon[:])
+			if hi.X+.002 >= cut.Min.X && lo.X-.002 <= cut.Max.X && hi.Y+top+.002 >= cut.Min.Y && lo.Y+top-.002 <= cut.Max.Y {
+				hit = true
+				break
+			}
+		}
 		for _, point := range vine.Points {
 			if point.P.X+point.Radius+.002 >= cut.Min.X && point.P.X-point.Radius-.002 <= cut.Max.X &&
 				point.P.Y+top+point.Radius+.002 >= cut.Min.Y && point.P.Y+top-point.Radius-.002 <= cut.Max.Y {
@@ -229,6 +246,14 @@ func (cut RockCut) Vines(source []Vine, top float64) ([]Vine, bool) {
 			vine := original
 			vine.Foreground = source[VineFamily(source, i)].Foreground
 			vine.Points = fragment.points
+			vine.Along = fragment.along
+			vine.Style = VineMaterial(source, i)
+			vine.Leaves = nil
+			for _, leaf := range original.Leaves {
+				if leaf.Along >= fragment.along[0]-1e-12 && leaf.Along <= fragment.along[len(fragment.along)-1]+1e-12 && !geom.InsidePolygon(leaf.Anchor, hole) {
+					vine.Leaves = append(vine.Leaves, leaf)
+				}
+			}
 			vine.Parent, vine.Joint, vine.Depth = -1, 0, 0
 			vine.styleFamily, vine.styleSet = VineStyleFamily(source, i), true
 			if fragment.first && original.Parent >= 0 && original.Parent < i {

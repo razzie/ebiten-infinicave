@@ -83,37 +83,40 @@ func TestVinePalettesVaryAndStayMuted(t *testing.T) {
 	seen := make(map[[len(vineColors)]color.NRGBA]bool, len(palettes))
 	for i := range palettes {
 		palettes[i] = vinePalette(vines, i)
-		if seen[palettes[i]] {
-			t.Fatalf("trunks 0 through 11 repeat a palette at trunk %d", i)
-		}
 		seen[palettes[i]] = true
+	}
+	if len(seen) < 4 {
+		t.Fatal("vine families need variations of both pastel palettes")
 	}
 	if child := vinePalette(vines, 12); child != palettes[0] {
 		t.Fatal("branches should retain their trunk's palette")
 	}
-	for _, palette := range palettes[8:10] {
-		if int(palette[3].G)*100 < int(palette[3].R)*40 || int(palette[3].B)*100 < int(palette[3].R)*30 {
-			t.Fatalf("palette should have a brown cast: %v", palette[3])
+	for i, palette := range palettes {
+		c := palette[3]
+		switch i % 2 {
+		case 0:
+			if c.G <= c.R || c.R <= c.B {
+				t.Fatalf("missing sage hue: %v", c)
+			}
+		case 1:
+			if c.R <= c.G || c.G <= c.B || int(c.G)-int(c.B) < 7 {
+				t.Fatalf("missing straw hue: %v", c)
+			}
+
 		}
-	}
-	for _, palette := range palettes[10:12] {
-		if palette[3].R != palette[3].G || palette[3].G != palette[3].B {
-			t.Fatalf("palette should be neutral gray: %v", palette[3])
-		}
-	}
-	for _, palette := range palettes {
-		for i, muted := range palette {
-			original := vineColors[i]
-			mutedTone := .30*float64(muted.R) + .59*float64(muted.G) + .11*float64(muted.B)
-			originalTone := .30*float64(original.R) + .59*float64(original.G) + .11*float64(original.B)
-			mutedRange := max(int(muted.R), int(muted.G), int(muted.B)) - min(int(muted.R), int(muted.G), int(muted.B))
-			originalRange := max(int(original.R), int(original.G), int(original.B)) - min(int(original.R), int(original.G), int(original.B))
-			if mutedTone >= originalTone || mutedRange >= originalRange {
-				t.Fatalf("palette band %d is not dimmer and less saturated: got %v, original %v", i, muted, original)
+		vines[i].Foreground = true
+		foreground := vinePalette(vines, i)
+		for band, muted := range palette {
+			bright := foreground[band]
+			if muted.R >= bright.R || muted.G >= bright.G || muted.B >= bright.B {
+				t.Fatalf("background material lost its depth: %v vs %v", muted, bright)
 			}
 		}
-		if max(int(palette[3].R), int(palette[3].G), int(palette[3].B)) > 55 {
-			t.Fatalf("vine highlight is too bright for background growth: %v", palette[3])
+		if max(c.R, c.G, c.B) > 45 {
+			t.Fatalf("background highlight is too bright: %v", c)
+		}
+		if max(foreground[3].R, foreground[3].G, foreground[3].B)-min(foreground[3].R, foreground[3].G, foreground[3].B) > 85 {
+			t.Fatalf("foreground material is too saturated: %v", foreground[3])
 		}
 	}
 	if meshes := PrepareVines(vines); len(meshes) != len(vines) {
@@ -136,5 +139,99 @@ func TestVineWeatheringIsSubtleAndStable(t *testing.T) {
 			float64(weathered.R) < float64(base.R)*.89 || float64(weathered.G) < float64(base.G)*.89 || float64(weathered.B) < float64(base.B)*.89 {
 			t.Fatalf("vine weathering exceeded its subtle darkening range: %v", weathered)
 		}
+	}
+}
+
+func TestVineTransitionAndForkUseLocalMaterial(t *testing.T) {
+	parent := terrain.Vine{
+		Parent: -1, Foreground: true,
+		Style:  terrain.VineStyle{From: terrain.VineSage, To: terrain.VineStraw, Start: .1, End: .7},
+		Points: []terrain.VinePoint{{P: geom.V{X: .2, Y: .1}, Radius: .004}, {P: geom.V{X: .2, Y: .5}, Radius: .004}, {P: geom.V{X: .2, Y: .9}, Radius: .004}},
+		Along:  []float64{0, .4, .8},
+	}
+	child := terrain.Vine{Parent: 0, Joint: 1, Depth: 1, Foreground: true, Points: []terrain.VinePoint{{P: parent.Points[1].P, Radius: .002}, {P: geom.V{X: .4, Y: .6}, Radius: 0}}, Along: []float64{.4, .6}}
+	vines := []terrain.Vine{parent, child}
+	start, middle, end := vinePaletteAt(vines, 0, 0), vinePaletteAt(vines, 0, .4), vinePaletteAt(vines, 0, .8)
+	if start[3].G <= start[3].R || end[3].R <= end[3].G || middle[3] == start[3] || middle[3] == end[3] {
+		t.Fatal("missing sage-to-straw transition")
+	}
+	if vinePaletteAt(vines, 1, .4) != middle {
+		t.Fatal("child does not inherit the local material")
+	}
+	p := parent.Points[1].P
+	if got := vineJoinColor(vines, 1, p, start[0]); got != vineBandColorFrom(middle, 0) {
+		t.Fatal("fork samples the parent's starting color rather than its local color")
+	}
+	meshes := PrepareVines(vines)
+	for _, mesh := range meshes {
+		checkMesh(t, mesh)
+	}
+	for i := range parent.Points {
+		palette := vinePaletteAt(vines, 0, parent.Along[i])
+		p := parent.Points[i].P.Add(geom.V{X: -vineBands[3] * parent.Points[i].Radius})
+		want := vineVertex(p, weatherVineColor(palette[3], p, 0))
+		if meshes[0].Vertices[i*len(vineBands)+3] != want {
+			t.Fatal("stem mesh did not evaluate material along its length")
+		}
+	}
+	cut, _ := terrain.CutFromHole(terrain.Hole{Shape: terrain.HoleCircle, Center: geom.V{X: .2, Y: -.5}, Radius: .08})
+	fragments, _ := cut.Vines(vines, -1)
+	for i, vine := range fragments {
+		for j, p := range vine.Points {
+			if got, want := vinePaletteAt(fragments, i, terrain.VineDistance(vine, j)), vinePaletteAt(vines, 0, p.P.Y-.1); vine.Parent < 0 && p.P.X == .2 && got != want {
+				t.Fatal("carving changed a surviving stem's color")
+			}
+		}
+	}
+}
+
+func TestLeavesShareStemMeshAndForegroundShadows(t *testing.T) {
+	p := geom.V{X: .3, Y: .4}
+	vine := terrain.Vine{Parent: -1, Foreground: true, Points: []terrain.VinePoint{{P: p, Radius: .003}, {P: p.Add(geom.V{Y: .2}), Radius: 0}}, Leaves: []terrain.VineLeaf{{Anchor: p, Polygon: [4]geom.V{p, p.Add(geom.V{X: .02, Y: .01}), p.Add(geom.V{X: .04, Y: .04}), p.Add(geom.V{X: .01, Y: .025})}}}}
+	meshes := PrepareForegroundVines([]terrain.Vine{vine})
+	if len(meshes) != 2 || len(meshes[1].Vertices) != 2*len(vineBands)+6 {
+		t.Fatal("leaves were not included in the stem's cached mesh")
+	}
+	for _, mesh := range meshes {
+		checkMesh(t, mesh)
+	}
+	leafStart := 2 * len(vineBands)
+	if meshes[1].Vertices[leafStart].ColorR == meshes[1].Vertices[leafStart+3].ColorR {
+		t.Fatal("leaf halves need distinct flat tones")
+	}
+	for i := leafStart; i < len(meshes[0].Vertices); i++ {
+		shadow, leaf := meshes[0].Vertices[i], meshes[1].Vertices[i]
+		if shadow.ColorA != .38 || shadow.DstX-leaf.DstX != 1 || shadow.DstY-leaf.DstY != 1.5 {
+			t.Fatal("leaf lost its contact shadow")
+		}
+	}
+	batch := SectionMesh{ForegroundVines: meshes}
+	FinishSectionMesh(&batch)
+	for _, point := range vine.Leaves[0].Polygon {
+		if int(point.X*RasterPixelsPerUnit) < batch.ForegroundVinesBounds.Min.X || int(point.X*RasterPixelsPerUnit) >= batch.ForegroundVinesBounds.Max.X {
+			t.Fatal("cached layer bounds omit a leaf")
+		}
+	}
+}
+
+func TestRepeatedVineColorsStayDarkInBackground(t *testing.T) {
+	style := terrain.VineStyle{From: terrain.VineSage, To: terrain.VineStraw, Start: .03, End: .10, Period: .18}
+	vines := []terrain.Vine{{Parent: -1, Style: style}, {Parent: -1, Style: style, Foreground: true}}
+	seen := map[[len(vineBands)]color.NRGBA]bool{}
+	for cycle := range 6 {
+		distance := style.End + float64(cycle)*style.Period + .001
+		background, foreground := vinePaletteAt(vines, 0, distance), vinePaletteAt(vines, 1, distance)
+		seen[foreground] = true
+		for i, c := range background {
+			bright := foreground[i]
+			for _, pair := range [][2]uint8{{c.R, bright.R}, {c.G, bright.G}, {c.B, bright.B}} {
+				if float64(pair[0]) > float64(pair[1])*.21+1 {
+					t.Fatal("background material is too bright")
+				}
+			}
+		}
+	}
+	if len(seen) != 2 {
+		t.Fatal("renderer does not alternate green and yellow along a vine")
 	}
 }
