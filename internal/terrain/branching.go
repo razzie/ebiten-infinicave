@@ -15,7 +15,11 @@ type BranchSegment struct {
 	LightA, LightB float64
 }
 
-func generateBranches(guides []Guide, noise *Perlin, rng *rand.Rand) []BranchSegment {
+func generateBranches(guides []Guide, noise *Perlin, rng *rand.Rand, options ...ShapeOptions) []BranchSegment {
+	shape := DefaultShapeOptions()
+	if len(options) > 0 {
+		shape = options[0]
+	}
 	var branches []BranchSegment
 	for i := range guides {
 		g := &guides[i]
@@ -33,7 +37,7 @@ func generateBranches(guides []Guide, noise *Perlin, rng *rand.Rand) []BranchSeg
 			root := q.Add(normal.Mul(geom.Lerp(0.04, 0.055, rng.Float64())))
 			direction := normal.Add(tangent.Mul(geom.Lerp(-.65, .65, rng.Float64()))).Norm()
 			reach := geom.Lerp(0.17, 0.3, rng.Float64())
-			width := geom.Lerp(0.026, 0.04, rng.Float64())
+			width := shape.branchWidth(rng.Float64())
 			phase := rng.Float64() * 1000 // Dimensionless noise phase, independent of scene scale.
 			forkAt := geom.Lerp(.38, .60, rng.Float64())
 			forked := false
@@ -67,7 +71,7 @@ func generateBranches(guides []Guide, noise *Perlin, rng *rand.Rand) []BranchSeg
 						side = -1
 					}
 					forkDir := heading.Add(heading.Perp().Mul(side * .95)).Norm()
-					branches = appendBranchFork(branches, end, forkDir, reach*geom.Lerp(.35, .55, rng.Float64()), width*.55, .425*(1-geom.Smoothstep(.12, 1, v)), phase, noise, guides)
+					branches = appendBranchFork(branches, end, forkDir, reach*geom.Lerp(.35, .55, rng.Float64()), math.Max(shape.branchWidth(0), width*.55), .425*(1-geom.Smoothstep(.12, 1, v)), phase, noise, guides)
 				}
 				p, d = end, next
 			}
@@ -133,6 +137,7 @@ const branchCell = .032
 // BranchField buckets segments by padded bounds; a spur contributes nothing
 // outside its support, and the max in branchBias is order independent.
 type BranchField struct {
+	negative   *BranchField
 	segs       []BranchSegment
 	lo, hi     []geom.V
 	cols, rows int

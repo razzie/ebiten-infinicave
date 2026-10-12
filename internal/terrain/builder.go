@@ -10,6 +10,8 @@ import (
 // Builder retains reusable generation workspaces and a bounded guide cache.
 // A builder has one caller at a time; concurrent sections use separate builders.
 type Builder struct {
+	// Shape selects branch growth and fine silhouette detail.
+	Shape ShapeOptions
 	// ForceGuidesUp selects one overall upward-facing side per guide.
 	ForceGuidesUp bool
 	// MushroomDensity is the cluster retention probability; zero disables mushrooms.
@@ -107,7 +109,7 @@ func (b *Builder) Begin(ctx context.Context, id int64) *SectionBuild {
 	if ctx.Err() != nil {
 		return nil
 	}
-	branches := newBranchField(generateBranches(guides, noise, rand.New(rand.NewSource(seed))))
+	branches := newShapedBranchField(generateBranchesWithOptions(guides, noise, rand.New(rand.NewSource(seed)), b.Shape), b.Shape.BranchingStrategy)
 	foreground := guideRockFaces(seeds, guides)
 	if ctx.Err() != nil {
 		return nil
@@ -121,6 +123,8 @@ func (b *Builder) Begin(ctx context.Context, id int64) *SectionBuild {
 		return nil
 	}
 	polishRockContours(foreground, guides, func(p geom.V) float64 { return reliefHeight(p, guides, noise, branches) })
+	roughenRockEdges(foreground, guides, seed, top, b.Shape)
+	cleanRockJunctions(foreground)
 
 	if ctx.Err() != nil {
 		return nil

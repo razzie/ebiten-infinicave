@@ -157,3 +157,53 @@ func TestViewerGrassDensityFlag(t *testing.T) {
 		}
 	}
 }
+
+func TestViewerBranchingAndRockEdgeFlags(t *testing.T) {
+	oldFlags, oldArgs := flag.CommandLine, os.Args
+	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })
+	defaults := infinicave.DefaultConfig()
+	for _, tc := range []struct {
+		args              []string
+		strategy          infinicave.BranchingStrategy
+		spikes, roughness float64
+	}{
+		{nil, infinicave.BranchingRecursive, defaults.SpikeDensity, defaults.EdgeRoughness},
+		{[]string{"-branching", "simple"}, infinicave.BranchingSimple, defaults.SpikeDensity, defaults.EdgeRoughness},
+		{[]string{"-branching", "recursive", "-spike-density", "0", "-edge-roughness", "1"}, infinicave.BranchingRecursive, 0, 1},
+		{[]string{"-branching", "loops", "-spike-density", "0.3", "-edge-roughness", "0.4"}, infinicave.BranchingLoops, .3, .4},
+	} {
+		flag.CommandLine = flag.NewFlagSet("rock-shape-options", flag.ContinueOnError)
+		os.Args = append([]string{"infinicave"}, tc.args...)
+		options, err := parseOptions()
+		if err != nil || options.config.BranchingStrategy != tc.strategy || options.config.SpikeDensity != tc.spikes || options.config.EdgeRoughness != tc.roughness {
+			t.Fatalf("shape flags: %+v, error %v", options.config, err)
+		}
+	}
+	flag.CommandLine = flag.NewFlagSet("invalid-branching", flag.ContinueOnError)
+	os.Args = []string{"infinicave", "-branching", "unknown"}
+	if _, err := parseOptions(); err == nil {
+		t.Fatal("unknown branching strategy accepted")
+	}
+}
+
+func TestViewerBranchThicknessFlags(t *testing.T) {
+	oldFlags, oldArgs := flag.CommandLine, os.Args
+	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })
+	defaults := infinicave.DefaultConfig()
+	for _, tc := range []struct {
+		args   []string
+		lo, hi float64
+	}{
+		{nil, defaults.BranchMinThickness, defaults.BranchMaxThickness},
+		{[]string{"-branch-min-thickness", "0.04", "-branch-max-thickness", "0.09"}, .04, .09},
+		{[]string{"-branch-min-thickness", "0", "-branch-max-thickness", "0"}, 0, 0},
+		{[]string{"-branch-min-thickness", "0.06", "-branch-max-thickness", "0.06"}, .06, .06},
+	} {
+		flag.CommandLine = flag.NewFlagSet("branch-thickness", flag.ContinueOnError)
+		os.Args = append([]string{"infinicave"}, tc.args...)
+		options, err := parseOptions()
+		if err != nil || options.config.BranchMinThickness != tc.lo || options.config.BranchMaxThickness != tc.hi {
+			t.Fatalf("thickness flags: %+v, error %v", options.config, err)
+		}
+	}
+}

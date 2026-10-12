@@ -53,10 +53,12 @@ func statsOf(s SectionData) sectionStats {
 // Open tips taper before their endpoints; spurs retain a sampled solid width.
 // Shared contour junctions are sampled and polished together across faces.
 // Background counts use sparse forks and retain every other viable seam offshoot.
+// Foreground uses recursive branches, the default even for zero options.
+// Branch thickness varies within its bounds; negative points open shoulders.
 func TestSectionStatsStable(t *testing.T) {
 	want := map[int64]sectionStats{
-		1:  {9710, 1546, 122, .7767881837},
-		42: {9651, 1157, 137, .6315938436},
+		1:  {9710, 1877, 135, .9745942911},
+		42: {9651, 1473, 132, .7554265958},
 	}
 	for seed, w := range want {
 		got := statsOf(BuildSection(seed, 0))

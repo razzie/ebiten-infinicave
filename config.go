@@ -10,7 +10,7 @@ import (
 
 // Config controls generation and rendering. Start with DefaultConfig to use
 // the viewer's appearance. A zero Config disables texture, background effects,
-// fog, bats, mushrooms, spider webs, moss, grass, and hanging growth.
+// fog, bats, mushrooms, spider webs, moss, grass, hanging growth, and fine edge detail.
 type Config struct {
 	Seed int64
 	// Orientation fixes the scrolling axis for the scene's lifetime. The zero
@@ -20,6 +20,24 @@ type Config struct {
 	// regardless of point order or BrightSign, in both orientations. The rock side
 	// stays continuous through bends and curls. False preserves authored sides.
 	ForceGuidesUp bool
+	// BranchingStrategy selects recursive longer branches (the default),
+	// simple short spurs, or reconnecting loops with irregular enclosed openings.
+	BranchingStrategy BranchingStrategy
+	// BranchMinThickness and BranchMaxThickness bound nominal branch thickness
+	// in scene units (the cave cross-axis spans 1). Soft shoulders and tapered
+	// tips can extend beyond or narrow below these bounds. Each zero endpoint
+	// uses its default: 0.048 minimum, 0.08 maximum. Equal bounds fix thickness.
+	// Values must be finite and between 0 and 1; the resolved minimum must not
+	// exceed the maximum. Limbs below terrain sampling width may stop growing.
+	BranchMinThickness float64
+	BranchMaxThickness float64
+	// SpikeDensity controls the probability of small teeth on exposed rock
+	// edges, from 0 (disabled) to 1. The viewer default is 0.65.
+	SpikeDensity float64
+	// EdgeRoughness controls shallow angular chips on exposed rock edges,
+	// from 0 (disabled) to 1. The viewer default is 0.75.
+	// Both edge settings affect collision geometry as well as rendering.
+	EdgeRoughness float64
 	// Texture is surface grain strength, from 0 (disabled) to 16.
 	Texture float64
 	// BackgroundBlur is Gaussian blur softness in scene units (0 disables it,
@@ -93,6 +111,11 @@ func DefaultConfig() Config {
 	return Config{
 		Orientation:          Vertical,
 		ForceGuidesUp:        true,
+		BranchingStrategy:    BranchingRecursive,
+		BranchMinThickness:   terrain.DefaultShapeOptions().BranchMinThickness,
+		BranchMaxThickness:   terrain.DefaultShapeOptions().BranchMaxThickness,
+		SpikeDensity:         terrain.DefaultShapeOptions().SpikeDensity,
+		EdgeRoughness:        terrain.DefaultShapeOptions().EdgeRoughness,
 		Texture:              8,
 		BackgroundBlur:       .002,
 		ShadowOpacity:        .65,
@@ -111,6 +134,26 @@ func DefaultConfig() Config {
 }
 
 func (c Config) validate() error {
+	for _, value := range []float64{c.BranchMinThickness, c.BranchMaxThickness} {
+		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 1 {
+			return fmt.Errorf("infinicave: branch thickness must be between 0 and 1 (0 uses the default)")
+		}
+	}
+	lo, hi := c.shapeOptions().BranchThicknessBounds()
+	if lo > hi {
+		return fmt.Errorf("infinicave: minimum branch thickness must not exceed maximum branch thickness")
+	}
+	if c.BranchingStrategy > BranchingLoops {
+		return fmt.Errorf("infinicave: invalid branching strategy %v", c.BranchingStrategy)
+	}
+	for _, setting := range []struct {
+		name  string
+		value float64
+	}{{"spike density", c.SpikeDensity}, {"edge roughness", c.EdgeRoughness}} {
+		if math.IsNaN(setting.value) || math.IsInf(setting.value, 0) || setting.value < 0 || setting.value > 1 {
+			return fmt.Errorf("infinicave: %s must be between 0 and 1", setting.name)
+		}
+	}
 	if c.Orientation != Vertical && c.Orientation != Horizontal {
 		return fmt.Errorf("infinicave: invalid orientation %v", c.Orientation)
 	}
@@ -160,4 +203,8 @@ func (c Config) validate() error {
 		}
 	}
 	return nil
+}
+
+func (c Config) shapeOptions() terrain.ShapeOptions {
+	return terrain.ShapeOptions{BranchingStrategy: c.BranchingStrategy, BranchMinThickness: c.BranchMinThickness, BranchMaxThickness: c.BranchMaxThickness, SpikeDensity: c.SpikeDensity, EdgeRoughness: c.EdgeRoughness}
 }

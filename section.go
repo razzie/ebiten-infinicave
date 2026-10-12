@@ -67,6 +67,7 @@ func GenerateSectionWithConfig(config Config, id int64) (Section, error) {
 		return Section{}, err
 	}
 	return terrain.GenerateSection(terrain.GenerationOptions{
+		Shape:              config.shapeOptions(),
 		Seed:               config.Seed,
 		Orientation:        config.Orientation,
 		ForceGuidesUp:      config.ForceGuidesUp,

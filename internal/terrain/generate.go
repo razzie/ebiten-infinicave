@@ -5,6 +5,7 @@ import "fmt"
 // GenerationOptions contains the settings shared by synchronous generation and
 // the scene's worker. Rendering settings are validated by the public facade.
 type GenerationOptions struct {
+	Shape              ShapeOptions
 	Seed               int64
 	Orientation        Orientation
 	ForceGuidesUp      bool
@@ -27,6 +28,7 @@ func GenerateSection(config GenerationOptions, id int64) (Section, error) {
 	var collision CollisionGeometry
 	builder := NewSectionBuilder(config.Seed, OrientedSectionLoader(config.Orientation, config.LoadSection), config.Orientation)
 	builder.ForceGuidesUp = config.ForceGuidesUp
+	builder.Shape = config.Shape
 	builder.MushroomDensity = config.MushroomDensity
 	builder.SpiderWebMaxSize = config.SpiderWebMaxSize
 	builder.SpiderWebDensity = config.SpiderWebDensity

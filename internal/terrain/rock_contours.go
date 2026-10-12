@@ -8,6 +8,23 @@ import (
 
 const rockContourHeight = .008
 
+// Closely spaced loop walls can introduce a run of almost collinear shared
+// junctions. Ear clipping cannot always resolve that run at its tolerance.
+// Remove redundant points only on affected faces, preserving their silhouette;
+// adjacency and collision already handle partial shared borders.
+func cleanRockJunctions(grid RockGrid) {
+	parallelFor(len(grid), func(i int) {
+		poly := grid[i].Polygon
+		if len(geom.Triangulate(poly)) == len(poly)-2 {
+			return
+		}
+		clean := geom.CleanPolygon(poly)
+		if len(clean) >= 3 && math.Abs(geom.PolygonArea(clean)-geom.PolygonArea(poly)) < 1e-13 && len(geom.Triangulate(clean)) == len(clean)-2 && simpleRockOutline(clean) {
+			grid[i].Polygon = clean
+		}
+	})
+}
+
 // Clip the outer footprint through existing faces instead of exposing a row
 // of complete Voronoi tiles. Keep the original face normal and material so
 // clipping/triangulation cannot introduce extra wedges of light.

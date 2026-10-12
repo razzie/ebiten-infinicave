@@ -18,6 +18,11 @@ func parseOptions() (viewerOptions, error) {
 	defaults := infinicave.DefaultConfig()
 	mode := flag.String("mode", "portrait", "scrolling mode: portrait (vertical) or landscape (horizontal)")
 	forceGuidesUp := flag.Bool("force-guides-up", defaults.ForceGuidesUp, "force exposed guide sides to face upward regardless of point order")
+	branching := flag.String("branching", defaults.BranchingStrategy.String(), "guide branching strategy: simple, recursive, loops")
+	branchMinThickness := flag.Float64("branch-min-thickness", defaults.BranchMinThickness, "minimum nominal branch thickness in scene units (0 uses default 0.048; range 0-1)")
+	branchMaxThickness := flag.Float64("branch-max-thickness", defaults.BranchMaxThickness, "maximum nominal branch thickness in scene units (0 uses default 0.08; range 0-1)")
+	spikeDensity := flag.Float64("spike-density", defaults.SpikeDensity, "small rock edge spike probability (0 disables spikes, range 0-1)")
+	edgeRoughness := flag.Float64("edge-roughness", defaults.EdgeRoughness, "shallow angular rock edge roughness (0 disables chips, range 0-1)")
 	seed := flag.Int64("seed", rand.Int63(), "random seed (random by default)")
 	output := flag.String("output", "", "save the first 2400 pixels along the scrolling axis as a PNG and exit")
 	texture := flag.Float64("texture", 8, "surface texture strength (0 disables it, range 0-16)")
@@ -45,6 +50,12 @@ func parseOptions() (viewerOptions, error) {
 	}
 	config.Orientation = orientation
 	config.ForceGuidesUp = *forceGuidesUp
+	config.BranchingStrategy, err = infinicave.ParseBranchingStrategy(*branching)
+	if err != nil {
+		return viewerOptions{}, err
+	}
+	config.SpikeDensity, config.EdgeRoughness = *spikeDensity, *edgeRoughness
+	config.BranchMinThickness, config.BranchMaxThickness = *branchMinThickness, *branchMaxThickness
 	config.Seed, config.Texture = *seed, *texture
 	config.BackgroundBlur, config.ShadowOpacity, config.ShadowBlur = *backgroundBlur, *shadowOpacity, *shadowBlur
 	config.ShadowOffset = infinicave.V{X: *shadowX, Y: *shadowY}

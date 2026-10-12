@@ -20,7 +20,7 @@ func TestWorldCancelsObsoleteGenerationAndResumes(t *testing.T) {
 			<-release
 		}
 		return SectionContent{}
-	}, render.RockGrowthOptions{})
+	}, render.RockGrowthOptions{}, terrain.ShapeOptions{})
 	defer w.close()
 	w.request(0)
 	select {
@@ -57,7 +57,7 @@ func TestWorldCancelsObsoleteGenerationAndResumes(t *testing.T) {
 
 func TestWorldWorkerPreparesAllLayers(t *testing.T) {
 	density := render.RockGrowthOptions{Moss: .23, Hanging: .17, Grass: .13}
-	w := newWorld(42, ViewShaded, 0, 0, terrain.DefaultSpiderWebDensity, terrain.DefaultMushroomDensity, false, nil, density)
+	w := newWorld(42, ViewShaded, 0, 0, terrain.DefaultSpiderWebDensity, terrain.DefaultMushroomDensity, false, nil, density, terrain.ShapeOptions{})
 	defer w.close()
 	w.request(0)
 	var early *terrain.Geometry
@@ -106,7 +106,7 @@ func TestWorldWorkerPreparesAllLayers(t *testing.T) {
 }
 
 func TestDiagnosticWorkerRetainsTerrainGeometry(t *testing.T) {
-	w := newWorld(42, ViewClay, 0, 0, terrain.DefaultSpiderWebDensity, terrain.DefaultMushroomDensity, false, testLedgeSection, render.RockGrowthOptions{})
+	w := newWorld(42, ViewClay, 0, 0, terrain.DefaultSpiderWebDensity, terrain.DefaultMushroomDensity, false, testLedgeSection, render.RockGrowthOptions{}, terrain.ShapeOptions{})
 	defer w.close()
 	w.request(0)
 	select {

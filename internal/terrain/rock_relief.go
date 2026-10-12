@@ -61,7 +61,9 @@ func reliefHeight(p geom.V, guides []Guide, noise *Perlin, branches *BranchField
 		height = math.Max(height, ridgeProfile(pr.Dist, width, elevation, bevel)*end)
 	}
 	// Offshoots carry low connected spurs of the same solid rock surface.
-	height = math.Max(height, 0.08*branchBias(p, branches)*branchMask)
+	positive := branchBias(p, branches) * branchMask
+	negative := branchNegativeBias(p, branches, positive, height, noise)
+	height = math.Max(0, math.Max(height, 0.08*positive)-negative)
 	world := geom.V{X: p.X, Y: p.Y + noise.OffsetY}
 	chips := rockReliefChipHeight * noise.Noise(world.X*35+43, world.Y*35+97)
 	edgeFade := geom.Smoothstep(0, foregroundEdgeFadeWidth, math.Min(p.X, generationWidth-p.X))
