@@ -129,6 +129,38 @@ func TestLeavesRespectGuideClearanceAndHue(t *testing.T) {
 	}
 }
 
+func TestThinForegroundLeavesAreLarger(t *testing.T) {
+	rock := testRockGrid([]geom.V{{X: .5, Y: .5}}, []color.NRGBA{{30, 30, 30, 255}})
+	background := newVineTerrain(rock, nil)
+	defer background.release()
+	foreground := newForegroundVineTerrain(rock, nil)
+	defer foreground.release()
+	for _, radius := range []float64{.0012, .0022} {
+		vine := straightStyleVine(.5, .8)
+		vine.Along = make([]float64, len(vine.Points))
+		for i := range vine.Points {
+			vine.Points[i].Radius = radius
+			vine.Along[i] = float64(i) * .0025
+		}
+		vine.Style = VineStyle{From: VineSage, To: VineSage}
+		back := generateVineLeaves(background, vine, rand.New(rand.NewSource(42)))
+		front := generateVineLeaves(foreground, vine, rand.New(rand.NewSource(42)))
+		if len(back) == 0 || len(back) != len(front) {
+			t.Fatal("leaf sizing changed attachment frequency on open rock")
+		}
+		for i, leaf := range front {
+			backLength := back[i].Polygon[2].Sub(back[i].Polygon[0]).Len()
+			frontLength := leaf.Polygon[2].Sub(leaf.Polygon[0]).Len()
+			if radius == .0012 && frontLength < backLength*1.2 {
+				t.Fatal("thin foreground stem did not receive larger leaves")
+			}
+			if radius == .0022 && math.Abs(frontLength-backLength) > 1e-12 {
+				t.Fatal("leaf sizing changed on a broader stem")
+			}
+		}
+	}
+}
+
 func TestCarvingPreservesVineDistancesAndLeafAttachments(t *testing.T) {
 	vine := straightStyleVine(.5, .8)
 	vine.Foreground = true

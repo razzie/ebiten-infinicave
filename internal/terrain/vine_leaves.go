@@ -38,6 +38,9 @@ func generateVineLeaves(field *VineTerrain, vine Vine, rng *rand.Rand) []VineLea
 		}
 		tangent := vine.Points[i+1].P.Sub(vine.Points[i-1].P).Norm()
 		length := geom.Clamp(p.Radius*geom.Lerp(6, 9, rng.Float64()), .009, .025)
+		if field.onForeground && p.Radius <= .0015 {
+			length *= 1.3
+		}
 		// Angular, unequal halves echo the faceted rock and reference leaves.
 		direction := geom.Rotate(tangent, side*geom.Lerp(.65, 1.25, rng.Float64()))
 		base := p.P.Add(tangent.Perp().Mul(side * p.Radius * .7))

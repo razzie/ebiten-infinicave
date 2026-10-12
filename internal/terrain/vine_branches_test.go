@@ -9,7 +9,7 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
 
-func TestDenseBranchesAreReservedForThinForegroundVines(t *testing.T) {
+func TestForegroundFamiliesKeepFineAttachedBranches(t *testing.T) {
 	rock := testRockGrid([]geom.V{{X: .5, Y: .5}}, []color.NRGBA{{30, 30, 30, 255}})
 	for _, foreground := range []bool{false, true} {
 		field := newVineTerrain(rock, nil)
@@ -42,12 +42,12 @@ func TestDenseBranchesAreReservedForThinForegroundVines(t *testing.T) {
 				secondary++
 			}
 			if vine.Parent >= i || vine.Points[0].P != vines[vine.Parent].Points[vine.Joint].P {
-				t.Fatal("more aggressive branching detached an attachment")
+				t.Fatal("branch detached from its attachment")
 			}
 		}
 		if foreground {
-			if main < 4 || secondary < 2 {
-				t.Fatalf("foreground needs a dense attached network: main=%d secondary=%d", main, secondary)
+			if main < 2 || main > 4 || secondary > main {
+				t.Fatalf("foreground needs a small attached family: main=%d secondary=%d", main, secondary)
 			}
 		} else if main < 1 || main > 3 || secondary > 2 {
 			t.Fatalf("background kept dense branching: main=%d secondary=%d", main, secondary)

@@ -54,7 +54,7 @@ func generateForegroundVinesWithWorkspace(foreground RockGrid, guides []Guide, r
 func generateForegroundVinesContext(ctx context.Context, foreground RockGrid, guides []Guide, rng *rand.Rand, workspace *vineWorkspace) []Vine {
 	field := newForegroundVineTerrainWithWorkspace(foreground, guides, workspace)
 	defer field.release()
-	vines := generateVinesInBandContext(ctx, field, rng, 0, SectionHeight, 2)
+	vines := generateVinesInBandContext(ctx, field, rng, 0, SectionHeight, 6)
 	for i := range vines {
 		vines[i].Foreground = true
 	}

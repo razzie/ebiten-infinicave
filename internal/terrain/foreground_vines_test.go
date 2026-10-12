@@ -61,7 +61,7 @@ func TestForegroundVinesStayOnVisibleRock(t *testing.T) {
 			}
 		}
 	}
-	if trunks > 2 {
+	if trunks > 6 {
 		t.Fatalf("foreground vines should remain sparse, got %d trunks", trunks)
 	}
 	if got := generateForegroundVines(nil, nil, rand.New(rand.NewSource(42))); len(got) != 0 {
@@ -98,6 +98,57 @@ func TestForegroundVinesKeepClearOfGuideLines(t *testing.T) {
 					t.Fatal("vine segment crosses the guide exclusion band")
 				}
 			}
+		}
+	}
+}
+
+func TestForegroundVinesSpreadAcrossSeparateRocks(t *testing.T) {
+	// Six equally viable islands should each receive a small family rather
+	// than concentrating all branches on the first one or two large trunks.
+	var rock RockGrid
+	for row := range 3 {
+		for column := range 2 {
+			x, y := .12+float64(column)*.5, .04+float64(row)*.32
+			poly := []geom.V{{X: x, Y: y}, {X: x + .24, Y: y}, {X: x + .24, Y: y + .25}, {X: x, Y: y + .25}}
+			rock = append(rock, RockCell{Polygon: poly, Center: geom.PolygonCenter(poly), Color: color.NRGBA{100, 90, 80, 255}})
+		}
+	}
+	for _, seed := range []int64{42, 123, 789} {
+		vines := generateForegroundVines(rock, nil, rand.New(rand.NewSource(seed)))
+		covered := make(map[int]bool)
+		for _, vine := range vines {
+			if vine.Parent >= 0 {
+				continue
+			}
+			for i, cell := range rock {
+				if geom.InsidePolygon(vine.Points[len(vine.Points)/2].P, cell.Polygon) {
+					covered[i] = true
+				}
+			}
+		}
+		if len(covered) != len(rock) {
+			t.Fatalf("seed %d populated %d of %d viable rocks", seed, len(covered), len(rock))
+		}
+	}
+}
+
+func TestForegroundGrowthAvoidsExistingStems(t *testing.T) {
+	rock := testRockGrid([]geom.V{{X: .5, Y: .5}}, []color.NRGBA{{100, 90, 80, 255}})
+	field := newForegroundVineTerrain(rock, nil)
+	defer field.release()
+	field.occupied = make(vineTwigOccupancy)
+	stem := straightStyleVine(.5, .8)
+	for i := range stem.Points {
+		stem.Points[i].Radius = .0015
+	}
+	field.occupied.add(stem)
+	vine := growVine(field, geom.V{X: .4, Y: .5}, geom.V{X: 1}, .0012, .3, 0, 0, 0)
+	if length, _ := vine.extent(); length < .06 {
+		t.Fatal("occupancy blocked growth before approaching the existing stem")
+	}
+	for _, p := range vine.Points {
+		if p.P.X+p.Radius >= .5-.0015 {
+			t.Fatal("new foreground trunk overlaps an existing ribbon")
 		}
 	}
 }

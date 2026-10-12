@@ -26,7 +26,7 @@ const (
 	vineMinTwigLength       = 0.06
 	vineThinRadius          = 0.003
 	vineMaxRadius           = 0.0045
-	foregroundVineMaxRadius = .0025
+	foregroundVineMaxRadius = .0018
 	vineThickLength         = 0.7
 	vineFullWidthLength     = 1.2
 )
@@ -39,7 +39,9 @@ type VineTerrain struct {
 	// Surface growth stays entirely on the raised rock instead of tucking
 	// beneath it or making shallow excursions across the background.
 	onForeground bool
-	clearance    []float64
+	// Accepted foreground stems reserve room for later trunks and forks.
+	occupied  vineTwigOccupancy
+	clearance []float64
 	// Distance back to dark rock inside a black or bright face.
 	unsupported []float64
 	// Distance to the actual background cell edges, independent of face tone.
@@ -157,6 +159,11 @@ func growVine(field *VineTerrain, root, heading geom.V, radius, reach, phase, cu
 			if space < r+.0015 || field.growthSpace(geom.LerpVector(p, q, .5)) < r+.0015 {
 				continue
 			}
+			// Branches need a short connector at their joint, then must leave
+			// the parent ribbon instead of tracing over an existing stem.
+			if field.occupied != nil && (depth == 0 || q.Sub(root).Len() > .015) && field.occupied.clearance(q) < r+.002 {
+				continue
+			}
 			trip := 0.0
 			if field.space(q) < r+.0015 {
 				trip = excursion + step
@@ -271,23 +278,28 @@ func generateVinesInBandContext(ctx context.Context, field *VineTerrain, rng *ra
 	radiusLow, radiusHigh := .006, .009
 	forks := 3
 	if field.onForeground {
-		minLength, minSpan = .190, .115
-		radiusLow, radiusHigh = .0018, foregroundVineMaxRadius
-		forks = 5
+		minLength, minSpan = .140, .085
+		radiusLow, radiusHigh = .0015, foregroundVineMaxRadius
+		forks = 3
+		// Keep occupancy local to this run; growth trials only read it, and
+		// reusing a terrain field must reproduce the same seeded vegetation.
+		copy := *field
+		field = &copy
+		field.occupied = make(vineTwigOccupancy)
 	}
 	var vines []Vine
 	for rootIndex := 0; rootIndex < count; rootIndex++ {
 		if ctx.Err() != nil {
 			return nil
 		}
-		// Small foreground formations favor fine, densely attached families.
+		// Small foreground formations favor fine, lightly branched families.
 		fine := field.onForeground && rng.Float64() < .65
 		familyForks := forks
 		low, high, rootSpace := radiusLow, radiusHigh, .015
 		branchScale, twigForks := .65, 1
 		if fine {
 			low, high, rootSpace = .0009, .0015, .009
-			familyForks, branchScale, twigForks = 8, .55, 2
+			familyForks, branchScale = 4, .55
 		}
 		type candidate struct {
 			p     geom.V
@@ -307,7 +319,13 @@ func generateVinesInBandContext(ctx context.Context, field *VineTerrain, rng *ra
 				}
 			}
 			if distance > .065 {
-				candidates = append(candidates, candidate{p, min(space, .040) - distance*.12 - 2*field.borderDistance(p)})
+				score := min(space, .040) - distance*.12 - 2*field.borderDistance(p)
+				if field.onForeground {
+					// Favor uncovered rock over a roomy spot beside an existing
+					// family. Background placement retains its original scoring.
+					score = min(space, .040)*2 + distance - field.borderDistance(p)*.25
+				}
+				candidates = append(candidates, candidate{p, score})
 			}
 		}
 		sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].score > candidates[j].score })
@@ -323,6 +341,9 @@ func generateVinesInBandContext(ctx context.Context, field *VineTerrain, rng *ra
 			curl = -1
 		}
 		reachA, reachB := geom.Lerp(.560, .820, rng.Float64()), geom.Lerp(.420, .650, rng.Float64())
+		if field.onForeground {
+			reachA, reachB = reachA*.5, reachB*.5
+		}
 		trunk, rootAt, best := Vine{}, 0, 0.0
 		var selected []candidate
 		for _, candidate := range candidates {
@@ -361,7 +382,13 @@ func generateVinesInBandContext(ctx context.Context, field *VineTerrain, rng *ra
 			v, joint := joinVineHalves(a, b)
 			length, span := v.extent()
 			if length >= minLength && span >= minSpan {
-				trials[n] = growthTrial{v, joint, length*.6 + span + candidate.score*.3}
+				score := length*.6 + span + candidate.score*.3
+				if field.onForeground {
+					// Once a small family is viable, coverage matters more than
+					// squeezing the longest possible trunk onto a large rock.
+					score = min(length, .300)*.2 + min(span, .200) + candidate.score
+				}
+				trials[n] = growthTrial{v, joint, score}
 			}
 		})
 		// Reduce in candidate/heading order, preserving the original tie-break.
@@ -376,6 +403,9 @@ func generateVinesInBandContext(ctx context.Context, field *VineTerrain, rng *ra
 		trunk.limitThickness()
 		trunkIndex := len(vines)
 		vines = append(vines, trunk)
+		if field.occupied != nil {
+			field.occupied.add(trunk)
+		}
 		// Invest in long, attached limbs before starting another independent
 		// trunk. Short blocked offshoots are discarded with their descendants.
 		for fork := 0; fork < familyForks; fork++ {
@@ -389,6 +419,9 @@ func generateVinesInBandContext(ctx context.Context, field *VineTerrain, rng *ra
 				side = -1
 			}
 			reach := geom.Lerp(.250, .420, rng.Float64())
+			if field.onForeground {
+				reach *= .65
+			}
 			branch, joint, side := growVineBranch(ctx, field, trunk, i, rootAt, branchScale, reach, phase+float64(fork), side, 1, vineMinBranchLength)
 			branchLength, _ := branch.extent()
 			if branchLength < vineMinBranchLength {
@@ -398,6 +431,9 @@ func generateVinesInBandContext(ctx context.Context, field *VineTerrain, rng *ra
 			branch.Parent, branch.Joint = trunkIndex, joint
 			branchIndex := len(vines)
 			vines = append(vines, branch)
+			if field.occupied != nil {
+				field.occupied.add(branch)
+			}
 			if !field.onForeground && fork%2 != 0 {
 				continue
 			}
@@ -409,6 +445,9 @@ func generateVinesInBandContext(ctx context.Context, field *VineTerrain, rng *ra
 					twig.limitThickness()
 					twig.Parent, twig.Joint = branchIndex, twigJoint
 					vines = append(vines, twig)
+					if field.occupied != nil {
+						field.occupied.add(twig)
+					}
 				}
 			}
 		}
