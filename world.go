@@ -79,7 +79,7 @@ type sectionTerrain struct {
 	ctx      context.Context
 }
 
-func newWorld(seed int64, view View, tolerance, webMaxSize, webDensity, mushroomDensity float64, forceGuidesUp bool, loadSection SectionLoader, orientation ...Orientation) *world {
+func newWorld(seed int64, view View, tolerance, webMaxSize, webDensity, mushroomDensity float64, forceGuidesUp bool, loadSection SectionLoader, growth render.RockGrowthOptions, orientation ...Orientation) *world {
 	limit := min(2, max(1, runtime.GOMAXPROCS(0)-1))
 	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan sectionJob, sectionQueueLimit),
 		results: make(chan render.SectionMesh, sectionQueueLimit*2), terrain: make(chan sectionTerrain, sectionQueueLimit),
@@ -132,7 +132,7 @@ func newWorld(seed int64, view View, tolerance, webMaxSize, webDensity, mushroom
 				ok = job.build.Materialize(ctx)
 				if ok {
 					job.geometry = terrain.BindTerrainMaterial(job.geometry, job.build.Data())
-					job.mesh = render.PrepareForeground(job.build.Data(), view)
+					job.mesh = render.PrepareForeground(job.build.Data(), view, growth)
 					job.mesh.Geometry = job.geometry
 					ok = sendMesh(job.mesh, w.terrainMeshes)
 				}

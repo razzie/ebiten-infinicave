@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/razzie/ebiten-infinicave/internal/render"
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
 // Config controls generation and rendering. Start with DefaultConfig to use
 // the viewer's appearance. A zero Config disables texture, background effects,
-// fog, bats, mushrooms, and spider webs.
+// fog, bats, mushrooms, spider webs, moss, grass, and hanging growth.
 type Config struct {
 	Seed int64
 	// Orientation fixes the scrolling axis for the scene's lifetime. The zero
@@ -45,6 +46,19 @@ type Config struct {
 	// from 0 (disabled) to 1 (the default appearance). Placement remains
 	// deterministic for a seed; lower density preserves surviving clusters.
 	MushroomDensity float64
+	// MossDensity controls green and yellow moss on upward-facing foreground
+	// facets, from 0 (disabled) to 1 (maximum coverage). The default is 0.72.
+	// Lower density preserves the placement and shape of surviving patches.
+	MossDensity float64
+	// GrassDensity controls yellow or green grass tufts and their ground
+	// patches beside guides on upward-facing foreground facets, from
+	// 0 (disabled) to 1 (maximum coverage).
+	// The default is 0.35. Lower density preserves surviving tufts.
+	GrassDensity float64
+	// HangingGrowthDensity is the occurrence probability for cave bulbs and
+	// lichen on eligible exposed undersides, from 0 (disabled) to 1.
+	// The default is 0.28. Lower density preserves surviving growth.
+	HangingGrowthDensity float64
 	// SpiderWebMaxSize limits the distance between any two web attachments,
 	// including support strands, in scene units (the cave cross-axis spans 1).
 	// It must be finite and nonnegative. Zero uses the default of 0.15.
@@ -77,19 +91,22 @@ type Config struct {
 // DefaultConfig returns the viewer's appearance with a deterministic seed of 0.
 func DefaultConfig() Config {
 	return Config{
-		Orientation:      Vertical,
-		ForceGuidesUp:    true,
-		Texture:          8,
-		BackgroundBlur:   .002,
-		ShadowOpacity:    .65,
-		ShadowBlur:       .008,
-		ShadowOffset:     V{X: .018, Y: .025},
-		Fog:              2,
-		BatsPerMinute:    7.5,
-		MushroomDensity:  terrain.DefaultMushroomDensity,
-		SpiderWebMaxSize: terrain.DefaultSpiderWebMaxSize,
-		SpiderWebDensity: terrain.DefaultSpiderWebDensity,
-		View:             ViewShaded,
+		Orientation:          Vertical,
+		ForceGuidesUp:        true,
+		Texture:              8,
+		BackgroundBlur:       .002,
+		ShadowOpacity:        .65,
+		ShadowBlur:           .008,
+		ShadowOffset:         V{X: .018, Y: .025},
+		Fog:                  2,
+		BatsPerMinute:        7.5,
+		MushroomDensity:      terrain.DefaultMushroomDensity,
+		MossDensity:          render.DefaultMossDensity,
+		GrassDensity:         render.DefaultGrassDensity,
+		HangingGrowthDensity: render.DefaultHangingGrowthDensity,
+		SpiderWebMaxSize:     terrain.DefaultSpiderWebMaxSize,
+		SpiderWebDensity:     terrain.DefaultSpiderWebDensity,
+		View:                 ViewShaded,
 	}
 }
 
@@ -133,6 +150,14 @@ func (c Config) validate() error {
 	}
 	if math.IsNaN(c.MushroomDensity) || math.IsInf(c.MushroomDensity, 0) || c.MushroomDensity < 0 || c.MushroomDensity > 1 {
 		return fmt.Errorf("infinicave: mushroom density must be between 0 and 1")
+	}
+	for _, setting := range []struct {
+		name  string
+		value float64
+	}{{"moss", c.MossDensity}, {"grass", c.GrassDensity}, {"hanging growth", c.HangingGrowthDensity}} {
+		if math.IsNaN(setting.value) || math.IsInf(setting.value, 0) || setting.value < 0 || setting.value > 1 {
+			return fmt.Errorf("infinicave: %s density must be between 0 and 1", setting.name)
+		}
 	}
 	return nil
 }

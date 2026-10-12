@@ -20,7 +20,7 @@ func TestWorldCancelsObsoleteGenerationAndResumes(t *testing.T) {
 			<-release
 		}
 		return SectionContent{}
-	})
+	}, render.RockGrowthOptions{})
 	defer w.close()
 	w.request(0)
 	select {
@@ -56,7 +56,8 @@ func TestWorldCancelsObsoleteGenerationAndResumes(t *testing.T) {
 }
 
 func TestWorldWorkerPreparesAllLayers(t *testing.T) {
-	w := newWorld(42, ViewShaded, 0, 0, terrain.DefaultSpiderWebDensity, terrain.DefaultMushroomDensity, false, nil)
+	density := render.RockGrowthOptions{Moss: .23, Hanging: .17, Grass: .13}
+	w := newWorld(42, ViewShaded, 0, 0, terrain.DefaultSpiderWebDensity, terrain.DefaultMushroomDensity, false, nil, density)
 	defer w.close()
 	w.request(0)
 	var early *terrain.Geometry
@@ -86,6 +87,11 @@ func TestWorldWorkerPreparesAllLayers(t *testing.T) {
 		checkMesh(t, mesh.Background.Faces)
 		checkMesh(t, mesh.Foreground.Faces)
 		checkMesh(t, mesh.Mushrooms)
+		density.Guides = mesh.Geometry.Guides
+		want := render.PrepareOwnedGridWithTopology(nil, ViewShaded, mesh.Geometry.Topology, density)
+		if !reflect.DeepEqual(mesh.Foreground, want) {
+			t.Fatal("streaming ignored configured rock growth density")
+		}
 		for _, layer := range [][]render.TriangleMesh{mesh.Background.Outlines, mesh.Foreground.Outlines, mesh.Vines, mesh.ForegroundVines} {
 			for _, m := range layer {
 				checkMesh(t, m)
@@ -100,7 +106,7 @@ func TestWorldWorkerPreparesAllLayers(t *testing.T) {
 }
 
 func TestDiagnosticWorkerRetainsTerrainGeometry(t *testing.T) {
-	w := newWorld(42, ViewClay, 0, 0, terrain.DefaultSpiderWebDensity, terrain.DefaultMushroomDensity, false, testLedgeSection)
+	w := newWorld(42, ViewClay, 0, 0, terrain.DefaultSpiderWebDensity, terrain.DefaultMushroomDensity, false, testLedgeSection, render.RockGrowthOptions{})
 	defer w.close()
 	w.request(0)
 	select {

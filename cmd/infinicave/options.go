@@ -29,6 +29,9 @@ func parseOptions() (viewerOptions, error) {
 	fog := flag.Float64("fog", defaults.Fog, "moving fog strength between background and foreground layers (0 disables it, values above 1 increase density)")
 	batsPerMinute := flag.Float64("bats-per-minute", defaults.BatsPerMinute, "average bat arrivals per minute (0 disables them, interactive viewer only)")
 	mushroomDensity := flag.Float64("mushroom-density", defaults.MushroomDensity, "mushroom cluster occurrence probability (0 disables mushrooms, range 0-1)")
+	mossDensity := flag.Float64("moss-density", defaults.MossDensity, "green and yellow moss coverage on upward-facing rocks (0 disables moss, range 0-1)")
+	grassDensity := flag.Float64("grass-density", defaults.GrassDensity, "yellow or green grass tuft coverage beside guides on upward-facing rocks (0 disables grass, range 0-1)")
+	hangingGrowthDensity := flag.Float64("hanging-growth-density", defaults.HangingGrowthDensity, "hanging cave bulb and lichen occurrence probability (0 disables them, range 0-1)")
 	webDensity := flag.Float64("spider-web-density", defaults.SpiderWebDensity, "spider web occurrence probability per eligible pocket (0 disables webs, range 0-1)")
 	webMaxSize := flag.Float64("spider-web-max-size", defaults.SpiderWebMaxSize, "maximum spider web span including attachments in scene units (0 uses the default 0.15; cave cross-axis spans 1)")
 	view := flag.String("view", "shaded", "terrain view: shaded, clay, height, normals, shadows")
@@ -48,6 +51,9 @@ func parseOptions() (viewerOptions, error) {
 	config.Fog = *fog
 	config.BatsPerMinute = *batsPerMinute
 	config.MushroomDensity = *mushroomDensity
+	config.MossDensity = *mossDensity
+	config.GrassDensity = *grassDensity
+	config.HangingGrowthDensity = *hangingGrowthDensity
 	config.SpiderWebMaxSize = *webMaxSize
 	config.SpiderWebDensity = *webDensity
 	if *output != "" {

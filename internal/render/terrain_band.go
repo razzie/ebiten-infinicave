@@ -23,6 +23,6 @@ func inTerrainBand(points ...geom.V) bool {
 
 // PrepareOwnedGridWithTopology emits terrain for a section's image while
 // retaining complete padded topology for shading, collision, and later edits.
-func PrepareOwnedGridWithTopology(grid terrain.RockGrid, view View, topology *terrain.RockTopology) GridMesh {
-	return prepareGridBand(grid, view, topology, nil, true)
+func PrepareOwnedGridWithTopology(grid terrain.RockGrid, view View, topology *terrain.RockTopology, growth ...RockGrowthOptions) GridMesh {
+	return prepareGridBand(grid, view, topology, nil, true, growth...)
 }

@@ -48,13 +48,15 @@ type SectionMesh struct {
 	SpiderWebsBounds                                    image.Rectangle
 }
 
-func PrepareSection(data terrain.SectionData, view View) SectionMesh {
+func PrepareSection(data terrain.SectionData, view View, growth ...RockGrowthOptions) SectionMesh {
 	mesh := SectionMesh{ID: data.ID}
 	parallel.Run(
 		func() {
 			mesh.Background = prepareGridWithNeighbors(data.Background, view, nil, data.BackgroundNeighbors)
 		},
-		func() { mesh.Foreground = PrepareGridWithTopology(data.Foreground, view, data.ForegroundTopology) },
+		func() {
+			mesh.Foreground = PrepareGridWithTopology(data.Foreground, view, data.ForegroundTopology, sectionRockGrowth(data, growth))
+		},
 		func() {
 			if view == ViewShaded {
 				mesh.Vines = PrepareVines(data.Vines)
@@ -79,13 +81,15 @@ func PrepareSection(data terrain.SectionData, view View) SectionMesh {
 
 // PrepareTerrain combines both materialized rock layers for synchronous callers.
 // Streaming prepares and publishes each layer separately. Buffers remain immutable.
-func PrepareTerrain(data terrain.SectionData, view View) SectionMesh {
+func PrepareTerrain(data terrain.SectionData, view View, growth ...RockGrowthOptions) SectionMesh {
 	mesh := SectionMesh{ID: data.ID, TerrainOnly: true, Layers: ForegroundLayer | BackgroundLayer}
 	parallel.Run(
 		func() {
 			mesh.Background = prepareGridBand(data.Background, view, nil, data.BackgroundNeighbors, true)
 		},
-		func() { mesh.Foreground = PrepareOwnedGridWithTopology(data.Foreground, view, data.ForegroundTopology) },
+		func() {
+			mesh.Foreground = PrepareOwnedGridWithTopology(data.Foreground, view, data.ForegroundTopology, sectionRockGrowth(data, growth))
+		},
 	)
 	return mesh
 }
@@ -125,15 +129,16 @@ func prepareGrid(grid terrain.RockGrid, view View) GridMesh {
 	return PrepareGridWithTopology(grid, view, nil)
 }
 
-func PrepareGridWithTopology(grid terrain.RockGrid, view View, topology *terrain.RockTopology) GridMesh {
-	return prepareGridWithNeighbors(grid, view, topology, nil)
+func PrepareGridWithTopology(grid terrain.RockGrid, view View, topology *terrain.RockTopology, growth ...RockGrowthOptions) GridMesh {
+	return prepareGridWithNeighbors(grid, view, topology, nil, growth...)
 }
 
-func prepareGridWithNeighbors(grid terrain.RockGrid, view View, topology *terrain.RockTopology, neighbors [][]int) GridMesh {
-	return prepareGridBand(grid, view, topology, neighbors, false)
+func prepareGridWithNeighbors(grid terrain.RockGrid, view View, topology *terrain.RockTopology, neighbors [][]int, growth ...RockGrowthOptions) GridMesh {
+	return prepareGridBand(grid, view, topology, neighbors, false, growth...)
 }
 
-func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTopology, neighbors [][]int, owned bool) GridMesh {
+func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTopology, neighbors [][]int, owned bool, growth ...RockGrowthOptions) GridMesh {
+	density := rockGrowthOptions(growth)
 	if topology == nil && len(grid) > 0 && grid[0].Raised {
 		topology = terrain.NewRockTopology(grid)
 	}
@@ -163,6 +168,9 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 		grid = terrain.ShadeRockFaces(grid, boundary, neighbors)
 	}
 	if raised {
+		if view == ViewShaded {
+			vertices, indices = appendHangingRockGrowth(vertices, indices, grid, boundary, owned, density.Hanging)
+		}
 		if view == ViewShaded || view == ViewClay {
 			vertices, indices = appendRockWalls(vertices, indices, grid, boundary, view, owned)
 		}
@@ -180,6 +188,9 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 			continue
 		}
 		vertices, indices = appendCellMesh(vertices, indices, poly, s, clr, cell.Normal)
+		if raised && view == ViewShaded {
+			vertices, indices = appendRockMoss(vertices, indices, cell, density.Moss)
+		}
 		if raised {
 			continue // Foreground seams are selected from actual shared relief.
 		}
@@ -213,6 +224,9 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 	}
 	if topology != nil && len(topology.Cuts) > 0 && (view == ViewShaded || view == ViewClay) {
 		vertices, indices = appendCarveRims(vertices, indices, topology, view, owned)
+	}
+	if raised && view == ViewShaded {
+		vertices, indices = appendRockGrass(vertices, indices, grid, density.Guides, owned, density.Grass)
 	}
 	mesh := GridMesh{Faces: TriangleMesh{Vertices: vertices, Indices: indices}}
 	if len(indices) == 0 {
@@ -320,9 +334,9 @@ func MergeSectionMeshes(previous, next SectionMesh) SectionMesh {
 	return previous
 }
 
-func PrepareForeground(data terrain.SectionData, view View) SectionMesh {
+func PrepareForeground(data terrain.SectionData, view View, growth ...RockGrowthOptions) SectionMesh {
 	return SectionMesh{ID: data.ID, TerrainOnly: true, Layers: ForegroundLayer,
-		Foreground: PrepareOwnedGridWithTopology(data.Foreground, view, data.ForegroundTopology)}
+		Foreground: PrepareOwnedGridWithTopology(data.Foreground, view, data.ForegroundTopology, sectionRockGrowth(data, growth))}
 }
 
 func PrepareBackground(data terrain.SectionData, view View) SectionMesh {

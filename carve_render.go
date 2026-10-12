@@ -96,11 +96,17 @@ func (g *Scene) finishVinesAt(img *ebiten.Image, bounds image.Rectangle, top flo
 	return finished
 }
 
+func (g *Scene) rockGrowthForGeometry(geometry *terrain.Geometry) render.RockGrowthOptions {
+	growth := g.rockGrowth
+	growth.Guides = geometry.Guides
+	return growth
+}
+
 func (g *Scene) redrawCarvedSection(section *worldSection) {
 	if section.foreground == nil { // CPU-only geometry consumers/tests
 		return
 	}
-	mesh := render.PrepareOwnedGridWithTopology(nil, g.view, section.geometry.Topology)
+	mesh := render.PrepareOwnedGridWithTopology(nil, g.view, section.geometry.Topology, g.rockGrowthForGeometry(section.geometry))
 	if section.mesh != nil {
 		section.mesh.Foreground = mesh
 		section.mesh.Geometry = section.geometry
@@ -133,7 +139,7 @@ func (g *Scene) applyStoredCuts(mesh *render.SectionMesh) {
 		plantsChanged = plantsChanged || plantsEdited
 	}
 	if changed && mesh.LayerMask()&render.ForegroundLayer != 0 {
-		mesh.Foreground = render.PrepareOwnedGridWithTopology(nil, g.view, mesh.Geometry.Topology)
+		mesh.Foreground = render.PrepareOwnedGridWithTopology(nil, g.view, mesh.Geometry.Topology, g.rockGrowthForGeometry(mesh.Geometry))
 	}
 	if (changed || plantsChanged) && mesh.LayerMask()&render.VegetationLayer != 0 {
 		g.prepareCarvedVegetation(mesh)
@@ -159,7 +165,7 @@ func (g *Scene) carveSectionUpload(u *sectionUpload, cut terrain.RockCut) {
 	}
 	u.data.Geometry = geometry
 	if changed && u.data.LayerMask()&render.ForegroundLayer != 0 {
-		u.data.Foreground = render.PrepareOwnedGridWithTopology(nil, g.view, geometry.Topology)
+		u.data.Foreground = render.PrepareOwnedGridWithTopology(nil, g.view, geometry.Topology, g.rockGrowthForGeometry(geometry))
 		if u.initialized && u.stage <= uploadForegroundPublish {
 			if u.foreground != nil {
 				u.foreground.Deallocate()

@@ -82,6 +82,16 @@ func (g *Guide) distanceBound2(p geom.V) float64 {
 	return dx*dx + dy*dy
 }
 
+// NearestPoint projects onto the sampled guide without requiring arc lengths.
+// Empty or single-point guides have no surface and return infinite distance.
+func (g *Guide) NearestPoint(p geom.V) (geom.V, float64) {
+	if len(g.Pts) < 2 {
+		return geom.V{}, math.Inf(1)
+	}
+	_, _, q, distance2 := guideNearest(g, p)
+	return q, math.Sqrt(distance2)
+}
+
 func (g *Guide) project(p geom.V) Projection {
 	segment, u, q, best2 := guideNearest(g, p)
 	tangent := g.segmentTangent(segment, u)

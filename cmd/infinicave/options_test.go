@@ -114,3 +114,46 @@ func TestViewerMushroomDensityFlag(t *testing.T) {
 		}
 	}
 }
+
+func TestViewerRockGrowthDensityFlags(t *testing.T) {
+	oldFlags, oldArgs := flag.CommandLine, os.Args
+	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })
+	defaults := infinicave.DefaultConfig()
+	for _, tc := range []struct {
+		args          []string
+		moss, hanging float64
+	}{
+		{nil, defaults.MossDensity, defaults.HangingGrowthDensity},
+		{[]string{"-moss-density", "0.2", "-hanging-growth-density", "0.1"}, .2, .1},
+		{[]string{"-moss-density", "0", "-hanging-growth-density", "1"}, 0, 1},
+		{[]string{"-moss-density", "1", "-hanging-growth-density", "0"}, 1, 0},
+	} {
+		flag.CommandLine = flag.NewFlagSet("rock-growth-density", flag.ContinueOnError)
+		os.Args = append([]string{"infinicave"}, tc.args...)
+		options, err := parseOptions()
+		if err != nil || options.config.MossDensity != tc.moss || options.config.HangingGrowthDensity != tc.hanging {
+			t.Fatalf("growth flags: moss=%g hanging=%g, want %g/%g, error %v", options.config.MossDensity, options.config.HangingGrowthDensity, tc.moss, tc.hanging, err)
+		}
+	}
+}
+
+func TestViewerGrassDensityFlag(t *testing.T) {
+	oldFlags, oldArgs := flag.CommandLine, os.Args
+	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })
+	for _, tc := range []struct {
+		args []string
+		want float64
+	}{
+		{nil, infinicave.DefaultConfig().GrassDensity},
+		{[]string{"-grass-density", "0.2"}, .2},
+		{[]string{"-grass-density", "0"}, 0},
+		{[]string{"-grass-density", "1"}, 1},
+	} {
+		flag.CommandLine = flag.NewFlagSet("grass-density", flag.ContinueOnError)
+		os.Args = append([]string{"infinicave"}, tc.args...)
+		options, err := parseOptions()
+		if err != nil || options.config.GrassDensity != tc.want {
+			t.Fatalf("grass flag: got %g, want %g, error %v", options.config.GrassDensity, tc.want, err)
+		}
+	}
+}
