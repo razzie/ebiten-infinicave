@@ -24,6 +24,7 @@ type Game struct {
 	seed         int64
 	output       string
 	highlight    *hoverRenderer
+	ribbon       *ribbonTrail
 	exported     bool
 	exportErr    error
 	carving      carveGesture
@@ -61,6 +62,9 @@ func (g *Game) Update() error {
 	if g.regenerate {
 		g.scene.Reset(g.seed)
 		g.carving = carveGesture{}
+		if g.ribbon != nil {
+			g.ribbon.points = g.ribbon.points[:0]
+		}
 		g.setCarveStatus("")
 		g.regenerate = false
 	}
@@ -69,11 +73,16 @@ func (g *Game) Update() error {
 	g.camera.step()
 	g.loading = !g.scene.Update(g.viewport())
 	g.updateCarving()
+	g.updateRibbon()
 	return nil
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	g.scene.Draw(screen, g.viewport())
+	passes := infinicave.RenderPasses{}
+	if g.ribbon != nil {
+		passes = g.ribbon.passes()
+	}
+	g.scene.DrawWithPasses(screen, g.viewport(), passes)
 	g.drawHover(screen)
 	if g.loading {
 		message := "Growing upward..."

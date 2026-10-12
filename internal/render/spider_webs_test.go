@@ -1,6 +1,7 @@
 package render
 
 import (
+	"image"
 	"reflect"
 	"testing"
 
@@ -30,7 +31,8 @@ func TestSpiderWebMeshUsesPreparedTerrainSites(t *testing.T) {
 		}
 		decoration := PrepareVegetation(terrain.SectionData{ForegroundTopology: topology}, view)
 		if view == ViewShaded {
-			expected := SectionMesh{SpiderWebs: prepareSpiderWebs(topology.SpiderWebs, true)}
+			expected := SectionMesh{}
+			expected.SpiderWebs = PrepareOwnedSpiderWebs(topology.SpiderWebs)
 			FinishSectionMesh(&expected)
 			if !reflect.DeepEqual(decoration.SpiderWebs, expected.SpiderWebs) || decoration.SpiderWebsBounds != expected.SpiderWebsBounds {
 				t.Fatal("decoration renderer did not use the precomputed web sites")
@@ -51,13 +53,17 @@ func TestSpiderWebImagesClipToOwnedBandAcrossSeams(t *testing.T) {
 		if mesh.SpiderWebsBounds.Empty() {
 			t.Fatal("seam-crossing web was culled")
 		}
-		if mesh.SpiderWebsBounds.Min.Y < RasterPixelsPerUnit || mesh.SpiderWebsBounds.Max.Y > 2*RasterPixelsPerUnit {
-			t.Fatal("web image overlaps a neighboring section's owned band")
+		for _, bounds := range []image.Rectangle{mesh.SpiderWebsBounds} {
+			if !bounds.Empty() && (bounds.Min.Y < RasterPixelsPerUnit || bounds.Max.Y > 2*RasterPixelsPerUnit) {
+				t.Fatal("web image overlaps a neighboring section's owned band")
+			}
 		}
 		for _, pixels := range []int{1, 501, 1920} {
 			scaled := ScaleVegetationMesh(mesh, pixels)
-			if scaled.SpiderWebsBounds.Min.Y < pixels || scaled.SpiderWebsBounds.Max.Y > 2*pixels {
-				t.Fatal("scaled web image overlaps a neighboring band")
+			for _, bounds := range []image.Rectangle{scaled.SpiderWebsBounds} {
+				if !bounds.Empty() && (bounds.Min.Y < pixels || bounds.Max.Y > 2*pixels) {
+					t.Fatal("scaled web image overlaps a neighboring band")
+				}
 			}
 		}
 	}

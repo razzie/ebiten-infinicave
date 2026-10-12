@@ -42,7 +42,7 @@ func (g *Scene) drawGridFacesWithAA(dst *ebiten.Image, mesh render.TriangleMesh,
 	})
 }
 
-func (w *world) draw(dst *ebiten.Image, y, height float64, fog *render.FogRenderer, background *render.BackgroundRenderer) {
+func (w *world) draw(dst *ebiten.Image, y, height float64, fog *render.FogRenderer, background *render.BackgroundRenderer, passes RenderPasses, context RenderContext) {
 	view := render.TargetTransform(dst)
 	y = render.RenderAlignedY(y, view.Pixels)
 	if background != nil {
@@ -55,6 +55,9 @@ func (w *world) draw(dst *ebiten.Image, y, height float64, fog *render.FogRender
 		for id := low; id <= high; id++ {
 			fog.DrawSection(dst, terrain.SectionTop(id), y, view)
 		}
+	}
+	if passes.BehindRocks != nil {
+		passes.BehindRocks(context)
 	}
 	w.DrawForegroundRocks(dst, y, height, 0, view)
 	for id := max(0, low-1); id <= high+1; id++ {
@@ -73,6 +76,10 @@ func (w *world) draw(dst *ebiten.Image, y, height float64, fog *render.FogRender
 			w.drawSupportedVegetation(dst, section.foregroundVines, section.foregroundVinesBounds, terrain.SectionWindowTop(id), y, height, section.vegetationWidth(), view, false)
 		}
 	}
+	if passes.AboveRocks != nil {
+		passes.AboveRocks(context)
+	}
+	w.drawGrass(dst, y, height, 0, view)
 }
 
 // DrawBackground supplies cached background rock and vines to the effect pass.
@@ -97,7 +104,7 @@ func (w *world) DrawBackground(dst *ebiten.Image, y, height float64, view render
 	}
 }
 
-// The same current images supply both visible rock and the shadow silhouette.
+// Cached rocks include moss and hanging growth; grass draws separately.
 // Runtime cuts redraw these images immediately, so no shadow cache goes stale.
 func (w *world) DrawForegroundRocks(dst *ebiten.Image, y, height, offsetX float64, view render.RenderTransform) {
 	low, high := visibleSections(y, height)
@@ -111,6 +118,27 @@ func (w *world) DrawForegroundRocks(dst *ebiten.Image, y, height, offsetX float6
 			op.GeoM.Translate(view.OffsetX, 0)
 			dst.DrawImage(section.foreground, op)
 		}
+	}
+}
+
+// Shadows retain complete grass, including ground patches, independently of hooks.
+func (w *world) DrawForegroundSilhouette(dst *ebiten.Image, y, height, offsetX float64, view render.RenderTransform) {
+	w.DrawForegroundRocks(dst, y, height, offsetX, view)
+	w.drawGrass(dst, y, height, offsetX, view)
+}
+
+func (w *world) drawGrass(dst *ebiten.Image, y, height, offsetX float64, view render.RenderTransform) {
+	low, high := visibleSections(y, height)
+	for id := low; id <= high; id++ {
+		section := w.sections[id]
+		if section == nil || section.foreground == nil || section.grass == nil {
+			continue
+		}
+		op := &ebiten.DrawImageOptions{}
+		scale := float64(view.Pixels) / float64(section.renderWidth())
+		op.GeoM.Scale(scale, scale)
+		op.GeoM.Translate(view.OffsetX+offsetX*float64(view.Pixels), (terrain.SectionTop(id)-y)*float64(view.Pixels))
+		dst.DrawImage(section.grass, op)
 	}
 }
 

@@ -3,6 +3,7 @@ package infinicave
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"reflect"
 	"testing"
 
@@ -11,6 +12,64 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/render"
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
+
+func TestGrassAndDecorationCachesPublishResizeAndCarveTogether(t *testing.T) {
+	g, err := NewScene(Config{GrassDensity: 1, MushroomDensity: 1, SpiderWebDensity: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(g.Close)
+	cell := terrainRect(.15, .3, .7, .4)
+	cell.Normal, cell.Color = V3{Y: -.8, Z: .6}, color.NRGBA{R: 140, G: 120, B: 90, A: 255}
+	cell.Z, cell.Ambient, cell.Shadow = .04, 1, 1
+	topology := terrain.NewRockTopology(RockGrid{cell})
+	topology.Appearance = topology.Grid
+	data := terrain.SectionData{Foreground: topology.Grid, ForegroundTopology: topology,
+		Guides: []Guide{terrain.SplineGuide([]V{{X: .14, Y: .3}, {X: .86, Y: .3}}, 42)}}
+	for i := 0; i < 40; i++ {
+		x := .2 + float64(i)*.015
+		data.Mushrooms = append(data.Mushrooms, MushroomGroup{Mushrooms: []Mushroom{testGroundedMushroom(x, .3)}})
+		topology.SpiderWebs = append(topology.SpiderWebs, terrain.NewSpiderWeb([]V{{X: x, Y: .31}, {X: x + .06, Y: .31}, {X: x + .03, Y: .36}}, .5))
+	}
+	mesh := render.PrepareSection(data, ViewShaded, render.RockGrowthOptions{Grass: 1})
+	mesh.Geometry = terrain.PrepareTerrainGeometry(data, 0)
+	render.FinishSectionMesh(&mesh)
+	if len(mesh.Foreground.Grass.Indices) == 0 || len(mesh.Mushrooms.Indices) == 0 || len(mesh.SpiderWebs.Indices) == 0 {
+		t.Fatal("fixture must supply grass, mushrooms, and webs")
+	}
+	w := g.world
+	w.startUpload(mesh)
+	finish := func() {
+		t.Helper()
+		for tick := 0; tick < 80 && w.upload != nil; tick++ {
+			w.receive(g)
+		}
+		if w.upload != nil {
+			t.Fatal("decoration upload did not complete")
+		}
+	}
+	finish()
+	s := w.sections[0]
+	if s == nil || s.grass == nil || s.mushrooms == nil || s.spiderWebs == nil {
+		t.Fatal("publication lost a decoration cache")
+	}
+	before := s.grass
+	g.SetRenderWidth(501)
+	w.startUpload(*s.mesh)
+	finish()
+	if s.grass == before || s.renderWidth() != 501 || s.vegetationWidth() != 501 || s.grass.Bounds().Dx() != 501 {
+		t.Fatal("resize retained obsolete grass caches")
+	}
+	if s.mushrooms == nil || s.spiderWebs == nil || s.spiderWebsBounds.Min.Y < 501 || s.spiderWebsBounds.Max.Y > 1002 {
+		t.Fatal("resize lost decorations or web ownership")
+	}
+	if _, err := g.CarveCircle(V{X: .5, Y: -.5}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if s.grass != nil || s.mushrooms != nil || s.spiderWebs != nil {
+		t.Fatal("carving left unsupported decorations")
+	}
+}
 
 func TestResizeUsesNativeImagesAndDefersOffscreenSections(t *testing.T) {
 	g := resolutionTestScene(t)

@@ -41,6 +41,7 @@ func scaleTriangleMesh(mesh TriangleMesh, scale float64, offset image.Point) Tri
 func ScaleGridMesh(mesh GridMesh, pixels, offsetX int) GridMesh {
 	scale := float64(pixels) / RasterPixelsPerUnit
 	mesh.Faces = scaleTriangleMesh(mesh.Faces, scale, image.Pt(offsetX, -pixels))
+	mesh.Grass = scaleTriangleMesh(mesh.Grass, scale, image.Pt(offsetX, -pixels))
 	mesh.Outlines = append([]TriangleMesh(nil), mesh.Outlines...)
 	for i, outline := range mesh.Outlines {
 		mesh.Outlines[i] = scaleTriangleMesh(outline, scale, image.Pt(offsetX, -pixels))

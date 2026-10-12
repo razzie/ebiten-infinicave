@@ -12,6 +12,7 @@ type viewerOptions struct {
 	config infinicave.Config
 	output string
 	hover  bool
+	ribbon ribbonMode
 }
 
 func parseOptions() (viewerOptions, error) {
@@ -41,6 +42,7 @@ func parseOptions() (viewerOptions, error) {
 	webMaxSize := flag.Float64("spider-web-max-size", defaults.SpiderWebMaxSize, "maximum spider web span including attachments in scene units (0 uses the default 0.15; cave cross-axis spans 1)")
 	view := flag.String("view", "shaded", "terrain view: shaded, clay, height, normals, shadows")
 	hover := flag.Bool("hover", false, "highlight foreground rocks and guide lines under the mouse")
+	ribbon := flag.String("ribbon", "off", "mouse ribbon trail: off, back (behind rocks), front (above rocks, mushrooms, and webs, below grass and bats); interactive viewer only")
 	tolerance := flag.Float64("collision-tolerance", 0, "collision polygon simplification tolerance in scene units (one section is 1 by 1)")
 	flag.Parse()
 	config := defaults
@@ -76,7 +78,11 @@ func parseOptions() (viewerOptions, error) {
 	}
 	config.View = parsedView
 	config.CollisionTolerance = *tolerance
-	return viewerOptions{config: config, output: *output, hover: *hover}, nil
+	ribbonMode, err := parseRibbonMode(*ribbon)
+	if err != nil {
+		return viewerOptions{}, err
+	}
+	return viewerOptions{config: config, output: *output, hover: *hover, ribbon: ribbonMode}, nil
 }
 
 func parseMode(mode string) (infinicave.Orientation, error) {

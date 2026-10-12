@@ -4,7 +4,6 @@ import (
 	"image/color"
 	"math"
 
-	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
@@ -129,11 +128,12 @@ func grassForCell(cell terrain.RockCell, guides []terrain.Guide, density float64
 	return patch
 }
 
-// Draw grass above the finished rock faces, with roots on the actual polygons.
+// Draw complete ground patches and blades together above custom content.
 // Cull using the blade footprint so a tuft can cross the owning image's seam.
-func appendRockGrass(vertices []ebiten.Vertex, indices []uint32, grid terrain.RockGrid, guides []terrain.Guide, owned bool, density float64) ([]ebiten.Vertex, []uint32) {
+func prepareRockGrass(grid terrain.RockGrid, guides []terrain.Guide, owned bool, density float64) TriangleMesh {
+	var mesh TriangleMesh
 	if density <= 0 || len(guides) == 0 {
-		return vertices, indices
+		return mesh
 	}
 	for _, cell := range grid {
 		patch := grassForCell(cell, guides, density)
@@ -141,16 +141,16 @@ func appendRockGrass(vertices []ebiten.Vertex, indices []uint32, grid terrain.Ro
 			if owned && !inTerrainBand(poly...) {
 				continue
 			}
-			vertices, indices = appendCellMesh(vertices, indices, poly, geom.PolygonCenter(poly), growthColor(patch.color, .78), cell.Normal)
+			mesh.Vertices, mesh.Indices = appendCellMesh(mesh.Vertices, mesh.Indices, poly, geom.PolygonCenter(poly), growthColor(patch.color, .78), cell.Normal)
 		}
 		for _, blade := range patch.blades {
 			if owned && !inTerrainBand(blade.polygon...) {
 				continue
 			}
-			first := len(vertices)
-			vertices, indices = appendCellMesh(vertices, indices, blade.polygon, geom.PolygonCenter(blade.polygon), patch.color, geom.V3{Z: 1})
-			for i := first; i < len(vertices); i++ {
-				v := &vertices[i]
+			first := len(mesh.Vertices)
+			mesh.Vertices, mesh.Indices = appendCellMesh(mesh.Vertices, mesh.Indices, blade.polygon, geom.PolygonCenter(blade.polygon), patch.color, geom.V3{Z: 1})
+			for i := first; i < len(mesh.Vertices); i++ {
+				v := &mesh.Vertices[i]
 				p := geom.V{X: float64(v.DstX) / RasterPixelsPerUnit, Y: float64(v.DstY)/RasterPixelsPerUnit + terrain.GenerationMinY}
 				height := -terrain.WorldPoint(terrain.RockOrientation(cell), p.Sub(blade.root)).Y / blade.height
 				clr := growthColor(patch.color, geom.Lerp(.62, 1.12, geom.Clamp(height, 0, 1)))
@@ -158,5 +158,5 @@ func appendRockGrass(vertices []ebiten.Vertex, indices []uint32, grid terrain.Ro
 			}
 		}
 	}
-	return vertices, indices
+	return mesh
 }

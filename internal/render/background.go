@@ -68,7 +68,7 @@ func (r *BackgroundRenderer) Draw(dst *ebiten.Image, w BackgroundLayers, y, heig
 	r.mask.Clear()
 	w.DrawBackground(r.background, paddedY, paddedHeight, view)
 	if r.opacity > 0 {
-		w.DrawForegroundRocks(r.mask, paddedY-r.Offset.Y, paddedHeight, r.Offset.X, view)
+		w.DrawForegroundSilhouette(r.mask, paddedY-r.Offset.Y, paddedHeight, r.Offset.X, view)
 	}
 	background := r.backgroundBlur.apply(r.background, r.softness*float64(view.Pixels), r.blur)
 	shadow := r.mask
@@ -156,5 +156,5 @@ type BackgroundConfig struct {
 // BackgroundLayers supplies the current cached terrain and shadow silhouette.
 type BackgroundLayers interface {
 	DrawBackground(*ebiten.Image, float64, float64, RenderTransform)
-	DrawForegroundRocks(*ebiten.Image, float64, float64, float64, RenderTransform)
+	DrawForegroundSilhouette(*ebiten.Image, float64, float64, float64, RenderTransform)
 }

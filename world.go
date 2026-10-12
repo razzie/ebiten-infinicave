@@ -17,6 +17,7 @@ import (
 type worldSection struct {
 	terrain, vines, mushrooms, foreground               *ebiten.Image
 	foregroundVines, spiderWebs                         *ebiten.Image
+	grass                                               *ebiten.Image
 	geometry                                            *terrain.Geometry
 	vinesBounds, foregroundVinesBounds, mushroomsBounds image.Rectangle
 	spiderWebsBounds                                    image.Rectangle
@@ -405,7 +406,7 @@ func (w *world) prune(y float64, height float64, velocity float64) {
 }
 
 func (s *worldSection) deallocate() {
-	for _, img := range []*ebiten.Image{s.terrain, s.foreground, s.vines, s.foregroundVines, s.mushrooms, s.spiderWebs} {
+	for _, img := range []*ebiten.Image{s.terrain, s.foreground, s.vines, s.foregroundVines, s.mushrooms, s.spiderWebs, s.grass} {
 		if img != nil {
 			img.Deallocate()
 		}

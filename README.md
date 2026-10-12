@@ -103,6 +103,43 @@ Call every `Scene` method on the Ebitengine game goroutine. `Close` is idempoten
 and releases shaders and cached images; background generation stops at its next cancellation check
 before its workers exit.
 
+Use `DrawWithPasses` to insert custom drawing around the foreground rocks:
+
+```go
+scene.DrawWithPasses(screen, viewport, infinicave.RenderPasses{
+    BehindRocks: func(ctx infinicave.RenderContext) {
+        // Draw after background effects and fog, before foreground rocks.
+    },
+    AboveRocks: func(ctx infinicave.RenderContext) {
+        // Place a sprite at a world position with a size in scene units.
+        op := &ebiten.DrawImageOptions{}
+        op.GeoM.Scale(0.04/float64(sprite.Bounds().Dx()),
+            0.04/float64(sprite.Bounds().Dx()))
+        op.GeoM.Translate(position.X, position.Y)
+        op.GeoM.Concat(ctx.WorldToTarget)
+        ctx.Dst.DrawImage(sprite, op)
+    },
+})
+```
+
+The draw order is background rocks and vines with their effects, fog,
+`BehindRocks`, foreground rocks, all mushrooms and webs, foreground vines,
+`AboveRocks`, all grass ground patches and blades, then bats. Moss and hanging
+growth remain part of the rocks. Grass is cached separately from the rocks,
+including its ground patches, and still contributes to rock shadows. Its
+placement, shape, and palette remain deterministic through scrolling, resizing,
+and carving.
+
+Each non-nil callback runs once per valid draw, including while terrain is
+loading and in diagnostic views. Custom content does not enter background blur
+or shadow masks. Advance its animation in your own `Update`; repeated draws
+do not advance the scene. Callbacks should only draw and must not update or
+mutate the scene. `ctx.Viewport` follows the renderer's pixel alignment, and
+`ctx.Min` / `ctx.Max` bound the whole target in world units, including side
+margins. `ctx.WorldToTarget` handles centering, native scale, and both orientations.
+In horizontal scenes, `ctx.Dst` is a temporary rotated target; borrow it only
+for the callback. `Draw` is equivalent to `DrawWithPasses` with empty callbacks.
+
 `DefaultConfig` uses texture strength 8, background blur 0.002, dynamic shadow
 opacity 0.65, shadow softness 0.008, shadow offset (0.018, 0.025), fog strength 1, 7.5 bats per minute, shaded rendering,
 seed 0, and exact collision geometry. A zero `Config` is also valid and disables
@@ -533,6 +570,18 @@ them or set another rate to change their frequency. The viewer disables bats for
 The viewer renders at the window's native pixel resolution, including on HiDPI displays. Resizing rerasterizes visible sections using cached geometry and preserves runtime cuts and camera position. Offscreen sections refresh when they become visible. Scrolling continues while missing sections are prepared in the background, with “Growing upward…” displayed until they are ready. Rocks share world coordinates across sections, and vines keep their full geometry across boundaries.
 
 Hover over a foreground rock for a soft warm highlight and glow over its entire connected block of cells, including across cached section boundaries. Point within 0.006 scene units of a guide to highlight only that guide line instead. Hover effects are disabled by default; use `-hover=true` to enable them. PNG exports never include hover effects.
+
+Use `-ribbon back` or `-ribbon front` to test the custom render passes with a
+tapered cyan and violet trail following the mouse. `back` draws behind rocks;
+`front` draws above rocks, foreground vines, mushrooms, and webs, but behind
+all grass ground patches, blades, and bats. The default is `-ribbon off`. The trail stays in world
+coordinates as you scroll, fades after about a second, clears on regeneration,
+and is omitted from PNG exports. Both scrolling modes support it:
+
+```sh
+go run ./cmd/infinicave -seed 42 -ribbon front
+go run ./cmd/infinicave -seed 42 -mode landscape -ribbon back
+```
 
 `go run ./cmd/infinicave -seed 42 -output scene.png` exports the bottom 1000 × 2400 pixels and exits. Adding `-mode landscape` exports the leftmost 2400 × 1000 pixels instead. `-texture 0` disables the surface texture. `-fog 0` disables the moving fog; `-fog 0.5` gives half strength. `-collision-tolerance 0.002` simplifies collision polygons with a 0.002-unit tolerance.
 

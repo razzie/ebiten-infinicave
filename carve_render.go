@@ -111,10 +111,11 @@ func (g *Scene) redrawCarvedSection(section *worldSection) {
 		section.mesh.Foreground = mesh
 		section.mesh.Geometry = section.geometry
 	}
-	g.drawCarvedForeground(section.foreground, mesh, section.geometry.Top)
+	g.drawCarvedForeground(section, mesh, section.geometry.Top)
 }
 
-func (g *Scene) drawCarvedForeground(dst *ebiten.Image, mesh render.GridMesh, top float64) {
+func (g *Scene) drawCarvedForeground(section *worldSection, mesh render.GridMesh, top float64) {
+	dst := section.foreground
 	pixels := dst.Bounds().Dx()
 	mesh = render.ScaleGridMesh(mesh, pixels, 0)
 	dst.Clear()
@@ -125,6 +126,14 @@ func (g *Scene) drawCarvedForeground(dst *ebiten.Image, mesh render.GridMesh, to
 	}
 	for _, outline := range mesh.Outlines {
 		outline.Draw(dst, g.world.white)
+	}
+	if section.grass != nil {
+		section.grass.Deallocate()
+		section.grass = nil
+	}
+	if len(mesh.Grass.Indices) > 0 {
+		section.grass = render.NewSectionImageAt(terrain.SectionHeight, pixels)
+		g.drawGridFaces(section.grass, mesh.Grass, top-SectionHeight)
 	}
 }
 
@@ -170,6 +179,10 @@ func (g *Scene) carveSectionUpload(u *sectionUpload, cut terrain.RockCut) {
 			if u.foreground != nil {
 				u.foreground.Deallocate()
 				u.foreground = nil
+			}
+			if u.grass != nil {
+				u.grass.Deallocate()
+				u.grass = nil
 			}
 			u.clearSurface()
 			u.needed |= render.ForegroundLayer

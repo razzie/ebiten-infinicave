@@ -132,15 +132,53 @@ func TestOwnedGrassIncludesTuftsCrossingSectionSeam(t *testing.T) {
 	if inTerrainBand(cell.Polygon...) {
 		t.Fatal("fixture rock overlaps the owned band")
 	}
-	_, indices := appendRockGrass(nil, nil, terrain.RockGrid{cell}, grassTestGuides(cell), true, 1)
-	if len(indices) == 0 {
+	grass := prepareRockGrass(terrain.RockGrid{cell}, grassTestGuides(cell), true, 1)
+	if len(grass.Indices) == 0 {
 		t.Fatal("grass growing into the owned band was clipped at the section seam")
 	}
 	cell.Center.Y += 1
 	for i := range cell.Polygon {
 		cell.Polygon[i].Y += 1
 	}
-	if _, indices := appendRockGrass(nil, nil, terrain.RockGrid{cell}, grassTestGuides(cell), true, 1); len(indices) != 0 {
+	if grass := prepareRockGrass(terrain.RockGrid{cell}, grassTestGuides(cell), true, 1); len(grass.Indices) != 0 {
 		t.Fatal("owned mesh retained distant grass")
+	}
+}
+
+func TestGrassLayerIncludesGroundAndPreservesOwnedSeams(t *testing.T) {
+	for _, mode := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
+		for i := 0; i < 20; i++ {
+			cell := growthTestCell(mode, .05+float64(i)*.025)
+			guides := grassTestGuides(cell)
+			grass := prepareRockGrass(terrain.RockGrid{cell}, guides, false, 1)
+			checkMesh(t, grass)
+			ground, blades := false, false
+			for _, v := range grass.Vertices {
+				ground = ground || v.Custom2 != 0 || v.Custom3 != 0
+				blades = blades || (v.Custom2 == 0 && v.Custom3 == 0)
+			}
+			if !ground || !blades {
+				t.Fatal("grass layer must include both ground patches and blades")
+			}
+			topology := terrain.NewRockTopology(terrain.RockGrid{cell})
+			topology.Appearance = topology.Grid
+			bare := PrepareGridWithTopology(nil, ViewShaded, topology, RockGrowthOptions{})
+			full := PrepareGridWithTopology(nil, ViewShaded, topology, RockGrowthOptions{Grass: 1, Guides: guides})
+			if !reflect.DeepEqual(bare.Faces, full.Faces) || !reflect.DeepEqual(bare.Outlines, full.Outlines) {
+				t.Fatal("grass ground patches or blades remain baked into the rock layer")
+			}
+			owned := prepareRockGrass(terrain.RockGrid{cell}, guides, true, 1)
+			for _, pixels := range []int{1, 501, 1000} {
+				a := ScaleGridMesh(GridMesh{Grass: grass}, pixels, 0)
+				b := ScaleGridMesh(GridMesh{Grass: owned}, pixels, 0)
+				if !reflect.DeepEqual(bandTriangles(a.Grass, pixels), bandTriangles(b.Grass, pixels)) {
+					t.Fatal("grass layer lost visible ground or blades at a section boundary")
+				}
+			}
+			sparse := prepareRockGrass(terrain.RockGrid{cell}, guides, false, .25)
+			if len(sparse.Indices) > 0 && !reflect.DeepEqual(sparse, grass) {
+				t.Fatal("density changed a surviving tuft's ground or blades")
+			}
+		}
 	}
 }

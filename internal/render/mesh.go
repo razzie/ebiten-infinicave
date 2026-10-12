@@ -24,6 +24,8 @@ type TriangleMesh struct {
 type GridMesh struct {
 	Faces    TriangleMesh
 	Outlines []TriangleMesh
+	// Grass contains ground patches and blades, drawn after AboveRocks.
+	Grass TriangleMesh
 }
 
 type MeshLayers uint8
@@ -100,10 +102,12 @@ func PrepareVegetation(data terrain.SectionData, view View) SectionMesh {
 		parallel.Run(
 			func() { mesh.Vines = PrepareVines(data.Vines) },
 			func() { mesh.ForegroundVines = PrepareForegroundVines(data.ForegroundVines, data.Orientation) },
-			func() { mesh.Mushrooms = PrepareOwnedMushrooms(data.Mushrooms, mushroomSectionTopology(data)) },
+			func() {
+				mesh.Mushrooms = PrepareOwnedMushrooms(data.Mushrooms, mushroomSectionTopology(data))
+			},
 			func() {
 				if data.ForegroundTopology != nil {
-					mesh.SpiderWebs = prepareSpiderWebs(data.ForegroundTopology.SpiderWebs, true)
+					mesh.SpiderWebs = PrepareOwnedSpiderWebs(data.ForegroundTopology.SpiderWebs)
 				}
 			},
 		)
@@ -225,10 +229,10 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 	if topology != nil && len(topology.Cuts) > 0 && (view == ViewShaded || view == ViewClay) {
 		vertices, indices = appendCarveRims(vertices, indices, topology, view, owned)
 	}
-	if raised && view == ViewShaded {
-		vertices, indices = appendRockGrass(vertices, indices, grid, density.Guides, owned, density.Grass)
-	}
 	mesh := GridMesh{Faces: TriangleMesh{Vertices: vertices, Indices: indices}}
+	if raised && view == ViewShaded {
+		mesh.Grass = prepareRockGrass(grid, density.Guides, owned, density.Grass)
+	}
 	if len(indices) == 0 {
 		return mesh
 	}

@@ -51,8 +51,11 @@ func TestCarvePlantsDuringEveryUploadStage(t *testing.T) {
 			mesh.Geometry = terrain.PrepareTerrainGeometry(data, 0)
 			render.FinishSectionMesh(&mesh)
 			u := &sectionUpload{data: mesh, stage: stage, next: 3, initialized: true, needed: render.AllLayers}
-			if stage == uploadForegroundOutlines || stage == uploadForegroundPublish {
+			if stage >= uploadForegroundOutlines && stage <= uploadForegroundPublish {
 				u.foreground = ebiten.NewImage(1, 1)
+			}
+			if stage >= uploadGrass && stage <= uploadForegroundPublish {
+				u.grass = ebiten.NewImage(1, 1)
 			}
 			if stage >= uploadVines {
 				u.vines, u.mushrooms, u.foregroundVines = ebiten.NewImage(1, 1), ebiten.NewImage(1, 1), ebiten.NewImage(1, 1)
@@ -72,9 +75,10 @@ func TestCarvePlantsDuringEveryUploadStage(t *testing.T) {
 			if stage >= uploadVines && !reflect.DeepEqual(scene.world.sections[0].geometry.Vegetation, plants) {
 				t.Fatal("published section and pending plants disagree")
 			}
-			if u.foreground != nil {
-				u.foreground.Deallocate()
+			if stage >= uploadGrass && stage <= uploadForegroundPublish && u.grass != nil {
+				t.Fatal("partially uploaded grass was not restarted")
 			}
+			u.deallocate()
 		})
 	}
 }

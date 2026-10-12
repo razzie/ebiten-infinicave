@@ -169,6 +169,17 @@ func (g *Scene) SetRenderWidth(pixels int) {
 // not add hover, loading text, or UI, and does nothing for an invalid viewport
 // or a closed Scene.
 func (g *Scene) Draw(dst *ebiten.Image, viewport Viewport) {
+	g.DrawWithPasses(dst, viewport, RenderPasses{})
+}
+
+// DrawWithPasses renders like Draw with optional custom passes around the
+// foreground rocks. Foreground vines, mushrooms, and webs precede AboveRocks;
+// all grass ground patches and blades follow it. Bats draw last.
+// Callbacks run once per draw, including across unloaded terrain, and never
+// run for invalid viewports or a closed Scene. Drawing does not animate them;
+// advance custom effects in the caller's Update.
+func (g *Scene) DrawWithPasses(dst *ebiten.Image, viewport Viewport, passes RenderPasses) {
+	publicViewport := viewport
 	viewport, valid := orientedViewport(g.orientation, viewport)
 	if g.closed || !valid {
 		return
@@ -182,7 +193,8 @@ func (g *Scene) Draw(dst *ebiten.Image, viewport Viewport) {
 		g.orientedTarget.Clear()
 		target = g.orientedTarget
 	}
-	g.world.draw(target, viewport.Y, viewport.Height, g.fog, g.background)
+	context := newRenderContext(target, publicViewport, g.orientation, viewport.Y)
+	g.world.draw(target, viewport.Y, viewport.Height, g.fog, g.background, passes, context)
 	if g.bats != nil {
 		g.bats.Draw(target, viewport)
 	}

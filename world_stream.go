@@ -50,12 +50,13 @@ func (w *world) savePending(data render.SectionMesh) {
 }
 
 func (u *sectionUpload) deallocate() {
-	for _, img := range []*ebiten.Image{u.img, u.foreground, u.vines, u.foregroundVines, u.mushrooms, u.spiderWebs, u.surface} {
+	for _, img := range []*ebiten.Image{u.img, u.foreground, u.vines, u.foregroundVines, u.mushrooms, u.spiderWebs, u.grass, u.surface} {
 		if img != nil {
 			img.Deallocate()
 		}
 	}
 	u.img, u.foreground, u.vines, u.foregroundVines, u.mushrooms, u.spiderWebs, u.surface = nil, nil, nil, nil, nil, nil, nil
+	u.grass = nil
 }
 
 // Resize/offscreen abandonment keeps CPU data and all published layers.
@@ -88,6 +89,7 @@ func (w *world) startUpload(data render.SectionMesh) {
 const (
 	uploadForegroundFaces = iota
 	uploadForegroundOutlines
+	uploadGrass
 	uploadForegroundPublish
 	uploadBackgroundFaces
 	uploadBackgroundOutlines
@@ -107,6 +109,7 @@ type sectionUpload struct {
 	pixels                                             int
 	img, foreground, vines, foregroundVines, mushrooms *ebiten.Image
 	spiderWebs                                         *ebiten.Image
+	grass                                              *ebiten.Image
 	stage, next                                        int
 	initialized                                        bool
 	needed                                             render.MeshLayers
@@ -378,12 +381,29 @@ func (w *world) receive(g *Scene) {
 			if !w.uploadMeshes(u.foreground, u.raster.Foreground.Outlines, &budget) {
 				return
 			}
+		case uploadGrass:
+			mesh := u.raster.Foreground.Grass
+			if len(mesh.Indices) > 0 {
+				if !budget.available() {
+					return
+				}
+				if u.grass == nil {
+					u.grass = render.NewSectionImageAt(terrain.SectionHeight, u.pixels)
+				}
+				if !w.uploadFaces(g, u.grass, mesh, top, true, &budget) {
+					return
+				}
+			}
 		case uploadForegroundPublish:
 			section := w.sectionForUpload(u)
 			changed := section.foreground == nil || !terrain.SameTerrain(section.geometry, u.data.Geometry)
 			if section.foreground != nil {
 				section.foreground.Deallocate()
 			}
+			if section.grass != nil {
+				section.grass.Deallocate()
+			}
+			section.grass, u.grass = u.grass, nil
 			section.foreground, u.foreground = u.foreground, nil
 			section.pixels = u.pixels
 			section.geometry = u.data.Geometry

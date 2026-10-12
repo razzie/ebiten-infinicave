@@ -10,7 +10,7 @@ them directly.
 | Configuration and scene lifecycle | `config.go`, `scene.go` | Validate settings; create, update, reset, draw, and close scenes |
 | Public geometry | `geometry.go`, `section.go`, `collision.go`, `orientation.go`, `carve.go` | Expose types and entry points with the existing import path |
 | Streaming | `world.go`, `world_stream.go` | Request sections, retain CPU results, publish terrain, budget GPU uploads, and evict distant sections |
-| World composition | `world_render.go`, `carve_render.go` | Draw cached layers and refresh images after edits |
+| World composition | `render_passes.go`, `world_render.go`, `carve_render.go` | Expose custom drawing hooks, draw cached layers, and refresh images after edits |
 | Queries and identity | `query.go`, `query_index.go` | Track loaded coverage, formation and guide IDs, aliases, and revisions |
 | Geometry algorithms | `internal/geom/` | Vectors, polygon clipping and triangulation, and ray/segment intersections |
 | Terrain and vegetation | `internal/terrain/` | Deterministic section generation, guides, Voronoi rock, lighting, vines, mushrooms, collision topology, and geometry edits |
@@ -53,6 +53,21 @@ images and shaders are created, uploaded, drawn, resized, and released on the ga
 goroutine. Upload budgets and cache publication live in `world_stream.go`.
 Carving replaces geometry, updates the query index, and refreshes affected images;
 stored cuts are replayed when sections regenerate. Resizing reuses CPU meshes.
+
+`Scene.DrawWithPasses` inserts optional drawing after fog (`BehindRocks`) and
+after foreground rocks, mushrooms, webs, and foreground vines (`AboveRocks`).
+All grass ground patches and blades follow that second hook; bats draw last.
+`Draw` delegates with empty hooks. Pass callbacks receive a transform from public
+world coordinates into the current target, including the intermediate rotated
+target used by horizontal scenes. Hooks run once on the game goroutine and are
+excluded from offscreen background and shadow composition.
+
+Grass has its own mesh and image, including ground patches. It shares the
+foreground layer's upload, publication, resizing, and carving lifecycle, and
+supplies the shadow silhouette alongside rocks. Mushrooms and webs use cropped
+images published together with vegetation. The viewer's optional `ribbon.go`
+trail demonstrates both hooks with mouse input and world coordinates,
+advancing its samples during `Game.Update`.
 
 Synchronous generation uses `terrain.GenerationOptions`, populated by the public
 `GenerateSectionWithConfig` entry point after validating the full configuration.

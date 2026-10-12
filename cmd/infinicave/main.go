@@ -27,6 +27,10 @@ func run() error {
 	}
 	defer scene.Close()
 	g := &Game{mode: orientation, scene: scene, seed: config.Seed, output: options.output}
+	if options.ribbon != ribbonOff && options.output == "" {
+		g.ribbon = newRibbonTrail(options.ribbon)
+		defer g.ribbon.close()
+	}
 	if options.hover && options.output == "" {
 		g.highlight, err = newHoverRenderer()
 		if err != nil {

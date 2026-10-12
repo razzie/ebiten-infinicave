@@ -171,7 +171,7 @@ func TestRockGrowthDensityReachesAllMeshPreparationPaths(t *testing.T) {
 	for _, density := range []RockGrowthOptions{{Moss: 1}, {Hanging: 1}, {Grass: 1}, {Moss: 1, Hanging: 1, Grass: 1}} {
 		density.Guides = guides
 		full := PrepareGridWithTopology(nil, ViewShaded, topology, density)
-		if len(full.Faces.Indices) <= len(bare.Faces.Indices) {
+		if len(full.Faces.Indices)+len(full.Grass.Indices) <= len(bare.Faces.Indices) {
 			t.Fatalf("configured growth missing: %+v", density)
 		}
 		if !reflect.DeepEqual(PrepareSection(data, ViewShaded, density).Foreground, full) {
