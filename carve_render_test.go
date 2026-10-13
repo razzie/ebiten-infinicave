@@ -26,8 +26,8 @@ func TestCarvePlantsAcrossSectionSeamsAndReload(t *testing.T) {
 	if _, err := scene.CarveSegment(V{X: .5, Y: -1.05}, V{X: .5, Y: -.95}, .04); err != nil {
 		t.Fatal(err)
 	}
-	if len(scene.world.sections[1].geometry.Vegetation.Vines) != 2 {
-		t.Fatal("neighbor-owned vine was not split across a seam")
+	if len(scene.world.sections[1].geometry.Vegetation.Vines) != 1 {
+		t.Fatal("texture carve changed a neighbor-owned vine recipe")
 	}
 	for _, d := range data {
 		want := scene.world.sections[d.ID].geometry.Vegetation
@@ -36,7 +36,7 @@ func TestCarvePlantsAcrossSectionSeamsAndReload(t *testing.T) {
 		render.FinishSectionMesh(&mesh)
 		scene.applyStoredCuts(&mesh)
 		if !reflect.DeepEqual(want, mesh.Geometry.Vegetation) {
-			t.Fatal("reloading restored unsupported mushrooms or uncut vines")
+			t.Fatal("reloading restored unsupported mushrooms or changed vine recipes")
 		}
 	}
 }
@@ -66,7 +66,7 @@ func TestCarvePlantsDuringEveryUploadStage(t *testing.T) {
 				t.Fatal(err)
 			}
 			plants := u.data.Geometry.Vegetation
-			if len(plants.Mushrooms) != 0 || len(plants.Vines) != 2 {
+			if len(plants.Mushrooms) != 0 || len(plants.Vines) != 1 {
 				t.Fatal("upload geometry retained damaged plants")
 			}
 			for _, a := range u.data.Plants {
@@ -141,7 +141,7 @@ func TestAuthoredAndRuntimeHolesProduceTheSamePlants(t *testing.T) {
 	if got := terrain.SectionVegetation(authored); !reflect.DeepEqual(got, want) {
 		t.Fatal("authored holes regrew or reshuffled vegetation instead of applying the same damage")
 	}
-	// Public section geometry carries the same clipped paths and whole plants.
+	// Public section geometry carries original vine recipes and supported plants.
 	section, err := GenerateSectionWithConfig(Config{Seed: 42, MushroomDensity: terrain.DefaultMushroomDensity, LoadSection: load}, 0)
 	if err != nil || !reflect.DeepEqual(section.Vines, want.Vines) || !reflect.DeepEqual(section.ForegroundVines, want.ForegroundVines) || !reflect.DeepEqual(section.Mushrooms, want.Mushrooms) {
 		t.Fatalf("public authored section lost vegetation edits: %v", err)

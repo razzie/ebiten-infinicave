@@ -35,6 +35,7 @@ type SpiderWeb struct {
 	Corner, A, B geom.V
 	Variation    float64
 	Network      *WebNetwork
+	supports     []geom.V
 }
 
 // Candidates follow the final polygon silhouette. Keep every supporting
@@ -321,6 +322,17 @@ func resolveSpiderWebsContext(ctx context.Context, appearance RockGrid, corners 
 		lo, hi := geom.PolygonBounds(w.Network.Nodes[:w.Network.Anchors])
 		nearbyFaces = clearance.nearby(lo, hi, nearbyFaces)
 		if !clearance.networkClear(w.Network, nearbyFaces) || webOverlaps(w, webs) {
+			continue
+		}
+		for _, p := range c.anchors {
+			for _, cell := range c.cells {
+				if q, ok := InsetRockAnchor(appearance[cell].Polygon, p, geom.V{}); ok {
+					w.supports = append(w.supports, q)
+					break
+				}
+			}
+		}
+		if len(w.supports) != len(c.anchors) {
 			continue
 		}
 		webs = append(webs, w)

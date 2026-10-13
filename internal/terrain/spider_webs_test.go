@@ -201,6 +201,7 @@ func TestCarvingRetainsPreparedWebNetworksAndRemovesDamagedSupport(t *testing.T)
 	geometry := PrepareTerrainGeometry(SectionData{ForegroundTopology: topology}, 0)
 	cut, _ := CutFromHole(Hole{Shape: HoleCircle, Center: p.Sub(geom.V{Y: 1}), Radius: .04})
 	updated, _, changed := cut.Geometry(0, geometry, 0)
+	updated, _ = cut.Plants(updated)
 	if !changed || !updated.Topology.websPrepared || len(updated.Topology.SpiderWebs) != 0 {
 		t.Fatal("cut retained damaged web or invalidated prepared networks")
 	}

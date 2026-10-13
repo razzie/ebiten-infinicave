@@ -7,16 +7,16 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
 
-func TestCarveVineTangencyAndRibbonOnlyOverlap(t *testing.T) {
-	cut, _ := CutFromHole((Hole{Shape: HoleSegment, Start: geom.V{X: .3, Y: -.4}, End: geom.V{X: .7, Y: -.4}, Width: .2}))
+func TestCarveVinesRetainsOriginalGeometryWithoutDetection(t *testing.T) {
+	cut, _ := CutFromHole(Hole{Shape: HoleSegment, Start: geom.V{X: .3, Y: -.4}, End: geom.V{X: .7, Y: -.4}, Width: .2})
 	v := Vine{Parent: -1, Points: []VinePoint{{geom.V{X: .1, Y: .5}, .01}, {geom.V{X: .9, Y: .5}, .01}}}
-	fragments := splitVine(v, cut.localPolygon(-1))
-	if len(fragments) != 1 || !reflect.DeepEqual(fragments[0].points, v.Points) {
-		t.Fatal("tangent centerline was removed")
+	source := Vegetation{Vines: []Vine{v}, ForegroundVines: []Vine{v}}
+	plants, changed := cut.vegetation(source, -1)
+	if changed || !reflect.DeepEqual(plants, source) || &plants.Vines[0] != &source.Vines[0] || &plants.ForegroundVines[0] != &source.ForegroundVines[0] {
+		t.Fatal("texture-only carving changed original vine recipes")
 	}
-	plants, changed := cut.vegetation(Vegetation{Vines: []Vine{v}}, -1)
-	if !changed || len(plants.Cuts) != 1 {
-		t.Fatal("ribbon overlap without centerline intersection lost its render mask")
+	if allocs := testing.AllocsPerRun(10, func() { cut.vegetation(source, -1) }); allocs != 0 {
+		t.Fatalf("vine-only edit allocated %v times", allocs)
 	}
 }
 
@@ -31,8 +31,8 @@ func TestCarveMushroomsUsesGuideRootAndExactCut(t *testing.T) {
 		hit    bool
 	}{
 		{"guide root", m.Anchor, .001, true},
-		{"buried stalk only", m.Stem[0], .001, true},
-		{"stalk end", m.CapCenter, .003, true},
+		{"buried stalk only", m.Stem[0], .001, false},
+		{"stalk end", m.CapCenter, .003, false},
 		{"bounds overlap outside circle", m.Anchor.Add(geom.V{X: .009, Y: .009}), .01, false},
 		{"root on cut boundary", m.Anchor.Add(geom.V{X: .01}), .01, false},
 		{"distant cut", geom.V{X: .8, Y: .8}, .01, false},

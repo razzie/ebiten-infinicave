@@ -133,8 +133,7 @@ func TestConcurrentWorldSectionsMatchSerialPreparation(t *testing.T) {
 		rock := render.PrepareTerrain(data, ViewClay)
 		mesh.Background, mesh.Foreground = rock.Background, rock.Foreground
 		mesh.Layers = render.AllLayers
-		mesh.Geometry = terrain.BindTerrainMaterial(early, data)
-		mesh.Geometry.Vegetation = terrain.SectionVegetation(data)
+		mesh.Geometry = terrain.BindTerrainVegetation(early, data)
 		want[id] = mesh
 	}
 	w := newWorld(42, ViewClay, 0, 0, terrain.DefaultSpiderWebDensity, terrain.DefaultMushroomDensity, false, nil, render.RockGrowthOptions{}, terrain.ShapeOptions{})

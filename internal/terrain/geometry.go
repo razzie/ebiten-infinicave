@@ -18,17 +18,18 @@ type Face struct {
 // Structural loops are independent of the original material facets. Carving
 // replaces loops and attachment state while retaining the immutable bake data.
 type Geometry struct {
-	Shapes     []RockShape   // exact editable loops; Grid/Topology retain the bake recipe
-	source     *RockTopology // stable shape identity across material binding and cuts
-	Grid       RockGrid      // original inset material facets, retained for baking
-	Topology   *RockTopology // immutable adjacency and boundaries shared with rendering
-	Cuts       []RockCut
-	Vegetation Vegetation
-	Faces      []Face
-	Guides     []Guide
-	Blocks     [][]int
-	Top        float64
-	Collision  CollisionGeometry
+	decorations *decorationState
+	Shapes      []RockShape   // exact editable loops; Grid/Topology retain the bake recipe
+	source      *RockTopology // stable shape identity across material binding and cuts
+	Grid        RockGrid      // original inset material facets, retained for baking
+	Topology    *RockTopology // immutable adjacency and boundaries shared with rendering
+	Cuts        []RockCut
+	Vegetation  Vegetation
+	Faces       []Face
+	Guides      []Guide
+	Blocks      [][]int
+	Top         float64
+	Collision   CollisionGeometry
 }
 
 func PrepareTerrainGeometry(data SectionData, tolerance float64) *Geometry {
@@ -60,6 +61,7 @@ func PrepareTerrainGeometry(data SectionData, tolerance float64) *Geometry {
 	}
 	h.Grid = grid
 	h.Topology = source
+	h.decorations = newDecorationState(h.Vegetation.Mushrooms, source.SpiderWebs)
 	for i := range h.Faces {
 		if h.Faces[i].block >= 0 {
 			continue
@@ -197,6 +199,15 @@ func BindTerrainMaterial(early *Geometry, data SectionData) *Geometry {
 	h := *early
 	h.Topology = data.ForegroundTopology
 	h.Grid = h.Topology.Grid
+	return &h
+}
+
+// BindTerrainVegetation attaches immutable decoration data and its support
+// index on the worker before publishing the completed section.
+func BindTerrainVegetation(early *Geometry, data SectionData) *Geometry {
+	h := *BindTerrainMaterial(early, data)
+	h.Vegetation = SectionVegetation(data)
+	h.decorations = newDecorationState(h.Vegetation.Mushrooms, h.Topology.SpiderWebs)
 	return &h
 }
 

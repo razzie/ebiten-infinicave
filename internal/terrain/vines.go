@@ -119,7 +119,7 @@ const (
 type Vine struct {
 	Points []VinePoint
 	Route  VineRoute
-	// Along retains original material distances when carving splits a stem.
+	// Along retains material distances in the original immutable bake recipe.
 	Along  []float64
 	Style  VineStyle
 	Leaves []VineLeaf

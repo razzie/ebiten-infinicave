@@ -67,7 +67,7 @@ func TestMushroomSpritesUseTheActualGuideRoot(t *testing.T) {
 	}
 }
 
-func TestMushroomCapBorderDamageRemovesWholeGroup(t *testing.T) {
+func TestMushroomCapBorderDamageRetainsSupportedGroup(t *testing.T) {
 	m := Mushroom{Anchor: geom.V{X: .4, Y: .5}, CapCenter: geom.V{X: .4, Y: .48}, CapWidth: .012, CapHeight: .006, Stem: []geom.V{{X: .4, Y: .5}, {X: .4, Y: .48}}}
 	body, border := MushroomCapOutline(m), MushroomCapFootprint(m)
 	point := geom.LerpVector(body[0], border[0], .8)
@@ -80,8 +80,8 @@ func TestMushroomCapBorderDamageRemovesWholeGroup(t *testing.T) {
 	}
 	source := []MushroomGroup{{Mushrooms: []Mushroom{m, {Anchor: geom.V{X: .45, Y: .5}}}}}
 	groups, changed := cut.mushrooms(source, 0)
-	if !changed || len(groups) != 0 {
-		t.Fatal("border damage left the group alive")
+	if changed || !reflect.DeepEqual(groups, source) {
+		t.Fatal("cap border damage removed a supported group")
 	}
 }
 

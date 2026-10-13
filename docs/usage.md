@@ -133,6 +133,8 @@ _ = result
 
 `CarveSegment(start, end, width)` makes a flat-ended cut; `Carve(Hole)` accepts the same descriptors as authored holes, using world coordinates. Inputs must be finite and sizes positive. Cuts update rendering, collision, and exact queries together, persist through section eviction, and are cleared by `Reset`.
 
+Foreground vines, their leaves, moss and rock surface details are carved by erasing their rendered textures. Background rock and background vines remain intact. Original geometry remains available for baking after resizing or reloading; vine paths returned by section generation are not split around holes. Mushroom groups disappear when any inset root support is cut, and webs disappear when any rock attachment support is cut. Cutting only a mushroom cap, stalk or free web strand retains the supported decoration. Grass and hanging growth are erased locally, with the whole tuft or instance removed when a support anchor is cut.
+
 `CarveResult.Changes` maps affected formation IDs to the remaining formations: no IDs means destroyed, one means reshaped, and multiple means split. Reports can be provisional when a cut reaches unloaded terrain. `SectionIDs` identifies collision sections to refresh. Previously returned geometry remains an independent snapshot.
 
 ## Generate a Section Without a Scene

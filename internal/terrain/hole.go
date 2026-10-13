@@ -71,5 +71,10 @@ func CutFromHole(h Hole) (RockCut, error) {
 	}
 	cut := RockCut{Poly: poly}
 	cut.Min, cut.Max = geom.PolygonBounds(poly)
+	if h.Shape == HoleCircle {
+		cut.anchorCenter = h.Center
+		inner := math.Max(0, h.Radius*math.Cos(math.Pi/96)-1e-10)
+		cut.anchorInner2, cut.anchorOuter2 = inner*inner, h.Radius*h.Radius
+	}
 	return cut, nil
 }

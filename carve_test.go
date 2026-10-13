@@ -408,19 +408,19 @@ func TestCarveRemovesMushroomWhenGuideRootIsCut(t *testing.T) {
 	}
 }
 
-func TestCarveRemovesMushroomGroupWhenOnlyCapIsCut(t *testing.T) {
+func TestCarveRetainsMushroomGroupWhenOnlyCapIsCut(t *testing.T) {
 	m := testGroundedMushroom(.5, .4)
 	scene := queryScene(terrain.SectionData{Foreground: RockGrid{terrainRect(.1, .4, .8, .3)}, Mushrooms: []MushroomGroup{{Mushrooms: []Mushroom{m}}}})
-	// Cap damage removes the complete attachment, including its stalk.
+	// Body-only cuts retain the complete supported decoration.
 	if _, err := scene.CarveCircle(m.CapCenter.Add(V{Y: -1}), .009); err != nil {
 		t.Fatal(err)
 	}
-	if len(scene.world.sections[0].geometry.Vegetation.Mushrooms) != 0 {
-		t.Fatal("cap damage retained a mushroom attachment")
+	if len(scene.world.sections[0].geometry.Vegetation.Mushrooms) != 1 {
+		t.Fatal("cap-only damage removed a supported mushroom attachment")
 	}
 }
 
-func TestCarveSplitsBothVineLayersBetweenSparseSamples(t *testing.T) {
+func TestCarveRetainsBothVineLayersForTextureMasking(t *testing.T) {
 	vine := Vine{Parent: -1, Points: []VinePoint{{P: V{X: .1, Y: .5}, Radius: .003}, {P: V{X: .9, Y: .5}, Radius: .007}}}
 	front := vine
 	front.Foreground = true
@@ -430,15 +430,8 @@ func TestCarveSplitsBothVineLayersBetweenSparseSamples(t *testing.T) {
 		t.Fatalf("vine-only cut should not report rock changes: %+v / %v", result, err)
 	}
 	plants := scene.world.sections[0].geometry.Vegetation
-	for _, vines := range [][]Vine{plants.Vines, plants.ForegroundVines} {
-		if len(vines) != 2 {
-			t.Fatalf("sparse vine did not split: %+v", vines)
-		}
-		left, right := vines[0].Points[len(vines[0].Points)-1], vines[1].Points[0]
-		if left.P.Sub(V{X: .4, Y: .5}).Len() > 1e-10 || right.P.Sub(V{X: .6, Y: .5}).Len() > 1e-10 ||
-			math.Abs(left.Radius-.0045) > 1e-10 || math.Abs(right.Radius-.0055) > 1e-10 {
-			t.Fatalf("cut endpoints/radii were not interpolated: %+v / %+v", left, right)
-		}
+	if !reflect.DeepEqual(plants.Vines, []Vine{vine}) || !reflect.DeepEqual(plants.ForegroundVines, []Vine{front}) {
+		t.Fatal("texture-only carve altered a vine recipe")
 	}
 	if len(vine.Points) != 2 || vine.Points[1].P != (V{X: .9, Y: .5}) {
 		t.Fatal("carving modified the original vine")

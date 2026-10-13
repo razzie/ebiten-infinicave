@@ -60,16 +60,25 @@ func TestGrassPatchFollowsSurfaceAndBladesGrowUp(t *testing.T) {
 				t.Fatal("blades rotate with the whole slope instead of growing up")
 			}
 		}
-		// A cut in the blade tip must remove both records, even though it does
-		// not strike the supporting anchor or the clipped ground polygon.
-		footprint := patch.Footprint[len(patch.Footprint)-1]
-		p := geom.PolygonCenter(footprint)
-		cut, err := terrain.CutFromHole(terrain.Hole{Shape: terrain.HoleCircle, Center: p, Radius: .0005})
+		// Body-only damage is handled by texture erasure, with no deletion.
+		var tip geom.V
+		bestY := math.Inf(1)
+		for _, v := range blades.Mesh.Vertices {
+			p := geom.V{X: float64(v.DstX) / RasterPixelsPerUnit, Y: float64(v.DstY)/RasterPixelsPerUnit + terrain.GenerationMinY}
+			if y := terrain.WorldPoint(mode, p).Y; y < bestY {
+				tip, bestY = p, y
+			}
+		}
+		cut, err := terrain.CutFromHole(terrain.Hole{Shape: terrain.HoleCircle, Center: tip, Radius: .0003})
 		if err != nil {
 			t.Fatal(err)
 		}
+		if patch.Hit(cut, 0) || blades.Hit(cut, 0) {
+			t.Fatal("blade-tip damage removed a supported tuft")
+		}
+		cut, _ = terrain.CutFromHole(terrain.Hole{Shape: terrain.HoleCircle, Center: patch.Anchors[0], Radius: .0003})
 		if !patch.Hit(cut, 0) || !blades.Hit(cut, 0) {
-			t.Fatal("grass damage separated the blades from their patch")
+			t.Fatal("support damage separated grass blades from their patch")
 		}
 	}
 }

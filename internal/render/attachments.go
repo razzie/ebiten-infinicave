@@ -3,6 +3,8 @@ package render
 import (
 	"image"
 	"math"
+	"slices"
+	"unsafe"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/razzie/ebiten-infinicave/internal/geom"
@@ -97,7 +99,11 @@ func prepareGrowthAttachments(grid terrain.RockGrid, boundary []terrain.RockEdge
 		}
 		a := newSpriteAttachment(HangingAttachment, HangingAtlas, int(random(1)*64), anchor, 0, .75+.35*random(2), terrain.RockOrientation(c), 1)
 		a.Underlay = true
-		a.Anchors = []geom.V{support}
+		if p, ok := terrain.InsetRockAnchor(c.Polygon, support, outward.Mul(-1)); ok {
+			a.Anchors = []geom.V{p}
+		} else {
+			continue
+		}
 		if (owned && !inTerrainBand(a.Min, a.Max)) || !clearance.fits(a) {
 			continue
 		}
@@ -118,6 +124,7 @@ func prepareGrowthAttachments(grid terrain.RockGrid, boundary []terrain.RockEdge
 		if owned && !inTerrainBand(a.Min, a.Max) {
 			continue
 		}
+		a.Anchors = nil
 		poly := a.Footprint[0]
 		a.Mesh.Vertices = nil
 		a.Mesh.Indices = nil
@@ -171,14 +178,9 @@ func prepareMushroomAttachments(groups []terrain.MushroomGroup, topology *terrai
 			}
 			m := PrepareMushrooms([]terrain.MushroomGroup{{Mushrooms: owned}}, topology)
 			b := triangleMeshesBounds([]TriangleMesh{m})
-			a := Attachment{Kind: MushroomAttachment, Mesh: m, Min: geom.V{X: float64(b.Min.X) / RasterPixelsPerUnit, Y: float64(b.Min.Y)/RasterPixelsPerUnit + terrain.GenerationMinY}, Max: geom.V{X: float64(b.Max.X) / RasterPixelsPerUnit, Y: float64(b.Max.Y)/RasterPixelsPerUnit + terrain.GenerationMinY}}
+			a := Attachment{Kind: MushroomAttachment, Anchor: group.Mushrooms[0].Anchor, Mesh: m, Min: geom.V{X: float64(b.Min.X) / RasterPixelsPerUnit, Y: float64(b.Min.Y)/RasterPixelsPerUnit + terrain.GenerationMinY}, Max: geom.V{X: float64(b.Max.X) / RasterPixelsPerUnit, Y: float64(b.Max.Y)/RasterPixelsPerUnit + terrain.GenerationMinY}}
 			for _, m := range owned {
-				a.Anchors = append(a.Anchors, m.Anchor)
-				a.Footprint = append(a.Footprint, terrain.MushroomCapFootprint(m))
-				for j := 1; j < len(m.Stem); j++ {
-					n := m.Stem[j].Sub(m.Stem[j-1]).Norm().Perp().Mul(m.StemWidth() / 2)
-					a.Footprint = append(a.Footprint, []geom.V{m.Stem[j-1].Add(n), m.Stem[j-1].Sub(n), m.Stem[j].Sub(n), m.Stem[j].Add(n)})
-				}
+				a.Anchors = append(a.Anchors, terrain.MushroomSupport(m))
 			}
 			out = append(out, a)
 			continue
@@ -186,7 +188,7 @@ func prepareMushroomAttachments(groups []terrain.MushroomGroup, topology *terrai
 		if anchor.Y < 0 || anchor.Y >= terrain.SectionHeight {
 			continue
 		}
-		a := Attachment{Kind: MushroomAttachment, Mesh: TriangleMesh{Texture: MushroomStemAtlas, premultiplied: true}, Extra: TriangleMesh{Texture: MushroomCapAtlas, premultiplied: true}, Min: geom.V{X: math.Inf(1), Y: math.Inf(1)}, Max: geom.V{X: math.Inf(-1), Y: math.Inf(-1)}}
+		a := Attachment{Kind: MushroomAttachment, Anchor: group.Mushrooms[0].Anchor, Mesh: TriangleMesh{Texture: MushroomStemAtlas, premultiplied: true}, Extra: TriangleMesh{Texture: MushroomCapAtlas, premultiplied: true}, Min: geom.V{X: math.Inf(1), Y: math.Inf(1)}, Max: geom.V{X: math.Inf(-1), Y: math.Inf(-1)}}
 		for _, plant := range group.Mushrooms {
 			sample, root, rotation, scale, ok := terrain.MushroomSpritePlacement(plant)
 			if !ok {
@@ -207,12 +209,7 @@ func prepareMushroomAttachments(groups []terrain.MushroomGroup, topology *terrai
 			a.Max = geom.V{X: max(a.Max.X, hi.X), Y: max(a.Max.Y, hi.Y)}
 		}
 		for _, m := range group.Mushrooms {
-			a.Anchors = append(a.Anchors, m.Anchor)
-			a.Footprint = append(a.Footprint, terrain.MushroomCapFootprint(m))
-			for j := 1; j < len(m.Stem); j++ {
-				d := m.Stem[j].Sub(m.Stem[j-1]).Norm().Perp().Mul(m.StemWidth() / 2)
-				a.Footprint = append(a.Footprint, []geom.V{m.Stem[j-1].Add(d), m.Stem[j-1].Sub(d), m.Stem[j].Sub(d), m.Stem[j].Add(d)})
-			}
+			a.Anchors = append(a.Anchors, terrain.MushroomSupport(m))
 		}
 		out = append(out, a)
 	}
@@ -228,36 +225,14 @@ func appendAttachmentMesh(dst *TriangleMesh, source TriangleMesh) {
 	}
 }
 
+// Hit only checks support points. Surface coverage is erased from textures.
 func (a Attachment) Hit(cut terrain.RockCut, top float64) bool {
-	if a.Dead || a.Kind == SurfaceMoss || a.Max.X <= cut.Min.X || a.Min.X >= cut.Max.X || a.Max.Y+top <= cut.Min.Y || a.Min.Y+top >= cut.Max.Y {
+	if a.Dead || a.Kind == SurfaceMoss {
 		return false
 	}
 	for _, p := range a.Anchors {
-		if geom.InsidePolygon(p.Add(geom.V{Y: top}), cut.Poly) {
-			return true
-		}
-	}
-	if a.Kind == HangingAttachment {
-		// Test sample triangles rather than transparent sprite margins.
-		m := AtlasRecipes(a.Mesh.Texture)[a.Cell]
-		for i := 0; i < len(m.Indices); i += 3 {
-			var tri [3]geom.V
-			for j := range tri {
-				v := m.Vertices[m.Indices[i+j]]
-				p := geom.V{X: float64(v.DstX) / RasterPixelsPerUnit, Y: float64(v.DstY)/RasterPixelsPerUnit + terrain.GenerationMinY}
-				tri[j] = a.Anchor.Add(terrain.InternalPoint(a.Orientation, geom.Rotate(p, a.Rotation).Mul(a.Scale))).Add(geom.V{Y: top})
-			}
-			if geom.PolygonArea(tri[:]) < 0 {
-				tri[0], tri[2] = tri[2], tri[0]
-			}
-			if geom.ConvexOverlap(tri[:], cut.Poly) {
-				return true
-			}
-		}
-		return false
-	}
-	for _, poly := range a.Footprint {
-		if cut.Intersects(poly, top) {
+		p.Y += top
+		if cut.ContainsAnchor(p) {
 			return true
 		}
 	}
@@ -265,59 +240,195 @@ func (a Attachment) Hit(cut terrain.RockCut, top float64) bool {
 }
 
 func FilterAttachments(source []Attachment, cuts []terrain.RockCut, top float64) []Attachment {
-	var out []Attachment
-	for i, a := range source {
-		for _, cut := range cuts {
-			if a.Hit(cut, top) {
-				if out == nil {
-					out = append([]Attachment(nil), source...)
-				}
-				out[i].Dead = true
-				break
-			}
-		}
-	}
-	if out == nil {
-		return source
-	}
+	out, _ := FilterAttachmentsIndexedWithChanges(source, nil, cuts, top)
 	return out
 }
+
 func AttachmentsChanged(a, b []Attachment) bool {
 	return len(a) != len(b) || (len(a) > 0 && &a[0] != &b[0])
 }
 
-func AttachmentIndex(source []Attachment) *geom.BoundsIndex {
-	b := make([]geom.Bounds, len(source))
-	for i, a := range source {
-		b[i] = geom.Bounds{Min: a.Min, Max: a.Max}
-	}
-	return geom.NewBoundsIndex(b)
+// AttachmentSupportIndex indexes individual support points, never sprite
+// bounds. Paired records sharing anchors (grass bases/blades and rock teeth)
+// share one hit test. The immutable index survives deletions and raster scaling.
+type AttachmentSupportIndex struct {
+	index  *geom.BoundsIndex
+	visual *geom.BoundsIndex
+	ids    map[[2]int64][]int
+	points []attachmentSupport
 }
 
-func FilterAttachmentsIndexed(source []Attachment, index *geom.BoundsIndex, cuts []terrain.RockCut, top float64) []Attachment {
-	if index == nil {
-		return FilterAttachments(source, cuts, top)
+type attachmentSupport struct {
+	point  geom.V
+	owners []int
+}
+
+func (t *AttachmentSupportIndex) RetainedBytes() int {
+	if t == nil {
+		return 0
 	}
-	var out []Attachment
-	for _, cut := range cuts {
-		index.Query(geom.Bounds{Min: cut.Min.Sub(geom.V{Y: top}), Max: cut.Max.Sub(geom.V{Y: top})}, func(i int) bool {
-			a := source[i]
-			if out != nil {
-				a = out[i]
+	size := int(unsafe.Sizeof(*t)) + t.index.RetainedBytes() + t.visual.RetainedBytes() + cap(t.points)*int(unsafe.Sizeof(attachmentSupport{}))
+	var previous *int
+	for _, p := range t.points {
+		if len(p.owners) > 0 && &p.owners[0] != previous {
+			size += cap(p.owners) * int(unsafe.Sizeof(int(0)))
+			previous = &p.owners[0]
+		}
+	}
+	for _, owners := range t.ids {
+		size += int(unsafe.Sizeof([2]int64{})) + int(unsafe.Sizeof(owners)) + cap(owners)*int(unsafe.Sizeof(int(0)))
+	}
+	return size
+}
+
+func AttachmentIndex(source []Attachment) *AttachmentSupportIndex {
+	t := &AttachmentSupportIndex{}
+	visual := make([]geom.Bounds, len(source))
+	groups := make(map[*geom.V][]int)
+	var order []*geom.V
+	for i, a := range source {
+		if a.Kind == MushroomAttachment || a.Kind == WebAttachment {
+			if t.ids == nil {
+				t.ids = make(map[[2]int64][]int)
 			}
-			if a.Hit(cut, top) {
-				if out == nil {
-					out = append([]Attachment(nil), source...)
+			t.ids[a.ID] = append(t.ids[a.ID], i)
+		}
+		visual[i] = geom.Bounds{Min: a.Min, Max: a.Max}
+		if a.Kind == SurfaceMoss || len(a.Anchors) == 0 {
+			continue
+		}
+		key := &a.Anchors[0]
+		if groups[key] == nil {
+			order = append(order, key)
+		}
+		groups[key] = append(groups[key], i)
+	}
+	var bounds []geom.Bounds
+	for _, key := range order {
+		owners := groups[key]
+		for _, p := range source[owners[0]].Anchors {
+			t.points = append(t.points, attachmentSupport{p, owners})
+			bounds = append(bounds, geom.Bounds{Min: p, Max: p})
+		}
+	}
+	t.index = geom.NewBoundsIndex(bounds)
+	t.visual = geom.NewBoundsIndex(visual)
+	return t
+}
+
+// AttachmentCandidates selects live recipes for a dirty region in section
+// coordinates, preserving original blend order. It also accepts a prefix of
+// the recipes while an upload is in progress.
+func AttachmentCandidates(source []Attachment, index *AttachmentSupportIndex, bounds geom.Bounds) []int {
+	var candidates []int
+	visit := func(i int) bool {
+		if i < len(source) {
+			a := source[i]
+			if !a.Dead && (geom.Bounds{Min: a.Min, Max: a.Max}).Overlaps(bounds) {
+				candidates = append(candidates, i)
+			}
+		}
+		return true
+	}
+	if index == nil {
+		for i := range source {
+			visit(i)
+		}
+	} else {
+		index.visual.Query(bounds, visit)
+		slices.Sort(candidates)
+	}
+	return candidates
+}
+
+func FilterAttachmentsIndexed(source []Attachment, index *AttachmentSupportIndex, cuts []terrain.RockCut, top float64) []Attachment {
+	out, _ := FilterAttachmentsIndexedWithChanges(source, index, cuts, top)
+	return out
+}
+
+// FilterAttachmentsByID consumes the terrain support query's result. Runtime
+// mushrooms and webs share that query with CPU state instead of redetecting hits.
+func FilterAttachmentsByID(source []Attachment, index *AttachmentSupportIndex, ids [][2]int64) ([]Attachment, []int) {
+	var out []Attachment
+	var removed []int
+	kill := func(i int) {
+		if source[i].Dead || (out != nil && out[i].Dead) {
+			return
+		}
+		if out == nil {
+			out = append([]Attachment(nil), source...)
+		}
+		out[i].Dead = true
+		removed = append(removed, i)
+	}
+	for _, id := range ids {
+		if index != nil {
+			for _, i := range index.ids[id] {
+				kill(i)
+			}
+		} else {
+			for i, a := range source {
+				if a.ID == id {
+					kill(i)
 				}
-				out[i].Dead = true
+			}
+		}
+	}
+	if out == nil {
+		return source, nil
+	}
+	return out, removed
+}
+
+// Returns newly dead record indices along with the immutable replacement.
+// Callers use the same result for dirty tiles and upload liveness updates.
+func FilterAttachmentsIndexedWithChanges(source []Attachment, index *AttachmentSupportIndex, cuts []terrain.RockCut, top float64) ([]Attachment, []int) {
+	var out []Attachment
+	var removed []int
+	current := func(i int) Attachment {
+		if out != nil {
+			return out[i]
+		}
+		return source[i]
+	}
+	kill := func(i int) {
+		if current(i).Dead {
+			return
+		}
+		if out == nil {
+			out = append([]Attachment(nil), source...)
+		}
+		out[i].Dead = true
+		removed = append(removed, i)
+	}
+	for _, cut := range cuts {
+		if index == nil {
+			for i := range source {
+				if current(i).Hit(cut, top) {
+					kill(i)
+				}
+			}
+			continue
+		}
+		index.index.Query(geom.Bounds{Min: cut.Min.Sub(geom.V{Y: top}), Max: cut.Max.Sub(geom.V{Y: top})}, func(i int) bool {
+			p := index.points[i]
+			if current(p.owners[0]).Dead {
+				return true
+			}
+			point := p.point
+			point.Y += top
+			if cut.ContainsAnchor(point) {
+				for _, owner := range p.owners {
+					kill(owner)
+				}
 			}
 			return true
 		})
 	}
 	if out == nil {
-		return source
+		return source, nil
 	}
-	return out
+	return out, removed
 }
 
 func HasLiveAttachments(source []Attachment, grass bool) bool {
@@ -381,28 +492,14 @@ func prepareWebAttachments(webs []terrain.SpiderWeb, owned bool) []Attachment {
 		if len(m.Indices) == 0 {
 			continue
 		}
-		var points []geom.V
-		var footprint [][]geom.V
+		points := []geom.V{w.Corner, w.A, w.B}
 		if w.Network != nil {
 			points = w.Network.Nodes
-			for _, t := range w.Network.Threads {
-				a, b := points[t.A], points[t.B]
-				n := b.Sub(a).Norm().Perp().Mul(.0006)
-				footprint = append(footprint, []geom.V{a.Add(n), a.Sub(n), b.Sub(n), b.Add(n)})
-			}
-		}
-		if len(points) == 0 {
-			points = []geom.V{w.Corner, w.A, w.B}
-			footprint = [][]geom.V{points}
 		}
 		lo, hi := geom.PolygonBounds(points)
 		lo = lo.Sub(geom.V{X: .001, Y: .001})
 		hi = hi.Add(geom.V{X: .001, Y: .001})
-		anchors := points
-		if w.Network != nil {
-			anchors = w.Network.Nodes[:w.Network.Anchors]
-		}
-		out = append(out, Attachment{Kind: WebAttachment, ID: terrain.CollisionVertexKey(w.Corner), Mesh: m, Min: lo, Max: hi, Anchors: anchors, Footprint: footprint})
+		out = append(out, Attachment{Kind: WebAttachment, Anchor: w.Corner, ID: terrain.CollisionVertexKey(w.Corner), Mesh: m, Min: lo, Max: hi, Anchors: terrain.SpiderWebSupports(w)})
 	}
 	return out
 }
@@ -458,7 +555,7 @@ func prepareWallAttachments(grid terrain.RockGrid, edges []terrain.RockEdge, vie
 			reversePoints(poly)
 		}
 		lo, hi := geom.PolygonBounds(poly)
-		out = append(out, Attachment{Kind: EdgeAttachment, Underlay: true, Mesh: m, Min: lo, Max: hi, Anchors: []geom.V{e.A, e.B}, Footprint: [][]geom.V{poly}})
+		out = append(out, Attachment{Kind: EdgeAttachment, Underlay: true, Mesh: m, Min: lo, Max: hi, Footprint: [][]geom.V{poly}})
 	}
 	return out
 }
@@ -466,7 +563,9 @@ func prepareWallAttachments(grid terrain.RockGrid, edges []terrain.RockEdge, vie
 func stampAttachmentIDs(source []Attachment, top float64) {
 	for i := range source {
 		p := geom.LerpVector(source[i].Min, source[i].Max, .5)
-		if len(source[i].Anchors) > 0 {
+		if source[i].Kind == MushroomAttachment || source[i].Kind == WebAttachment {
+			p = source[i].Anchor
+		} else if len(source[i].Anchors) > 0 {
 			p = source[i].Anchors[0]
 		}
 		source[i].ID = terrain.CollisionVertexKey(p.Add(geom.V{Y: top}))

@@ -11,8 +11,29 @@ func FiniteCarveValue(x float64) bool { return !math.IsNaN(x) && !math.IsInf(x, 
 func finiteCarvePoint(p geom.V) bool { return FiniteCarveValue(p.X) && FiniteCarveValue(p.Y) }
 
 type RockCut struct {
-	Poly     []geom.V
-	Min, Max geom.V
+	Poly                       []geom.V
+	Min, Max                   geom.V
+	anchorCenter               geom.V
+	anchorInner2, anchorOuter2 float64
+}
+
+// ContainsAnchor uses the exact cut polygon, excluding boundary-only contact.
+// Generated circles accept/reject almost every point with a distance test;
+// only the narrow band between the incircle and circumcircle needs edge tests.
+func (cut RockCut) ContainsAnchor(p geom.V) bool {
+	if p.X <= cut.Min.X || p.X >= cut.Max.X || p.Y <= cut.Min.Y || p.Y >= cut.Max.Y {
+		return false
+	}
+	if cut.anchorOuter2 > 0 {
+		d := p.Sub(cut.anchorCenter).Len2()
+		if d < cut.anchorInner2 {
+			return true
+		}
+		if d >= cut.anchorOuter2 {
+			return false
+		}
+	}
+	return geom.InsidePolygon(p, cut.Poly)
 }
 
 // Check section coverage with intervals, avoiding a walk through potentially
@@ -170,7 +191,6 @@ func (cut RockCut) Geometry(id int64, old *Geometry, tolerance float64) (*Geomet
 	topology.Cuts = updated.Cuts
 	topology.Top = old.Top
 	// Base material remains immutable, including its original lighting.
-	topology.SpiderWebs = cut.SpiderWebs(old.Topology.SpiderWebs, old.Top)
 	updated.Topology = &topology
 	updated.Collision = updated.shapeCollision(id, tolerance)
 	return &updated, parents, true

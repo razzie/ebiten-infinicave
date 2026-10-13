@@ -8,7 +8,7 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
-func TestCarveRemapsBranchesAndPreservesFamilyMaterials(t *testing.T) {
+func TestCarveRetainsBranchesAndFamilyMaterials(t *testing.T) {
 	trunk := terrain.Vine{Parent: -1, Foreground: true}
 	for _, x := range []float64{.1, .3, .5, .7, .9} {
 		trunk.Points = append(trunk.Points, terrain.VinePoint{P: geom.V{X: x, Y: .5}, Radius: .004})
@@ -21,35 +21,21 @@ func TestCarveRemapsBranchesAndPreservesFamilyMaterials(t *testing.T) {
 		})
 	}
 	cut, _ := terrain.CutFromHole((terrain.Hole{Shape: terrain.HoleCircle, Center: geom.V{X: .5, Y: -.5}, Radius: .1}))
-	vines, changed := cut.Vines(source, -1)
-	if !changed || len(vines) != 5 {
-		t.Fatalf("branching cut: %d survivors, changed=%v", len(vines), changed)
+	geometry := &terrain.Geometry{Top: -1, Topology: &terrain.RockTopology{}, Vegetation: terrain.Vegetation{ForegroundVines: source}}
+	updated, changed := cut.Plants(geometry)
+	if changed || updated != geometry {
+		t.Fatal("texture-only carve rebuilt CPU branches")
 	}
-	for i, vine := range vines {
-		if terrain.VineStyleFamily(vines, i) != 0 || vinePalette(vines, i) != vinePalette(source, 0) || !vine.Foreground {
-			t.Fatal("split changed a family material")
+	for i, vine := range updated.Vegetation.ForegroundVines {
+		if terrain.VineStyleFamily(source, i) != 0 || vinePalette(source, i) != vinePalette(source, 0) || !vine.Foreground {
+			t.Fatal("carving changed family material")
 		}
-		if vine.Parent >= 0 {
-			if vine.Parent >= i || vine.Joint >= len(vines[vine.Parent].Points) || vine.Points[0].P != vines[vine.Parent].Points[vine.Joint].P {
-				t.Fatal("surviving branch has an invalid attachment")
-			}
+		if vine.Parent >= 0 && (vine.Parent >= i || vine.Joint >= len(source[vine.Parent].Points) || vine.Points[0].P != source[vine.Parent].Points[vine.Joint].P) {
+			t.Fatal("carving changed a branch attachment")
 		}
 	}
-	if vines[2].Parent != 0 || vines[3].Parent != -1 || vines[4].Parent != 1 {
-		t.Fatalf("branches did not attach to the correct surviving trunk: %+v", vines)
-	}
-	for _, mesh := range PrepareForegroundVines(vines) {
+	for _, mesh := range PrepareForegroundVines(updated.Vegetation.ForegroundVines) {
 		checkMesh(t, mesh)
-	}
-	// Removing the first family must not recolor the next family by index.
-	source = []terrain.Vine{
-		{Parent: -1, Points: []terrain.VinePoint{{P: geom.V{X: .48, Y: .5}, Radius: .002}, {P: geom.V{X: .52, Y: .5}, Radius: .002}}},
-		{Parent: -1, Points: []terrain.VinePoint{{P: geom.V{X: .1, Y: .7}, Radius: .002}, {P: geom.V{X: .9, Y: .7}, Radius: .002}}},
-	}
-	palette := vinePalette(source, 1)
-	vines, _ = cut.Vines(source, -1)
-	if len(vines) != 1 || vinePalette(vines, 0) != palette || terrain.VineStyleFamily(vines, 0) != 1 {
-		t.Fatal("removing an earlier family recolored the next family")
 	}
 }
 
@@ -174,15 +160,7 @@ func TestVineTransitionAndForkUseLocalMaterial(t *testing.T) {
 			t.Fatal("stem mesh did not evaluate material along its length")
 		}
 	}
-	cut, _ := terrain.CutFromHole(terrain.Hole{Shape: terrain.HoleCircle, Center: geom.V{X: .2, Y: -.5}, Radius: .08})
-	fragments, _ := cut.Vines(vines, -1)
-	for i, vine := range fragments {
-		for j, p := range vine.Points {
-			if got, want := vinePaletteAt(fragments, i, terrain.VineDistance(vine, j)), vinePaletteAt(vines, 0, p.P.Y-.1); vine.Parent < 0 && p.P.X == .2 && got != want {
-				t.Fatal("carving changed a surviving stem's color")
-			}
-		}
-	}
+
 }
 
 func TestLeavesShareStemMeshAndForegroundShadows(t *testing.T) {

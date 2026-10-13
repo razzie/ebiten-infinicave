@@ -175,41 +175,15 @@ func TestCarvingPreservesVineDistancesAndLeafAttachments(t *testing.T) {
 	}
 	original := []Vine{vine}
 	cut, _ := CutFromHole(Hole{Shape: HoleCircle, Center: geom.V{X: .5, Y: -.5}, Radius: .08})
-	vines, hit := cut.Vines(original, -1)
-	if !hit || len(vines) != 2 {
-		t.Fatal("vine did not split")
+	source := Vegetation{Vines: original}
+	plants, changed := cut.vegetation(source, -1)
+	if changed || !reflect.DeepEqual(plants, source) || &plants.Vines[0] != &original[0] {
+		t.Fatal("texture carving changed paths, material distances or leaf attachments")
 	}
-	for _, v := range vines {
-		if v.Style != vine.Style || len(v.Leaves) != 1 {
-			t.Fatal("cut changed style or kept a detached leaf")
-		}
-		for i, p := range v.Points {
-			if math.Abs(v.Along[i]-(p.P.Y-.1)) > 1e-12 {
-				t.Fatal("material distance restarted after cutting")
-			}
-		}
-	}
-	if vines[0].Leaves[0] != vine.Leaves[0] || vines[1].Leaves[0] != vine.Leaves[2] {
-		t.Fatal("surviving leaves moved")
-	}
-	// A cut touching only a leaf still needs a render mask.
 	leafCut, _ := CutFromHole(Hole{Shape: HoleCircle, Center: geom.V{X: .536, Y: -.8}, Radius: .004})
-	plants, changed := leafCut.vegetation(Vegetation{Vines: original}, -1)
-	if !changed || len(plants.Cuts) != 1 || len(plants.Vines) != 1 || len(plants.Vines[0].Leaves) != 3 {
-		t.Fatal("leaf-only damage failed to retain the render mask")
-	}
-	if len(original[0].Leaves) != 3 || original[0].Along[0] != 0 {
-		t.Fatal("cut mutated the original snapshot")
-	}
-	// Repeated splits keep absolute coordinates and the remaining attachment.
-	second, _ := CutFromHole(Hole{Shape: HoleCircle, Center: geom.V{X: .5, Y: -.7}, Radius: .03})
-	vines, _ = second.Vines(vines, -1)
-	for _, v := range vines {
-		for i, p := range v.Points {
-			if math.Abs(v.Along[i]-(p.P.Y-.1)) > 1e-12 {
-				t.Fatal("repeated cut moved the transition")
-			}
-		}
+	plants, changed = leafCut.vegetation(plants, -1)
+	if changed || !reflect.DeepEqual(plants, source) {
+		t.Fatal("leaf-only carving changed CPU vegetation")
 	}
 }
 

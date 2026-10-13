@@ -1,7 +1,9 @@
 package infinicave
 
 import (
+	"bytes"
 	"context"
+	"image"
 	"image/color"
 	"os"
 	"os/exec"
@@ -71,6 +73,38 @@ func (g *carvePixelGame) Draw(*ebiten.Image) {
 		}
 		return color.RGBAModel.Convert(img.At(int(p.X*float64(pixels)), int(p.Y*float64(pixels)))).(color.RGBA).A
 	}
+	checkVines := func(s *worldSection, pixels int) {
+		g.t.Helper()
+		for _, layer := range []struct {
+			img                 *ebiten.Image
+			bounds              image.Rectangle
+			cutPoint, keptPoint V
+			carved              bool
+		}{
+			{s.vines, s.vinesBounds, V{X: .45, Y: .6}, V{X: .75, Y: .6}, false},
+			{s.foregroundVines, s.foregroundVinesBounds, V{X: .45, Y: .6125}, V{X: .72, Y: .68}, true},
+		} {
+			if layer.img == nil {
+				g.t.Fatal("vine layer disappeared")
+			}
+			read := func(p V) uint8 {
+				x := int(p.X*float64(pixels)) - layer.bounds.Min.X
+				y := int((p.Y-terrain.GenerationMinY)*float64(pixels)) - layer.bounds.Min.Y
+				return color.RGBAModel.Convert(layer.img.At(x, y)).(color.RGBA).A
+			}
+			if (read(layer.cutPoint) == 0) != layer.carved || read(layer.keptPoint) == 0 {
+				g.t.Fatalf("vine layer coverage at width %d disagrees with carved=%v", pixels, layer.carved)
+			}
+		}
+		if !reflect.DeepEqual(s.geometry.Vegetation.Vines, data.Vines) || !reflect.DeepEqual(s.geometry.Vegetation.ForegroundVines, data.ForegroundVines) {
+			g.t.Fatal("texture masking changed CPU vine geometry")
+		}
+	}
+	readPixels := func(img *ebiten.Image) []byte {
+		pixels := make([]byte, 4*img.Bounds().Dx()*img.Bounds().Dy())
+		img.ReadPixels(pixels)
+		return pixels
+	}
 	for stage := uploadRockUnderlay; stage <= uploadPlantsPublish; stage++ {
 		scene.world.close()
 		scene.world = &world{sections: make(map[int64]*worldSection), done: make(chan struct{}), pixels: 256, collision: map[int64]*terrain.Geometry{0: terrain.PrepareTerrainGeometry(data, 0)}}
@@ -91,6 +125,13 @@ func (g *carvePixelGame) Draw(*ebiten.Image) {
 		}
 		if s.geometry.Collision.Contains(V{X: .45, Y: -.35}) {
 			g.t.Fatalf("stage %d: collision refilled the visible cut", stage)
+		}
+		checkVines(s, 256)
+		backgroundVines := readPixels(s.vines)
+		for _, a := range s.mesh.Foreground.Growth {
+			if a.Kind == render.SurfaceMoss && a.Dead {
+				g.t.Fatal("texture erasure deleted the moss recipe")
+			}
 		}
 		// Atlas cells must contain visible grass/moss, not transparent quads.
 		if s.grass == nil {
@@ -123,6 +164,19 @@ func (g *carvePixelGame) Draw(*ebiten.Image) {
 		if alpha(s.foreground, V{X: .45, Y: .65}, 256) != 0 || !reflect.DeepEqual(before, s.foreground.At(217, 192)) {
 			g.t.Fatalf("stage %d: overlapping tile replay changed untouched rock", stage)
 		}
+		// Restoring tiles must not create opaque seams inside an existing cut.
+		for y := 0; y < 256; y++ {
+			for x := 0; x < 256; x++ {
+				p := V{X: (float64(x) + .5) / 256, Y: (float64(y) + .5) / 256}
+				if p.Sub(V{X: .45, Y: .65}).Len() < .05 && color.RGBAModel.Convert(s.foreground.At(x, y)).(color.RGBA).A != 0 {
+					g.t.Fatalf("opaque cut interior at (%d,%d) after tile replay", x, y)
+				}
+			}
+		}
+		checkVines(s, 256)
+		if !bytes.Equal(backgroundVines, readPixels(s.vines)) {
+			g.t.Fatal("overlapping foreground cuts changed background vine pixels")
+		}
 		if stage == uploadPlantsPublish {
 			// Removing one attachment preserves a nearby overlapping survivor.
 			if len(s.mesh.Plants) < 2 {
@@ -140,8 +194,14 @@ func (g *carvePixelGame) Draw(*ebiten.Image) {
 				if _, err := scene.CarveCircle(p.Add(V{Y: -1}), .004); err != nil {
 					g.t.Fatal(err)
 				}
+				if s.mesh.Webs[0].Dead {
+					g.t.Fatal("free-node damage removed a supported web")
+				}
+				if _, err := scene.CarveCircle(s.mesh.Webs[0].Anchors[0].Add(V{Y: -1}), .002); err != nil {
+					g.t.Fatal(err)
+				}
 				if !s.mesh.Webs[0].Dead {
-					g.t.Fatal("cut web was regenerated instead of removed")
+					g.t.Fatal("support damage retained a web")
 				}
 			}
 			scene.SetRenderWidth(384)
@@ -150,6 +210,8 @@ func (g *carvePixelGame) Draw(*ebiten.Image) {
 			if alpha(s.foreground, V{X: .45, Y: .65}, 384) != 0 || alpha(s.foreground, V{X: .85, Y: .75}, 384) == 0 {
 				g.t.Fatal("resize refilled a cut or lost rock")
 			}
+			checkVines(s, 384)
+			backgroundVines = readPixels(s.vines)
 			fresh := render.PrepareSection(data, ViewShaded, render.RockGrowthOptions{Moss: 1, Hanging: 1, Grass: 1})
 			fresh.Geometry = terrain.PrepareTerrainGeometry(data, 0)
 			render.FinishSectionMesh(&fresh)
@@ -161,6 +223,10 @@ func (g *carvePixelGame) Draw(*ebiten.Image) {
 			reloaded := scene.world.sections[0]
 			if alpha(reloaded.foreground, V{X: .45, Y: .65}, 384) != 0 || !reloaded.mesh.Plants[0].Dead || !reloaded.mesh.Webs[0].Dead {
 				g.t.Fatal("reload restored a cut or damaged attachment")
+			}
+			checkVines(reloaded, 384)
+			if !bytes.Equal(backgroundVines, readPixels(reloaded.vines)) {
+				g.t.Fatal("stored foreground cuts changed background vine pixels on reload")
 			}
 		}
 	}

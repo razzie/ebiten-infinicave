@@ -24,7 +24,7 @@ type TriangleMesh struct {
 }
 
 type GridMesh struct {
-	GrowthIndex *geom.BoundsIndex
+	GrowthIndex *AttachmentSupportIndex
 	Growth      []Attachment
 	Faces       TriangleMesh
 	Outlines    []TriangleMesh
@@ -42,7 +42,7 @@ const (
 )
 
 type SectionMesh struct {
-	PlantIndex, WebIndex                                *geom.BoundsIndex
+	PlantIndex, WebIndex                                *AttachmentSupportIndex
 	BakedInstances                                      bool
 	Webs                                                []Attachment
 	VisualCuts                                          []terrain.RockCut
@@ -491,10 +491,10 @@ func sectionBakeVegetation(data terrain.SectionData) terrain.SectionData {
 	return data
 }
 func applyAuthoredVisualCuts(mesh *SectionMesh, data terrain.SectionData) {
-	mesh.PlantIndex, mesh.WebIndex = AttachmentIndex(mesh.Plants), AttachmentIndex(mesh.Webs)
 	for _, list := range [][]Attachment{mesh.Plants, mesh.Webs} {
 		stampAttachmentIDs(list, terrain.SectionTop(data.ID))
 	}
+	mesh.PlantIndex, mesh.WebIndex = AttachmentIndex(mesh.Plants), AttachmentIndex(mesh.Webs)
 	if data.ForegroundTopology == nil {
 		return
 	}

@@ -148,6 +148,5 @@ func (b *Builder) Decorate(ctx context.Context, s *SectionBuild) bool {
 	s.data.ForegroundBake = &baked
 	s.data.ForegroundTopology = topology
 	s.data.Vines, s.data.ForegroundVines, s.data.Mushrooms = plants.Vines, plants.ForegroundVines, plants.Mushrooms
-	s.data.vegetationCuts = plants.Cuts
 	return true
 }

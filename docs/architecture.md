@@ -51,16 +51,27 @@ Mesh preparation uses CPU data, even though vertices use Ebitengine types. GPU
 images and shaders are created, uploaded, drawn, resized, and released on the game
 goroutine. Upload budgets and cache publication live in `world_stream.go`.
 Carving replaces connected outer/inner loops independently of material facets.
-Finished rock/vine images receive cut masks; removed attachments and overlapping
-edits replay only dirty image tiles. Compact commands are selected by section
+Finished foreground rock/vine images receive cut masks; background rock and
+background vines remain intact. Removed attachments and overlapping
+edits replay only dirty image tiles, independently for each layer. Vine paths,
+leaves and material distances remain immutable; carving never splits their CPU
+geometry. Moss and ordinary rock walls use texture erasure without support checks.
+Compact commands are selected by section
 range and replayed before publication. Resizing reuses immutable bake recipes.
 
 Shared CPU atlas samples contain 8×8 grass, moss, and hanging-growth variants,
 and paired 16×16 mushroom stem/cap pages. Workers transform and batch the sample
 meshes into page coordinates; each world incrementally uploads bounded GPU
 pages on the game goroutine. Section recipes retain stable
-attachment IDs, anchors, footprints, bounds indexes, and dead flags. Finished web
-networks retain meshes and anchors; edits remove them without regeneration.
+attachment IDs, inset rock support anchors, visual bounds, and dead flags.
+Immutable support indexes contain individual anchors and share detection for
+paired grass and tooth records. Filtering returns newly dead records for dirty
+tiles and upload liveness, without repeating hit detection or rescaling meshes.
+The terrain support query returns mushroom/web IDs directly to image editing;
+its index and original objects remain unchanged across deletions. Separate visual
+bounds select nearby surviving recipes in their original drawing order.
+Finished mushroom groups and web networks are removed only when a support is
+cut, without cap, stem or silk intersection checks or regeneration.
 Foreground vines use the generated branch graph to guide connected cell-edge
 routes; forks attach at facet junctions. Background routes branch twice and use
 sparse seam graphs near their seeded paths. Background paths precede

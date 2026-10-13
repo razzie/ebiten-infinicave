@@ -151,9 +151,7 @@ func newWorld(seed int64, view View, tolerance, webMaxSize, webDensity, mushroom
 				ok = builder.Decorate(ctx, job.build)
 				if ok {
 					mesh := render.PrepareVegetation(job.build.Data(), view)
-					complete := *terrain.BindTerrainMaterial(job.geometry, job.build.Data())
-					complete.Vegetation = terrain.SectionVegetation(job.build.Data())
-					mesh.Geometry = &complete
+					mesh.Geometry = terrain.BindTerrainVegetation(job.geometry, job.build.Data())
 					mesh = render.MergeSectionMeshes(job.mesh, mesh)
 					ok = sendMesh(mesh, w.results)
 					if ok {

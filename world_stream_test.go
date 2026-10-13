@@ -68,7 +68,7 @@ func TestGrassAndDecorationCachesPublishResizeAndCarveTogether(t *testing.T) {
 	}
 	for _, list := range [][]render.Attachment{s.mesh.Foreground.Growth, s.mesh.Plants, s.mesh.Webs} {
 		for _, a := range list {
-			if a.Kind != render.SurfaceMoss && !a.Dead {
+			if a.Kind != render.SurfaceMoss && len(a.Anchors) > 0 && !a.Dead {
 				t.Fatal("carving left a live unsupported attachment")
 			}
 		}

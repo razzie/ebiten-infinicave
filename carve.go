@@ -46,8 +46,10 @@ type CarveResult struct {
 // CarveCircle removes foreground rock in a blast centered at a world point.
 // Radius must be finite and positive. The circle uses a 96-sided inscribed
 // polygon (maximum radial error about 0.00054 * radius). Rendering, exact
-// queries and collision use the same cut. Damaged mushroom groups and webs are
-// removed, and both vine layers are masked. Background rock is retained.
+// queries and collision use the same cut. Mushroom groups and webs are removed
+// when a rock support anchor is cut. Foreground vines and moss are erased from
+// their textures; their original geometry is retained. Background rock and
+// background vines are retained.
 // Edits persist until Reset or Close, including across eviction.
 // Call on the game goroutine after Update. Closed scenes return an error.
 func (g *Scene) CarveCircle(center V, radius float64) (CarveResult, error) {
@@ -96,9 +98,12 @@ func (g *Scene) carve(cut terrain.RockCut, hole Hole) (CarveResult, error) {
 		section := w.sections[id]
 		old := section.geometry
 		updated, parents, changed := cut.Geometry(id, old, g.collisionTolerance)
-		updated, plantsChanged := cut.Plants(updated)
+		updated, plantsChanged, removals := cut.PlantsWithChanges(updated)
 		section.geometry = updated
-		g.editSectionImages(section, id, cut)
+		if collision := w.collision[id]; terrain.SameTerrain(old, collision) {
+			w.collision[id] = updated
+		}
+		g.editSectionImages(section, id, cut, removals)
 		if !changed {
 			if plantsChanged {
 				section.geometry = updated
@@ -146,6 +151,9 @@ func (g *Scene) carve(cut terrain.RockCut, hole Hole) (CarveResult, error) {
 	// Collision may be ready while its section is still generating decoration
 	// or uploading. Keep that early cache in sync with edits as well.
 	for id, geometry := range w.collision {
+		if section := w.sections[id]; section != nil && terrain.SameTerrain(section.geometry, geometry) {
+			continue
+		}
 		updated, _, changed := cut.Geometry(id, geometry, g.collisionTolerance)
 		w.collision[id] = updated
 		if changed && w.sections[id] == nil {

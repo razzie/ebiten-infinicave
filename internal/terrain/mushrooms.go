@@ -11,8 +11,10 @@ type Mushroom struct {
 	spriteRotation, spriteScale float64
 	sprite                      bool
 	orientation                 Orientation // Cap and growth directions in the section frame.
+	support                     geom.V
+	supportSet                  bool
 	Stem                        []geom.V
-	Anchor                      geom.V // Root attachment; support, stalk, or cap damage removes the group.
+	Anchor                      geom.V // Visual root attachment; carving tests the inset rock support.
 	RootDirection               geom.V
 	CapCenter                   geom.V
 	CapWidth                    float64
@@ -153,8 +155,8 @@ func MushroomCapOutline(m Mushroom) []geom.V {
 	return outline
 }
 
-// Include the rendered dark border in group damage, using the atlas scale
-// and frame for generated plants. The body outline remains available separately.
+// Include the rendered dark border in the visual footprint, using the atlas
+// scale and frame for generated plants. Carving only tests support anchors.
 func MushroomCapFootprint(m Mushroom) []geom.V {
 	outline := MushroomCapOutline(m)
 	rotation, scale := 0.0, 1.0

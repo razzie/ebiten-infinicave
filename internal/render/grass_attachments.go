@@ -164,18 +164,7 @@ func prepareGrassAttachments(c terrain.RockCell, growth RockGrowthOptions, suppo
 		bmin, bmax := geom.PolygonBounds(bounds)
 		lo = geom.V{X: min(lo.X, bmin.X), Y: min(lo.Y, bmin.Y)}
 		hi = geom.V{X: max(hi.X, bmax.X), Y: max(hi.Y, bmax.Y)}
-		// Both records share the precise tuft footprint, so damage removes the
-		// ground patch and blades together without testing transparent margins.
-		recipe := AtlasRecipes(GrassAtlas)[cell]
-		for j := 0; j < len(recipe.Indices); j += 3 {
-			var footprint []geom.V
-			for _, index := range recipe.Indices[j : j+3] {
-				v := recipe.Vertices[index]
-				p := geom.V{X: float64(v.DstX) / RasterPixelsPerUnit, Y: float64(v.DstY)/RasterPixelsPerUnit + terrain.GenerationMinY}
-				footprint = append(footprint, root.Add(terrain.InternalPoint(mode, geom.Rotate(p, rotation).Mul(scale))))
-			}
-			patch.Footprint = append(patch.Footprint, footprint)
-		}
+
 	}
 	patch.Min, patch.Max = lo, hi
 	blades.Min, blades.Max, blades.Footprint = lo, hi, patch.Footprint

@@ -174,6 +174,9 @@ func OrientedSection(o Orientation, s Section) Section {
 			m := &group.Mushrooms[i]
 			MapPoints(m.Stem, o.local)
 			m.Anchor, m.CapCenter = o.local(m.Anchor), o.local(m.CapCenter)
+			if m.supportSet {
+				m.support = o.local(m.support)
+			}
 			m.RootDirection = WorldPoint(o, m.RootDirection)
 			m.orientation = Vertical
 		}

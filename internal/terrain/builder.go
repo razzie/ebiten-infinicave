@@ -72,7 +72,6 @@ type SectionData struct {
 	Mushrooms              []MushroomGroup
 	Guides                 []Guide
 	Holes                  []Hole
-	vegetationCuts         []RockCut
 	ForegroundTopology     *RockTopology
 	BackgroundNeighbors    [][]int
 }

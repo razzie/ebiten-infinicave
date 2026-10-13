@@ -127,6 +127,18 @@ func sampledMushroomsForGuides(guides []Guide, foreground RockGrid, density floa
 				}
 				m.CapCenter = transform(m.CapCenter)
 				m.RootDirection = InternalPoint(mode, geom.Rotate(m.RootDirection, rotation))
+				for _, cell := range ground {
+					if anchor.X < cell.lo.X-.003 || anchor.X > cell.hi.X+.003 || anchor.Y < cell.lo.Y-.003 || anchor.Y > cell.hi.Y+.003 {
+						continue
+					}
+					if support, ok := InsetRockAnchor(cell.poly, anchor, normal); ok {
+						m.support, m.supportSet = support, true
+						break
+					}
+				}
+				if !m.supportSet {
+					continue
+				}
 
 				m.CapWidth *= scale
 				m.CapHeight *= scale
