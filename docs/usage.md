@@ -69,11 +69,14 @@ The order is background and fog, `BehindRocks`, foreground rocks, mushrooms and 
 | `Fog`, `BatsPerMinute` | Animated atmosphere and bat arrivals; zero disables each. |
 | `MushroomDensity`, `MossDensity`, `GrassDensity`, `HangingGrowthDensity`, `SpiderWebDensity` | Decoration occurrence or coverage from 0 to 1. |
 | `BackgroundBlur`, `ShadowBlur` | Softness in scene units, from 0 to 0.05. |
+| `DisableBackground` | Skip background rocks, vines, blur, shadows, and their GPU uploads. Defaults to false; fog remains controlled by `Fog`. |
 | `ShadowOpacity` | Dynamic background shadow opacity from 0 to 1. |
 | `CollisionTolerance` | Optional collision polygon simplification tolerance; zero keeps exact boundaries. |
 | `View` | `ViewShaded`, `ViewClay`, `ViewHeight`, `ViewNormals`, or `ViewShadows`. |
 
 Diagnostic views hide vegetation and disable texture, background effects, fog, and bats. See the `Config` documentation for validation ranges and complete defaults.
+
+Set `config.DisableBackground = true` to draw the foreground over your own background. This leaves generation and collision/query geometry unchanged. Set `config.Fog = 0` too if you want to disable mist.
 
 ## Authored Sections
 
@@ -160,6 +163,7 @@ Run `go run ./cmd/infinicave -h` for the complete flag list. Useful examples:
 ```sh
 go run ./cmd/infinicave -seed 42 -mode landscape
 go run ./cmd/infinicave -seed 42 -branching loops
+go run ./cmd/infinicave -seed 42 -disable-background
 go run ./cmd/infinicave -seed 42 -view normals -output normals.png
 ```
 

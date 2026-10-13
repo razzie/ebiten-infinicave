@@ -58,6 +58,7 @@ type world struct {
 	largeCuts         []int
 	indexedCuts       int
 	pixels            int
+	disableBackground bool // game goroutine only; CPU generation retains all layers
 	pending           map[int64]render.SectionMesh
 	viewport          Viewport
 	priorities        chan Viewport

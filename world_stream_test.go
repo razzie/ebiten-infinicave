@@ -209,6 +209,45 @@ func TestResizeRefreshFollowsCameraAndRetainsCutsDuringUpload(t *testing.T) {
 	}
 }
 
+func TestDisabledBackgroundSkipsUploadsAndRefresh(t *testing.T) {
+	g, err := NewScene(Config{DisableBackground: true, View: ViewClay})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.world.close()
+	w := &world{disableBackground: true, sections: make(map[int64]*worldSection), done: make(chan struct{})}
+	g.world = w
+	t.Cleanup(g.Close)
+	mesh := resolutionTestMesh(0)
+	mesh.Vines = []render.TriangleMesh{{}}
+	mesh.ForegroundVines = []render.TriangleMesh{{}}
+	mesh.VinesBounds = image.Rect(10, 1000, 30, 1020)
+	mesh.ForegroundVinesBounds = mesh.VinesBounds
+	for _, pixels := range []int{64, 128} {
+		w.pixels = pixels
+		w.startUpload(mesh)
+		for tick := 0; tick < 100 && w.upload != nil; tick++ {
+			w.receive(g)
+			if w.upload != nil && (w.upload.img != nil || w.upload.vines != nil) {
+				t.Fatal("disabled background allocated upload images")
+			}
+		}
+		if w.upload != nil {
+			t.Fatal("foreground upload did not complete")
+		}
+		s := w.sections[0]
+		if s == nil || s.foreground == nil || s.foregroundVines == nil || s.vegetationPending {
+			t.Fatal("disabled background prevented foreground publication")
+		}
+		if s.terrain != nil || s.vines != nil || w.needsVisibleRefresh(0, s) || w.BackgroundVisible(-1, 1) {
+			t.Fatal("disabled background was uploaded or still requires refreshing")
+		}
+		if s.mesh.LayerMask() != render.AllLayers || len(s.mesh.Vines) == 0 {
+			t.Fatal("disabling rendering changed retained CPU recipes")
+		}
+	}
+}
+
 func TestSectionUploadsPublishTerrainBeforeVegetation(t *testing.T) {
 	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan sectionJob, 1), results: make(chan render.SectionMesh, 1), done: make(chan struct{}), working: true}
 	// Empty batches isolate the scheduler; nonempty crop bounds exercise image ownership.

@@ -145,6 +145,39 @@ func (g *compositorTestGame) Draw(*ebiten.Image) {
 		check(mask, 28, 16, green)
 		check(mask, 28, 28, orange)
 		mask.Deallocate()
+		// Disabling backgrounds must bypass both direct and effect composition,
+		// preserve the caller's pixels, and keep the foreground in both orientations.
+		s.terrain.Fill(blue)
+		s.vines = layer(image.Rect(48, 48, 56, 56), green)
+		s.vinesBounds = bounds
+		for _, effects := range []*render.BackgroundRenderer{nil, background} {
+			scene.background = effects
+			for _, disabled := range []bool{false, true} {
+				scene.world.disableBackground = disabled
+				dst.Fill(purple)
+				scene.DrawWithPasses(dst, viewport, RenderPasses{
+					BehindRocks: func(c RenderContext) {
+						if disabled {
+							want := purple
+							if orientation == Horizontal {
+								want = color.RGBA{}
+							}
+							check(c.Dst, 50, 50, want)
+							check(c.Dst, 60, 60, want)
+							return
+						}
+						check(c.Dst, 60, 60, blue)
+					},
+				})
+				x, y := 8, 16
+				if orientation == Horizontal {
+					x, y = 63-y, x
+				}
+				check(dst, x, y, red)
+			}
+		}
+		scene.world.disableBackground = false
+		scene.background = background
 		// Force an arrival, then enlarge it so at least one opaque pixel is
 		// observable. Compare with a separate bat-only reference image.
 		scene.bats = render.NewBatFlock(42, 60, orientation)

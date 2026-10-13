@@ -283,12 +283,16 @@ func (w *world) viewportLayers(id int64) render.MeshLayers {
 			return render.VegetationLayer
 		}
 	}
-	return render.ForegroundLayer | render.BackgroundLayer | render.VegetationLayer
+	layers := render.AllLayers
+	if w.disableBackground {
+		layers &^= render.BackgroundLayer
+	}
+	return layers
 }
 
 func (w *world) needsVisibleRefresh(id int64, s *worldSection) bool {
 	if w.viewportLayers(id)&render.ForegroundLayer != 0 {
-		return s.needsRefresh(w.renderWidth())
+		return s.needsRefresh(w.renderWidth(), w.viewportLayers(id))
 	}
 	return s.mesh != nil && s.mesh.LayerMask()&render.VegetationLayer != 0 && (s.vegetationPending || s.vegetationWidth() != w.renderWidth())
 }
@@ -514,7 +518,11 @@ func (w *world) receive(g *Scene) {
 			}
 			// Scale vegetation only once it is ready to upload.
 			if u.next == 0 && u.vines == nil {
-				plants := render.ScaleVegetationMesh(u.data, u.pixels)
+				data := u.data
+				if w.disableBackground {
+					data.Vines, data.VinesBounds = nil, image.Rectangle{}
+				}
+				plants := render.ScaleVegetationMesh(data, u.pixels)
 				u.raster.Vines, u.raster.VinesBounds = plants.Vines, plants.VinesBounds
 				u.raster.ForegroundVines, u.raster.ForegroundVinesBounds = plants.ForegroundVines, plants.ForegroundVinesBounds
 				u.raster.Mushrooms, u.raster.MushroomsBounds = plants.Mushrooms, plants.MushroomsBounds

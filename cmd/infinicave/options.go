@@ -27,6 +27,7 @@ func parseOptions() (viewerOptions, error) {
 	seed := flag.Int64("seed", rand.Int63(), "random seed (random by default)")
 	output := flag.String("output", "", "save the first 2400 pixels along the scrolling axis as a PNG and exit")
 	texture := flag.Float64("texture", 8, "surface texture strength (0 disables it, range 0-16)")
+	disableBackground := flag.Bool("disable-background", defaults.DisableBackground, "disable background rocks, vines, blur, and shadows (fog is controlled separately)")
 	backgroundBlur := flag.Float64("background-blur", defaults.BackgroundBlur, "background rock and vine blur in scene units (0 disables it, range 0-0.05)")
 	shadowOpacity := flag.Float64("shadow-opacity", defaults.ShadowOpacity, "dynamic rock shadow opacity (0 disables it, range 0-1)")
 	shadowBlur := flag.Float64("shadow-blur", defaults.ShadowBlur, "dynamic rock shadow softness in scene units (range 0-0.05)")
@@ -59,6 +60,7 @@ func parseOptions() (viewerOptions, error) {
 	config.SpikeDensity, config.EdgeRoughness = *spikeDensity, *edgeRoughness
 	config.BranchMinThickness, config.BranchMaxThickness = *branchMinThickness, *branchMaxThickness
 	config.Seed, config.Texture = *seed, *texture
+	config.DisableBackground = *disableBackground
 	config.BackgroundBlur, config.ShadowOpacity, config.ShadowBlur = *backgroundBlur, *shadowOpacity, *shadowBlur
 	config.ShadowOffset = infinicave.V{X: *shadowX, Y: *shadowY}
 	config.Fog = *fog

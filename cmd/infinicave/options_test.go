@@ -53,6 +53,27 @@ func TestViewerForceGuidesUpFlag(t *testing.T) {
 	}
 }
 
+func TestViewerDisableBackgroundFlag(t *testing.T) {
+	oldFlags, oldArgs := flag.CommandLine, os.Args
+	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{nil, false},
+		{[]string{"-disable-background"}, true},
+		{[]string{"-disable-background=false"}, false},
+		{[]string{"-disable-background", "-output", "scene.png"}, true},
+	} {
+		flag.CommandLine = flag.NewFlagSet("background-options", flag.ContinueOnError)
+		os.Args = append([]string{"infinicave"}, tc.args...)
+		options, err := parseOptions()
+		if err != nil || options.config.DisableBackground != tc.want {
+			t.Fatalf("background flag: got %v, want %v, error %v", options.config.DisableBackground, tc.want, err)
+		}
+	}
+}
+
 func TestViewerSpiderWebMaximumSizeFlag(t *testing.T) {
 	oldFlags, oldArgs := flag.CommandLine, os.Args
 	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })

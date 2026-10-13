@@ -15,18 +15,28 @@ func TestBackgroundConfigurationAndLifecycle(t *testing.T) {
 	for view := ViewClay; view <= ViewShadows; view++ {
 		configs = append(configs, Config{BackgroundBlur: .003, ShadowOpacity: .5, View: view})
 	}
+	for _, config := range append([]Config(nil), configs...) {
+		config.DisableBackground = true
+		configs = append(configs, config)
+	}
 	for _, config := range configs {
 		scene, err := NewScene(config)
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(scene.Close)
-		enabled := config.View == ViewShaded && (config.BackgroundBlur > 0 || config.ShadowOpacity > 0)
+		enabled := !config.DisableBackground && config.View == ViewShaded && (config.BackgroundBlur > 0 || config.ShadowOpacity > 0)
 		if (scene.background != nil) != enabled {
 			t.Fatalf("background effects enabled incorrectly for %+v", config)
 		}
 		before := scene.background
 		scene.Reset(42)
+		if scene.world.disableBackground != config.DisableBackground || (scene.backgroundFade == nil) != config.DisableBackground {
+			t.Fatal("world reset lost background enablement")
+		}
+		if (scene.fog != nil) != (config.Fog > 0 && config.View == ViewShaded) {
+			t.Fatal("background enablement changed fog")
+		}
 		if scene.background != before {
 			t.Fatal("world reset lost background rendering settings")
 		}

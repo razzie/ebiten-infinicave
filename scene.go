@@ -29,6 +29,7 @@ type Scene struct {
 	vineMaterial         *ebiten.Shader
 	fog                  *render.FogRenderer
 	background           *render.BackgroundRenderer
+	disableBackground    bool
 	bats                 *render.BatFlock
 	geometryRevisionBase uint64 // revisions accumulated across world resets
 	texture              float64
@@ -52,6 +53,7 @@ func NewScene(config Config) (*Scene, error) {
 	}
 	g := &Scene{orientation: config.Orientation, forceGuidesUp: config.ForceGuidesUp, texture: config.Texture, view: config.View, collisionTolerance: config.CollisionTolerance, spiderWebMaxSize: config.SpiderWebMaxSize, spiderWebDensity: config.SpiderWebDensity, mushroomDensity: config.MushroomDensity, rockGrowth: render.RockGrowthOptions{Moss: config.MossDensity, Hanging: config.HangingGrowthDensity, Grass: config.GrassDensity}, loadSection: config.LoadSection, onCollisionReady: config.OnCollisionReady}
 	g.shape = config.shapeOptions()
+	g.disableBackground = config.DisableBackground
 	if g.view != ViewShaded {
 		g.texture = 0
 	}
@@ -60,10 +62,12 @@ func NewScene(config Config) (*Scene, error) {
 	if err != nil {
 		return nil, fmt.Errorf("infinicave: compile rock shader: %w", err)
 	}
-	g.backgroundFade, err = ebiten.NewShader(render.BackgroundFadeShaderSource)
-	if err != nil {
-		g.Close()
-		return nil, fmt.Errorf("infinicave: compile background fade shader: %w", err)
+	if !g.disableBackground {
+		g.backgroundFade, err = ebiten.NewShader(render.BackgroundFadeShaderSource)
+		if err != nil {
+			g.Close()
+			return nil, fmt.Errorf("infinicave: compile background fade shader: %w", err)
+		}
 	}
 	g.vineMaterial, err = ebiten.NewShader(render.VineShaderSource)
 	if err != nil {
@@ -77,7 +81,7 @@ func NewScene(config Config) (*Scene, error) {
 			return nil, fmt.Errorf("infinicave: compile fog shader: %w", err)
 		}
 	}
-	if g.view == ViewShaded && (config.BackgroundBlur > 0 || config.ShadowOpacity > 0) {
+	if !g.disableBackground && g.view == ViewShaded && (config.BackgroundBlur > 0 || config.ShadowOpacity > 0) {
 		effects := render.BackgroundConfig{BackgroundBlur: config.BackgroundBlur, ShadowOpacity: config.ShadowOpacity, ShadowBlur: config.ShadowBlur}
 		effects.ShadowOffset = terrain.InternalPoint(g.orientation, config.ShadowOffset)
 		g.background, err = render.NewBackgroundRenderer(effects)
@@ -87,6 +91,7 @@ func NewScene(config Config) (*Scene, error) {
 		}
 	}
 	g.world = newWorld(config.Seed, g.view, g.collisionTolerance, g.spiderWebMaxSize, g.spiderWebDensity, g.mushroomDensity, g.forceGuidesUp, terrain.OrientedSectionLoader(g.orientation, g.loadSection), g.rockGrowth, g.shape, g.orientation)
+	g.world.disableBackground = g.disableBackground
 	if config.BatsPerMinute > 0 && g.view == ViewShaded {
 		g.bats = render.NewBatFlock(config.Seed, config.BatsPerMinute, g.orientation)
 	}
@@ -226,6 +231,7 @@ func (g *Scene) Reset(seed int64) {
 	g.geometryRevisionBase = g.GeometryRevision() + 1
 	g.world.close()
 	g.world = newWorld(seed, g.view, g.collisionTolerance, g.spiderWebMaxSize, g.spiderWebDensity, g.mushroomDensity, g.forceGuidesUp, terrain.OrientedSectionLoader(g.orientation, g.loadSection), g.rockGrowth, g.shape, g.orientation)
+	g.world.disableBackground = g.disableBackground
 	g.world.pixels = pixels
 	if g.bats != nil {
 		g.bats = render.NewBatFlock(seed, g.bats.PerMinute, g.orientation)

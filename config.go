@@ -41,6 +41,10 @@ type Config struct {
 	EdgeRoughness float64
 	// Texture is surface grain strength, from 0 (disabled) to 16.
 	Texture float64
+	// DisableBackground skips rendering and GPU uploads for background rocks
+	// and vines, including blur and foreground shadows. False keeps them enabled.
+	// Fog is controlled separately by Fog. Generation and geometry are unchanged.
+	DisableBackground bool
 	// BackgroundBlur is Gaussian blur softness in scene units (0 disables it,
 	// maximum 0.05). Background rocks and vines are blurred together.
 	BackgroundBlur float64

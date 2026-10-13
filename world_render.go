@@ -45,7 +45,7 @@ func (g *Scene) drawGridFacesWithAA(dst *ebiten.Image, mesh render.TriangleMesh,
 func (w *world) draw(dst *ebiten.Image, y, height float64, fog *render.FogRenderer, background *render.BackgroundRenderer, passes RenderPasses, context RenderContext) {
 	view := render.TargetTransform(dst)
 	y = render.RenderAlignedY(y, view.Pixels)
-	if background != nil {
+	if !w.disableBackground && background != nil {
 		background.Draw(dst, w, y, height, view)
 	} else {
 		w.DrawBackground(dst, y, height, view)
@@ -84,6 +84,9 @@ func (w *world) draw(dst *ebiten.Image, y, height float64, fog *render.FogRender
 
 // DrawBackground supplies cached background rock and vines to the effect pass.
 func (w *world) DrawBackground(dst *ebiten.Image, y, height float64, view render.RenderTransform) {
+	if w.disableBackground {
+		return
+	}
 	low, high := visibleSections(y, height)
 	for id := low; id <= high; id++ {
 		if section := w.sections[id]; section != nil && section.terrain != nil {
@@ -154,9 +157,9 @@ func (s *worldSection) vegetationWidth() int {
 	}
 	return s.renderWidth()
 }
-func (s *worldSection) needsRefresh(pixels int) bool {
+func (s *worldSection) needsRefresh(pixels int, layers render.MeshLayers) bool {
 	if s.mesh != nil {
-		mask := s.mesh.LayerMask()
+		mask := s.mesh.LayerMask() & layers
 		if mask&render.ForegroundLayer != 0 && s.foreground == nil {
 			return true
 		}
@@ -167,7 +170,9 @@ func (s *worldSection) needsRefresh(pixels int) bool {
 			return true
 		}
 	}
-	return (s.foreground != nil && s.renderWidth() != pixels) || (s.terrain != nil && s.backgroundWidth() != pixels) || (!s.vegetationPending && s.vegetationWidth() != pixels)
+	return (layers&render.ForegroundLayer != 0 && s.foreground != nil && s.renderWidth() != pixels) ||
+		(layers&render.BackgroundLayer != 0 && s.terrain != nil && s.backgroundWidth() != pixels) ||
+		(layers&render.VegetationLayer != 0 && !s.vegetationPending && s.vegetationWidth() != pixels)
 }
 
 // Cross-band plants are visible only where their supporting rock layer exists.
@@ -193,6 +198,9 @@ func (w *world) drawSupportedVegetation(dst, layer *ebiten.Image, bounds image.R
 }
 
 func (w *world) BackgroundVisible(y, height float64) bool {
+	if w.disableBackground {
+		return false
+	}
 	lo, hi := visibleSections(y, height)
 	for id := lo; id <= hi; id++ {
 		if section := w.sections[id]; section != nil && section.terrain != nil {
