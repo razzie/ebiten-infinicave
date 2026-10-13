@@ -251,12 +251,16 @@ func onPolygonBoundary(p geom.V, poly []geom.V) bool {
 	return false
 }
 func onShapeBoundary(p geom.V, s RockShape) bool {
-	for _, poly := range s.Loops {
-		if onPolygonBoundary(p, poly) {
-			return true
-		}
-	}
-	return false
+	// Use the immutable edge hierarchy already needed for cut intersections.
+	// A cut's many spans otherwise each scan the entire formation boundary.
+	pad := geom.V{X: 1e-10, Y: 1e-10}
+	found := false
+	s.index.Query(geom.Bounds{Min: p.Sub(pad), Max: p.Add(pad)}, func(i int) bool {
+		e := s.edges[i]
+		found = geom.SegmentDistanceSquared(p, p, e.A, e.B) < 1e-20
+		return !found
+	})
+	return found
 }
 
 func differenceShapeFallback(s RockShape, hole []geom.V) ([]RockShape, bool) {

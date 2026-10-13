@@ -182,13 +182,15 @@ func (q *worldQueryIndex) rebuild(w *world) {
 	for i, a := range blocks {
 		for j := i + 1; j < len(blocks); j++ {
 			b := blocks[j]
-			if a.section == b.section || a.section-b.section > 2 || b.section-a.section > 2 {
+			if a.section == b.section || a.section-b.section > 2 || b.section-a.section > 2 || root(i) == root(j) {
 				continue
 			}
+		connected:
 			for _, ai := range a.faces {
 				for _, bi := range b.faces {
 					if terrain.ShapesConnect(a.geometry.Shapes[ai], b.geometry.Shapes[bi], V{Y: b.geometry.Top - a.geometry.Top}) {
 						join(i, j)
+						break connected
 					}
 				}
 			}

@@ -44,6 +44,24 @@ func RegionMesh(source TriangleMesh, rect image.Rectangle) TriangleMesh {
 	return m
 }
 
+// AttachmentRegionBatches keeps the selected recipes' blend order and batches
+// compatible triangle lists, as the initial upload does. Replaying a dense
+// region should not require a separate antialiased draw for every tiny instance.
+func AttachmentRegionBatches(source []Attachment, candidates []int, rect image.Rectangle, grass, underlay bool) []TriangleMesh {
+	var meshes []TriangleMesh
+	for _, i := range candidates {
+		a := source[i]
+		if a.Dead || a.Underlay != underlay || (a.Kind == GrassAttachment) != grass {
+			continue
+		}
+		m := RegionMesh(a.Mesh, rect)
+		if len(m.Indices) > 0 {
+			meshes = append(meshes, m)
+		}
+	}
+	return batchTriangleMeshes(meshes)
+}
+
 func MeshIndex(mesh TriangleMesh) *geom.BoundsIndex {
 	b := make([]geom.Bounds, len(mesh.Indices)/3)
 	for i := range b {

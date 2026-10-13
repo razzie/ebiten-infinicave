@@ -214,12 +214,8 @@ func (g *Scene) replayGridRegion(section *worldSection, id int64, dirty geom.Bou
 	region := geom.Bounds{Min: V{X: float64(rect.Min.X) / float64(pixels), Y: float64(rect.Min.Y) / float64(pixels)}, Max: V{X: float64(rect.Max.X) / float64(pixels), Y: float64(rect.Max.Y) / float64(pixels)}}
 	candidates := render.AttachmentCandidates(source.Growth, source.GrowthIndex, region)
 	if !grass {
-		for _, i := range candidates {
-			a := source.Growth[i]
-			if !a.Dead && a.Underlay {
-				m := render.RegionMesh(a.Mesh, reference)
-				g.drawAttachmentMesh(target, render.ScaleRegionMesh(m, pixels, image.Pt(0, -pixels)))
-			}
+		for _, m := range render.AttachmentRegionBatches(source.Growth, candidates, reference, false, true) {
+			g.drawAttachmentMesh(target, render.ScaleRegionMesh(m, pixels, image.Pt(0, -pixels)))
 		}
 	}
 	if !grass {
@@ -232,15 +228,8 @@ func (g *Scene) replayGridRegion(section *worldSection, id int64, dirty geom.Bou
 	} else if len(source.Grass.Indices) > 0 {
 		g.drawGridFaces(target, render.ScaleRegionMesh(render.RegionMesh(source.Grass, reference), pixels, image.Pt(0, -pixels)), top)
 	}
-	for _, i := range candidates {
-		a := source.Growth[i]
-		if a.Dead || a.Underlay || (a.Kind == render.GrassAttachment) != grass {
-			continue
-		}
-		m := render.RegionMesh(a.Mesh, reference)
-		if len(m.Indices) > 0 {
-			g.drawAttachmentMesh(target, render.ScaleRegionMesh(m, pixels, image.Pt(0, -pixels)))
-		}
+	for _, m := range render.AttachmentRegionBatches(source.Growth, candidates, reference, grass, false) {
+		g.drawAttachmentMesh(target, render.ScaleRegionMesh(m, pixels, image.Pt(0, -pixels)))
 	}
 	render.EraseCutsAt(target, bounds, top, section.mesh.VisualCuts, pixels)
 	if !grass {

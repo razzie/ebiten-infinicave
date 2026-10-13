@@ -10,8 +10,9 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
-// Union dirty tiles rather than expanding one rectangle across unrelated
-// attachments. Each tile is restored once, in a deterministic order.
+// Union dirty tiles and join adjacent runs into rectangles. Large blasts then
+// replay each mesh and cut mask once per rectangle rather than once per tile,
+// while gaps between unrelated attachments stay untouched.
 func dirtyTiles(dst *ebiten.Image, bounds image.Rectangle, top float64, pixels int, regions []geom.Bounds) []geom.Bounds {
 	if dst == nil {
 		return nil
@@ -37,9 +38,33 @@ func dirtyTiles(dst *ebiten.Image, bounds image.Rectangle, top float64, pixels i
 		}
 		return a.X - b.X
 	})
-	result := make([]geom.Bounds, 0, len(tiles))
-	for _, p := range tiles {
-		r := image.Rect(p.X, p.Y, p.X+tile, p.Y+tile).Intersect(dst.Bounds()).Add(bounds.Min)
+	var rects []image.Rectangle
+	previous := make(map[[2]int]int)
+	for i := 0; i < len(tiles); {
+		y := tiles[i].Y
+		current := make(map[[2]int]int)
+		for i < len(tiles) && tiles[i].Y == y {
+			x, end := tiles[i].X, tiles[i].X+tile
+			i++
+			for i < len(tiles) && tiles[i].Y == y && tiles[i].X == end {
+				end += tile
+				i++
+			}
+			key := [2]int{x, end}
+			index, ok := previous[key]
+			if ok && rects[index].Max.Y == y {
+				rects[index].Max.Y = y + tile
+			} else {
+				index = len(rects)
+				rects = append(rects, image.Rect(x, y, end, y+tile))
+			}
+			current[key] = index
+		}
+		previous = current
+	}
+	result := make([]geom.Bounds, 0, len(rects))
+	for _, rect := range rects {
+		r := rect.Intersect(dst.Bounds()).Add(bounds.Min)
 		// Interior pixel coordinates avoid floating-point roundoff snapping a
 		// nominal tile edge into its neighboring tile in dirtyRaster.
 		result = append(result, geom.Bounds{

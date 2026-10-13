@@ -53,7 +53,10 @@ goroutine. Upload budgets and cache publication live in `world_stream.go`.
 Carving replaces connected outer/inner loops independently of material facets.
 Finished foreground rock/vine images receive cut masks; background rock and
 background vines remain intact. Removed attachments and overlapping
-edits replay only dirty image tiles, independently for each layer. Vine paths,
+edits replay only dirty image tiles, independently for each layer. Adjacent dirty
+tiles are coalesced into rectangles without filling gaps; surviving growth and
+wall recipes are batched in their original texture and blend order for replay.
+Vine paths,
 leaves and material distances remain immutable; carving never splits their CPU
 geometry. Moss and ordinary rock walls use texture erasure without support checks.
 Compact commands are selected by section
