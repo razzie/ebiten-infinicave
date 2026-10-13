@@ -51,7 +51,8 @@ type world struct {
 	revision          uint64 // queryable terrain version for the lazy query index
 	collisionRevision uint64 // early collision availability changes
 	queries           *worldQueryIndex
-	cuts              []cutCommand // compact world-space edits survive eviction
+	cuts              []cutCommand      // compact world-space edits survive eviction
+	retiredGuides     map[[32]byte]bool // immutable snapshots shared with generation jobs
 	cutKeys           map[Hole]bool
 	cutBuckets        map[int64][]int
 	largeCuts         []int
@@ -64,12 +65,13 @@ type world struct {
 }
 
 type sectionJob struct {
-	id       int64
-	ctx      context.Context
-	phase    int
-	build    *terrain.SectionBuild
-	geometry *terrain.Geometry
-	mesh     render.SectionMesh
+	retiredGuides map[[32]byte]bool
+	id            int64
+	ctx           context.Context
+	phase         int
+	build         *terrain.SectionBuild
+	geometry      *terrain.Geometry
+	mesh          render.SectionMesh
 }
 
 var errSectionComplete = errors.New("section generation completed")
@@ -124,7 +126,7 @@ func newWorld(seed int64, view View, tolerance, webMaxSize, webDensity, mushroom
 		if ok {
 			switch job.phase {
 			case sectionGeometry:
-				job.build = builder.Begin(ctx, id)
+				job.build = builder.BeginWithoutGuides(ctx, id, job.retiredGuides)
 				ok = job.build != nil
 				if ok {
 					job.geometry = terrain.PrepareTerrainGeometry(job.build.Data(), tolerance)
@@ -213,6 +215,7 @@ func (w *world) close() {
 		w.atlases = nil
 	}
 	w.cuts = nil
+	w.retiredGuides = nil
 	w.queries = nil
 	w.cutKeys = nil
 	w.cutBuckets = nil
@@ -257,7 +260,7 @@ func (w *world) request(id int64) {
 		}
 		ctx, cancel := context.WithCancelCause(w.ctx)
 		select {
-		case w.jobs <- sectionJob{id: id, ctx: ctx}:
+		case w.jobs <- sectionJob{id: id, ctx: ctx, retiredGuides: w.retiredGuides}:
 			w.inflight[id] = sectionFlight{ctx: ctx, cancel: cancel}
 			w.working = true
 		default:
@@ -274,7 +277,7 @@ func (w *world) request(id int64) {
 			ctx, cancel = context.WithCancel(w.ctx)
 			w.activeCancel = cancel
 		}
-		w.jobs <- sectionJob{id: id, ctx: ctx}
+		w.jobs <- sectionJob{id: id, ctx: ctx, retiredGuides: w.retiredGuides}
 	}
 }
 

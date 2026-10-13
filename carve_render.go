@@ -92,6 +92,7 @@ func (g *Scene) applyStoredCuts(mesh *render.SectionMesh) {
 		editMeshImages(mesh, cut, removals)
 	}
 	mesh.AppliedCuts = uint64(len(g.world.cuts))
+	mesh.Geometry = mesh.Geometry.WithoutGuides(g.world.retiredGuides)
 }
 
 // Dirty regions are reconstructed from original recipes before masking, so

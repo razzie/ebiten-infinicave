@@ -137,6 +137,8 @@ Foreground vines, their leaves, moss and rock surface details are carved by eras
 
 `CarveResult.Changes` maps affected formation IDs to the remaining formations: no IDs means destroyed, one means reshaped, and multiple means split. Reports can be provisional when a cut reaches unloaded terrain. `SectionIDs` identifies collision sections to refresh. Previously returned geometry remains an independent snapshot.
 
+When a formation is completely destroyed, its guides are released and their guide IDs expire once no other supported fragment or unloaded continuation remains. Compact source identities persist with the edits, so reloaded sections skip those guides and their procedural branches. `Reset` clears these exclusions too.
+
 ## Generate a Section Without a Scene
 
 `GenerateSection(seed, id)` synchronously generates section data without creating a renderer or GPU resources:

@@ -16,6 +16,10 @@ func newGuideCache(seed int64, orientation ...Orientation) *guideCache {
 }
 
 func (c *guideCache) window(id int64) []Guide {
+	return c.windowWithoutGuides(id, nil)
+}
+
+func (c *guideCache) windowWithoutGuides(id int64, retired map[[32]byte]bool) []Guide {
 	for owner := id - 3; owner <= id+3; owner++ {
 		if _, ok := c.proposals[owner]; !ok {
 			c.proposals[owner] = generateGuideSection(rand.New(rand.NewSource(SectionSeed(c.seed, owner))), c.orientation)
@@ -29,8 +33,9 @@ func (c *guideCache) window(id int64) []Guide {
 			for i := range section {
 				section[i].Seed = SectionSeed(SectionSeed(c.seed, owner), int64(i+1)) | 1
 			}
-			c.resolved[owner] = section
 		}
+		section = liveGuides(section, SectionTop(owner), retired)
+		c.resolved[owner] = section
 		for _, g := range section {
 			g = shiftedGuide(g, SectionTop(owner)-SectionTop(id))
 			g.S = append([]float64(nil), g.S...)
@@ -41,6 +46,19 @@ func (c *guideCache) window(id int64) []Guide {
 	for owner := range c.proposals {
 		if owner < id-3 || owner > id+3 {
 			delete(c.proposals, owner)
+			continue
+		}
+		// Resolved guides can share point arrays with their proposals. Drop
+		// that owner's proposal cache too; rebuilding the original proposals
+		// on demand preserves neighboring placement without retaining dead
+		// guide arrays between builds.
+		if len(retired) > 0 {
+			for _, g := range c.proposals[owner] {
+				if retired[GuideKey(g.Pts, SectionTop(owner))] {
+					delete(c.proposals, owner)
+					break
+				}
+			}
 		}
 	}
 	for owner := range c.resolved {

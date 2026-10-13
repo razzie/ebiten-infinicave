@@ -179,6 +179,10 @@ func (cut RockCut) Geometry(id int64, old *Geometry, tolerance float64) (*Geomet
 	}
 	updated := *old
 	updated.setShapes(shapes)
+	updated.guideSupport = make([][][32]byte, len(parents))
+	for i, parent := range parents {
+		updated.guideSupport[i] = old.FaceGuideKeys(parent)
+	}
 	// Preserve untouched face slices and keys for query cache reuse.
 	for i, p := range parents {
 		if len(shapes[i].Loops) > 0 && len(old.Shapes[p].Loops) > 0 && &shapes[i].Loops[0][0] == &old.Shapes[p].Loops[0][0] {

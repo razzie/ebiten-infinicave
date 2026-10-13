@@ -18,18 +18,19 @@ type Face struct {
 // Structural loops are independent of the original material facets. Carving
 // replaces loops and attachment state while retaining the immutable bake data.
 type Geometry struct {
-	decorations *decorationState
-	Shapes      []RockShape   // exact editable loops; Grid/Topology retain the bake recipe
-	source      *RockTopology // stable shape identity across material binding and cuts
-	Grid        RockGrid      // original inset material facets, retained for baking
-	Topology    *RockTopology // immutable adjacency and boundaries shared with rendering
-	Cuts        []RockCut
-	Vegetation  Vegetation
-	Faces       []Face
-	Guides      []Guide
-	Blocks      [][]int
-	Top         float64
-	Collision   CollisionGeometry
+	guideSupport [][][32]byte
+	decorations  *decorationState
+	Shapes       []RockShape   // exact editable loops; Grid/Topology retain the bake recipe
+	source       *RockTopology // stable shape identity across material binding and cuts
+	Grid         RockGrid      // original inset material facets, retained for baking
+	Topology     *RockTopology // immutable adjacency and boundaries shared with rendering
+	Cuts         []RockCut
+	Vegetation   Vegetation
+	Faces        []Face
+	Guides       []Guide
+	Blocks       [][]int
+	Top          float64
+	Collision    CollisionGeometry
 }
 
 func PrepareTerrainGeometry(data SectionData, tolerance float64) *Geometry {
@@ -99,6 +100,7 @@ func PrepareTerrainGeometry(data SectionData, tolerance float64) *Geometry {
 		shapes = append(shapes, SplitLoops(loops)...)
 	}
 	h.setShapes(shapes)
+	h.prepareGuideSupport()
 	if len(h.Cuts) > 0 {
 		h.tagAuthoredCutEdges()
 	}

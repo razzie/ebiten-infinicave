@@ -81,6 +81,13 @@ func BuildSection(seed, id int64) SectionData {
 }
 
 func (b *Builder) Begin(ctx context.Context, id int64) (s *SectionBuild) {
+	return b.BeginWithoutGuides(ctx, id, nil)
+}
+
+// BeginWithoutGuides excludes permanently destroyed formation sources before
+// projection preparation, branch growth, foreground shaping, and decoration.
+// retired is an immutable snapshot owned by the requesting world.
+func (b *Builder) BeginWithoutGuides(ctx context.Context, id int64, retired map[[32]byte]bool) (s *SectionBuild) {
 	start := time.Now()
 	defer func() {
 		if s != nil {
@@ -101,8 +108,9 @@ func (b *Builder) Begin(ctx context.Context, id int64) (s *SectionBuild) {
 		content := loadedWorldContent(seed, id, loadSection)
 		guides, holes = content.Guides, content.Holes
 	} else {
-		guides = guideCache.window(id)
+		guides = guideCache.windowWithoutGuides(id, retired)
 	}
+	guides = liveGuides(guides, top, retired)
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -112,27 +120,31 @@ func (b *Builder) Begin(ctx context.Context, id int64) (s *SectionBuild) {
 		}
 		guides[i].prepareProjection()
 	}
-	seeds := artisticRockSeeds(worldSeeds(seed, top, noise), guides, seed, top)
-	if ctx.Err() != nil {
-		return nil
+	var foreground RockGrid
+	var segments []BranchSegment
+	if len(guides) > 0 {
+		seeds := artisticRockSeeds(worldSeeds(seed, top, noise), guides, seed, top)
+		if ctx.Err() != nil {
+			return nil
+		}
+		segments = generateBranchesWithOptions(guides, noise, rand.New(rand.NewSource(seed)), b.Shape)
+		branches := newShapedBranchField(segments, b.Shape.BranchingStrategy)
+		foreground = guideRockFaces(seeds, guides)
+		if ctx.Err() != nil {
+			return nil
+		}
+		shapeReliefGrid(foreground, guides, noise, branches)
+		if ctx.Err() != nil {
+			return nil
+		}
+		foreground = contourRockGrid(foreground, func(p geom.V) float64 { return reliefHeight(p, guides, noise, branches) }, guides)
+		if ctx.Err() != nil {
+			return nil
+		}
+		polishRockContours(foreground, guides, func(p geom.V) float64 { return reliefHeight(p, guides, noise, branches) })
+		trimRockNeedles(foreground, guides)
+		cleanRockJunctions(foreground)
 	}
-	segments := generateBranchesWithOptions(guides, noise, rand.New(rand.NewSource(seed)), b.Shape)
-	branches := newShapedBranchField(segments, b.Shape.BranchingStrategy)
-	foreground := guideRockFaces(seeds, guides)
-	if ctx.Err() != nil {
-		return nil
-	}
-	shapeReliefGrid(foreground, guides, noise, branches)
-	if ctx.Err() != nil {
-		return nil
-	}
-	foreground = contourRockGrid(foreground, func(p geom.V) float64 { return reliefHeight(p, guides, noise, branches) }, guides)
-	if ctx.Err() != nil {
-		return nil
-	}
-	polishRockContours(foreground, guides, func(p geom.V) float64 { return reliefHeight(p, guides, noise, branches) })
-	trimRockNeedles(foreground, guides)
-	cleanRockJunctions(foreground)
 
 	if ctx.Err() != nil {
 		return nil

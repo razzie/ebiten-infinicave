@@ -52,6 +52,7 @@ func (w *world) receiveCollision(g *Scene) {
 			if w.collision == nil {
 				w.collision = make(map[int64]*terrain.Geometry)
 			}
+			geometry = geometry.WithoutGuides(w.retiredGuides)
 			w.collision[ready.id] = geometry
 			w.collisionRevision++
 			if g.onCollisionReady != nil {

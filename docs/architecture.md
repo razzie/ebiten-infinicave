@@ -58,6 +58,11 @@ leaves and material distances remain immutable; carving never splits their CPU
 geometry. Moss and ordinary rock walls use texture erasure without support checks.
 Compact commands are selected by section
 range and replayed before publication. Resizing reuses immutable bake recipes.
+Structural faces retain compact guide support identities through carving and
+splits. Destroying the last complete support retires the guide across cached
+geometry and queries. Immutable retirement snapshots accompany generation jobs;
+builders omit those sources before branch generation and release their resolved
+guide cache entries. Late results are filtered again before publication.
 
 Shared CPU atlas samples contain 8×8 grass, moss, and hanging-growth variants,
 and paired 16×16 mushroom stem/cap pages. Workers transform and batch the sample

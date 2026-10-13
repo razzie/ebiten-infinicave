@@ -1,8 +1,6 @@
 package infinicave
 
 import (
-	"crypto/sha256"
-	"encoding/binary"
 	"math"
 	"sort"
 	"sync/atomic"
@@ -344,20 +342,7 @@ func (q *worldQueryIndex) rebuild(w *world) {
 }
 
 func queryGuideKey(points []V) [32]byte {
-	bytes := make([]byte, 16*len(points))
-	for i, p := range points {
-		// Ignore rounding from translating the same padded guide into
-		// different section coordinate systems, without relying on Seed
-		// (custom loaders may reuse seeds for distinct polylines).
-		for axis, value := range []float64{p.X, p.Y} {
-			value = math.Round(value*1e7) / 1e7
-			if value == 0 {
-				value = 0 // canonicalize negative zero
-			}
-			binary.LittleEndian.PutUint64(bytes[16*i+8*axis:], math.Float64bits(value))
-		}
-	}
-	return sha256.Sum256(bytes)
+	return terrain.GuideKey(points, 0)
 }
 
 // coverage returns the end of the available prefix of the ray's in-world

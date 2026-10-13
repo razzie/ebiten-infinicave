@@ -44,6 +44,7 @@ type FormationID struct{ world, object uint64 }
 
 // GuideID is an opaque, comparable reference to a guide polyline. It belongs to
 // one Scene world and expires after Reset, Close, or eviction of all its copies.
+// It also expires when carving completely destroys its supporting formations.
 type GuideID struct{ world, object uint64 }
 
 // Hit describes a query intersection. Kind is TargetRock or TargetGuide; only

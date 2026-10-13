@@ -51,6 +51,9 @@ type CarveResult struct {
 // their textures; their original geometry is retained. Background rock and
 // background vines are retained.
 // Edits persist until Reset or Close, including across eviction.
+// Completely destroyed formations release their guides once no supported
+// fragment or uncached continuation remains. Reloads skip those guide sources
+// and their procedural branches.
 // Call on the game goroutine after Update. Closed scenes return an error.
 func (g *Scene) CarveCircle(center V, radius float64) (CarveResult, error) {
 	return g.Carve(Hole{Shape: HoleCircle, Center: center, Radius: radius})
@@ -134,8 +137,14 @@ func (g *Scene) carve(cut terrain.RockCut, hole Hole) (CarveResult, error) {
 	}
 	delete(affected, 0) // padding-only geometry has no query ID
 	before := make(map[uint64]Formation)
+	sources := make(map[uint64][][32]byte)
 	for id := range affected {
 		before[id] = q.formations[id]
+		for _, block := range q.formationBlocks[id] {
+			for _, face := range block.faces {
+				sources[id] = append(sources[id], block.geometry.FaceGuideKeys(face)...)
+			}
+		}
 		// Previous identity must not reconnect newly separated components.
 		for key, previous := range q.faceIDs {
 			if previous == id {
@@ -181,6 +190,7 @@ func (g *Scene) carve(cut terrain.RockCut, hole Hole) (CarveResult, error) {
 		ids = append(ids, id)
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	retired := make(map[[32]byte]bool)
 	for _, id := range ids {
 		change := FormationChange{Before: before[id].ID, Complete: before[id].Complete}
 		for part := range remaining[id] {
@@ -191,6 +201,12 @@ func (g *Scene) carve(cut terrain.RockCut, hole Hole) (CarveResult, error) {
 		sort.Slice(change.Remaining, func(i, j int) bool { return change.Remaining[i].object < change.Remaining[j].object })
 		result.Changes = append(result.Changes, change)
 		result.Complete = result.Complete && change.Complete
+		if change.Complete && len(change.Remaining) == 0 {
+			for _, key := range sources[id] {
+				retired[key] = true
+			}
+		}
 	}
+	w.retireGuides(retired)
 	return result, nil
 }
