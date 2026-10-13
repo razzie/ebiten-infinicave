@@ -16,6 +16,8 @@ type vineEdgeGraph struct {
 	edges  []vineEdge
 	links  [][]int
 	bins   map[[2]int][]int
+	// Center graphs append shared-edge midpoints after their cell centers.
+	centerCount int
 }
 
 const vineEdgeBinSize = .032
@@ -172,7 +174,7 @@ func addVineEdgeBranches(field *VineTerrain, vines []Vine, rng *rand.Rand) []Vin
 
 func traceVineEdgeBranch(field *VineTerrain, occupied vineTwigOccupancy, used []bool, root, seam geom.V, edge, end int, radius, reach float64) (Vine, []int, float64) {
 	g := field.edges
-	v := Vine{Points: []VinePoint{{root, radius}}, Parent: -1, EdgeAligned: true}
+	v := Vine{Points: []VinePoint{{root, radius}}, Parent: -1, Route: CellEdgeVineRoute, EdgeAligned: true}
 	length, exposed := 0.0, 0.0
 	// The only connector goes from the exact parent point to its nearby seam.
 	// All subsequent segments lie on the source polygon edges.

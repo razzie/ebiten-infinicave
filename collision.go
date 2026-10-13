@@ -45,7 +45,8 @@ func (w *world) receiveCollision(g *Scene) {
 				continue
 			}
 			geometry := ready.geometry
-			for _, cut := range w.cuts {
+			for _, index := range w.cutsForSection(ready.id, 0) {
+				cut := w.cuts[index].expand()
 				geometry, _, _ = cut.Geometry(ready.id, geometry, g.collisionTolerance)
 			}
 			if w.collision == nil {

@@ -41,6 +41,7 @@ type Scene struct {
 	loadSection          SectionLoader
 	onCollisionReady     func(CollisionGeometry)
 	closed               bool
+	materialsWarm        bool
 }
 
 // NewScene validates config, compiles embedded shaders, and starts generation.
@@ -184,6 +185,7 @@ func (g *Scene) DrawWithPasses(dst *ebiten.Image, viewport Viewport, passes Rend
 	if g.closed || !valid {
 		return
 	}
+	g.warmMaterials(dst)
 	target := dst
 	if g.orientation == Horizontal {
 		// Reuse the section-frame compositor at native resolution. A quarter

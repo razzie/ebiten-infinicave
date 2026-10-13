@@ -9,7 +9,7 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
 
-func guideNearest(g *Guide, p geom.V) (segment int, u float64, q geom.V, best2 float64) {
+func guideNearestVector(g *Guide, p geom.V) (segment int, u float64, q geom.V, best2 float64) {
 	if g.projection == nil || simd.Emulated() {
 		return guideNearestScalar(g, p)
 	}
@@ -18,9 +18,9 @@ func guideNearest(g *Guide, p geom.V) (segment int, u float64, q geom.V, best2 f
 	px, py := simd.BroadcastFloat64s(p.X), simd.BroadcastFloat64s(p.Y)
 	zero, one := simd.BroadcastFloat64s(0), simd.BroadcastFloat64s(1)
 	var ts, xs, ys, distances [guideProjectionBlock]float64
-	for block, bounds := range c.blocks {
-		if bounds.distance2(p) >= best2 {
-			continue
+	best2 = c.index.Nearest(p, best2, func(block int, best float64) float64 {
+		if c.blocks[block].distance2(p) > best {
+			return best
 		}
 		end := min((block+1)*guideProjectionBlock, len(c.length2))
 		for first := block * guideProjectionBlock; first < end; {
@@ -39,13 +39,14 @@ func guideNearest(g *Guide, p geom.V) (segment int, u float64, q geom.V, best2 f
 			// Reduce in segment order with the scalar strict comparison. Ties
 			// must select the first segment, including at repeated endpoints.
 			for lane := 0; lane < count; lane++ {
-				if c.length2[first+lane] != 0 && distances[lane] < best2 {
-					best2, segment, u = distances[lane], first+lane, ts[lane]
+				if c.length2[first+lane] != 0 && (distances[lane] < best || (distances[lane] == best && first+lane < segment)) {
+					best, segment, u = distances[lane], first+lane, ts[lane]
 					q = geom.V{X: xs[lane], Y: ys[lane]}
 				}
 			}
 			first += count
 		}
-	}
+		return best
+	})
 	return
 }

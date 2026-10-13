@@ -94,22 +94,18 @@ func TestMushroomStalkClippingIncludesProjectedRockWalls(t *testing.T) {
 	}
 }
 
-func TestMushroomStalkClippingUsesCurrentCutTopology(t *testing.T) {
+func TestCarveKeepsOriginalStalkOcclusionRecipeAndRemovesDamagedGroup(t *testing.T) {
 	cell := terrainRect(.4, .5, .2, .2)
 	m := terrain.Mushroom{Anchor: geom.V{X: .5, Y: .5}, Stem: []geom.V{{X: .5, Y: .52}, {X: .5, Y: .4}}, CapCenter: geom.V{X: .5, Y: .4}, CapWidth: .01, CapHeight: .005, Color: terrain.MushroomColors[0]}
-	groups := []terrain.MushroomGroup{{Mushrooms: []terrain.Mushroom{m}}}
-	data := terrain.SectionData{Foreground: terrain.RockGrid{cell}, Mushrooms: groups}
+	data := terrain.SectionData{Foreground: terrain.RockGrid{cell}, Mushrooms: []terrain.MushroomGroup{{Mushrooms: []terrain.Mushroom{m}}}}
 	geometry := terrain.PrepareTerrainGeometry(data, 0)
-	cut := terrain.RockCut{Poly: []geom.V{{X: .49, Y: -.49}, {X: .51, Y: -.49}, {X: .51, Y: -.47}, {X: .49, Y: -.47}}, Min: geom.V{X: .49, Y: -.49}, Max: geom.V{X: .51, Y: -.47}}
+	cut, _ := terrain.CutFromHole(terrain.Hole{Shape: terrain.HoleCircle, Center: geom.V{X: .5, Y: -.49}, Radius: .014})
 	carved, _, changed := cut.Geometry(0, geometry, 0)
-	if !changed {
-		t.Fatal("test cut did not remove rock around the buried stalk")
+	carved, plantsChanged := cut.Plants(carved)
+	if !changed || !plantsChanged || len(carved.Vegetation.Mushrooms) != 0 {
+		t.Fatal("stalk damage retained the mushroom")
 	}
-	before := PrepareMushrooms(groups, geometry.Topology)
-	after := PrepareMushrooms(groups, carved.Topology)
-	oldArea, _ := mushroomStalkAreas(t, before, geometry.Grid)
-	newArea, _ := mushroomStalkAreas(t, after, carved.Grid)
-	if newArea <= oldArea+1e-6 {
-		t.Fatal("terrain cut did not expose the newly uncovered stalk")
+	if !reflect.DeepEqual(PrepareMushrooms(data.Mushrooms, geometry.Topology), PrepareMushrooms(data.Mushrooms, carved.Topology)) {
+		t.Fatal("cut regenerated or exposed the old stalk recipe")
 	}
 }

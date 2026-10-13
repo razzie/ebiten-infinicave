@@ -9,16 +9,18 @@ import (
 
 type Face struct {
 	Poly     []geom.V
+	Holes    [][]geom.V
 	Min, Max geom.V
 	block    int
 	Key      [2]int64 // stable world-space interior point
 }
 
-// Retain the same clipped faces used for rendering and derive collision
-// boundaries from their union for collisions, queries, and terrain edits.
+// Structural loops are independent of the original material facets. Carving
+// replaces loops and attachment state while retaining the immutable bake data.
 type Geometry struct {
+	Shapes     []RockShape   // exact editable loops; Grid/Topology retain the bake recipe
 	source     *RockTopology // stable shape identity across material binding and cuts
-	Grid       RockGrid      // final inset faces, retained for terrain edits
+	Grid       RockGrid      // original inset material facets, retained for baking
 	Topology   *RockTopology // immutable adjacency and boundaries shared with rendering
 	Cuts       []RockCut
 	Vegetation Vegetation
@@ -76,7 +78,117 @@ func PrepareTerrainGeometry(data SectionData, tolerance float64) *Geometry {
 		h.Blocks = append(h.Blocks, queue)
 	}
 	h.Collision = prepareCollisionGeometry(data.ID, grid, source.allBoundary, h, tolerance)
+	// Compact structural geometry to union loops. Appearance cells no longer
+	// determine edit cost or query identity granularity.
+	var shapes []RockShape
+	for block := range h.Blocks {
+		var edges []RockEdge
+		for _, e := range source.allBoundary {
+			if h.Faces[e.Cell].block == block {
+				edges = append(edges, e)
+			}
+		}
+		loops, ok := TraceCollisionLoops(edges)
+		if !ok {
+			for _, i := range h.Blocks[block] {
+				loops = append(loops, h.Faces[i].Poly)
+			}
+		}
+		shapes = append(shapes, SplitLoops(loops)...)
+	}
+	h.setShapes(shapes)
+	if len(h.Cuts) > 0 {
+		h.tagAuthoredCutEdges()
+	}
 	return h
+}
+
+func (h *Geometry) tagAuthoredCutEdges() {
+	var edges []RockEdge
+	for _, cut := range h.Cuts {
+		poly := cut.localPolygon(h.Top)
+		for i, p := range poly {
+			edges = append(edges, RockEdge{A: p, B: poly[(i+1)%len(poly)]})
+		}
+	}
+	index := geom.NewBoundsIndex(edgeBounds(edges, 1e-8))
+	for i := range h.Shapes {
+		for j, e := range h.Shapes[i].edges {
+			p := geom.LerpVector(e.A, e.B, .5)
+			index.Query(geom.Bounds{Min: p, Max: p}, func(k int) bool {
+				c := edges[k]
+				if geom.SegmentDistanceSquared(p, p, c.A, c.B) < 1e-16 {
+					h.Shapes[i].edges[j].Cell = -1
+					return false
+				}
+				return true
+			})
+		}
+	}
+}
+
+func (h *Geometry) setShapes(shapes []RockShape) {
+	h.Shapes = shapes
+	h.Faces = nil
+	h.Blocks = nil
+	for i, s := range shapes {
+		poly := s.Loops[0]
+		// A canonical boundary point is independent of shade and resolution.
+		ordered := geom.OrderPolygon(poly)
+		p := geom.LerpVector(ordered[0], ordered[1], .5).Add(ordered[1].Sub(ordered[0]).Norm().Perp().Mul(1e-6))
+		key := [2]int64{int64(math.Round(p.X * 1e7)), int64(math.Round((p.Y + h.Top) * 1e7))}
+		h.Faces = append(h.Faces, Face{Poly: poly, Holes: s.Loops[1:], Min: s.Min, Max: s.Max, Key: key, block: i})
+		h.Blocks = append(h.Blocks, []int{i})
+	}
+}
+
+func (h *Geometry) CutEdges() []RockEdge {
+	var edges []RockEdge
+	for _, s := range h.Shapes {
+		for _, e := range s.edges {
+			if e.Cell < 0 {
+				edges = append(edges, e)
+			}
+		}
+	}
+	return edges
+}
+
+func (h *Geometry) CutEdgesInBounds(bounds geom.Bounds) []RockEdge {
+	var edges []RockEdge
+	for _, s := range h.Shapes {
+		s.index.Query(bounds, func(i int) bool {
+			if e := s.edges[i]; e.Cell < 0 {
+				edges = append(edges, e)
+			}
+			return true
+		})
+	}
+	return edges
+}
+
+func (h *Geometry) shapeCollision(id int64, tolerance float64) CollisionGeometry {
+	c := CollisionGeometry{ID: -id, Top: h.Top, Origin: geom.V{Y: h.Top}, Min: geom.V{Y: h.Top}, Max: geom.V{X: Width, Y: h.Top + SectionHeight}}
+	for _, s := range h.Shapes {
+		loops := s.Loops
+		if tolerance > 0 {
+			candidate := make([][]geom.V, len(loops))
+			for i, p := range loops {
+				candidate[i] = simplifyCollisionLoop(p, tolerance)
+			}
+			if compatibleCollisionLoops(loops, candidate) {
+				loops = candidate
+			}
+		}
+		for _, p := range loops {
+			out := make([]geom.V, len(p))
+			for i, v := range p {
+				out[i] = v.Add(geom.V{Y: h.Top})
+			}
+			c.Polygons = append(c.Polygons, out)
+		}
+	}
+	return c
 }
 
 // BindTerrainMaterial reuses collision and connected components from the early

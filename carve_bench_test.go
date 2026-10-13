@@ -1,7 +1,9 @@
 package infinicave
 
 import (
+	"sort"
 	"testing"
+	"time"
 
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
@@ -14,7 +16,7 @@ func BenchmarkCarve(b *testing.B) {
 	for i := range data {
 		data[i] = terrain.BuildSection(42, int64(i))
 	}
-	for _, name := range []string{"circle", "segment"} {
+	for _, name := range []string{"circle", "segment", "overlap"} {
 		b.Run(name, func(b *testing.B) {
 			original := queryScene(data...)
 			original.collisionTolerance = 0
@@ -27,6 +29,7 @@ func BenchmarkCarve(b *testing.B) {
 				}
 			}
 			b.ResetTimer()
+			durations := make([]time.Duration, 0, b.N)
 			for i := 0; i < b.N; i++ {
 				b.StopTimer()
 				scene := &Scene{world: &world{sections: make(map[int64]*worldSection)}}
@@ -34,18 +37,30 @@ func BenchmarkCarve(b *testing.B) {
 					scene.world.sections[id] = &worldSection{geometry: section.geometry}
 				}
 				scene.world.queryIndex()
+				if name == "overlap" {
+					if _, err := scene.CarveCircle(center.Sub(V{X: .025}), .05); err != nil {
+						b.Fatal(err)
+					}
+				}
 				b.StartTimer()
+				start := time.Now()
 				var result CarveResult
 				var err error
-				if name == "circle" {
+				if name == "circle" || name == "overlap" {
 					result, err = scene.CarveCircle(center, .05)
 				} else {
 					result, err = scene.CarveSegment(center.Sub(V{X: .2}), center.Add(V{X: .2}), .02)
 				}
+				elapsed := time.Since(start)
+				b.StopTimer()
+				durations = append(durations, elapsed)
 				if err != nil || len(result.SectionIDs) == 0 {
 					b.Fatalf("carve missed generated rock: %+v, %v", result, err)
 				}
 			}
+			sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+			b.ReportMetric(float64(durations[len(durations)/2]), "median-ns")
+			b.ReportMetric(float64(durations[min(len(durations)-1, (len(durations)*95+99)/100-1)]), "p95-ns")
 		})
 	}
 }

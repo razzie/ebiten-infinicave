@@ -81,7 +81,7 @@ func TestWorldWorkerPreparesAllLayers(t *testing.T) {
 		if early == mesh.Geometry || !reflect.DeepEqual(early.Collision, mesh.Geometry.Collision) || len(early.Vegetation.Vines) != 0 {
 			t.Fatal("worker mutated or replaced early collision boundaries")
 		}
-		if mesh.ID != 0 || len(mesh.Background.Faces.Indices) == 0 || len(mesh.Foreground.Faces.Indices) == 0 || len(mesh.Vines) == 0 || len(mesh.ForegroundVines) == 0 || len(mesh.Mushrooms.Indices) == 0 {
+		if mesh.ID != 0 || len(mesh.Background.Faces.Indices) == 0 || len(mesh.Foreground.Faces.Indices) == 0 || len(mesh.Vines) == 0 || len(mesh.ForegroundVines) == 0 || len(mesh.Plants) == 0 {
 			t.Fatal("worker returned incomplete section geometry")
 		}
 		checkMesh(t, mesh.Background.Faces)
@@ -349,9 +349,7 @@ func TestSceneSpiderWebDensitySurvivesResetAndCarving(t *testing.T) {
 						if !changed {
 							t.Fatal("fixture carve did not change terrain")
 						}
-						carved := render.SectionMesh{Geometry: geometry}
-						scene.prepareCarvedVegetation(&carved)
-						check(carved.Geometry.Topology)
+						check(geometry.Topology)
 					case <-time.After(20 * time.Second):
 						t.Fatal("streamed section did not complete")
 					}

@@ -36,7 +36,8 @@ type Config struct {
 	SpikeDensity float64
 	// EdgeRoughness controls shallow angular chips on exposed rock edges,
 	// from 0 (disabled) to 1. The viewer default is 0.75.
-	// Both edge settings affect collision geometry as well as rendering.
+	// Both edge settings decorate the rendered edge without adding vertices
+	// to structural polygons or changing collision and query geometry.
 	EdgeRoughness float64
 	// Texture is surface grain strength, from 0 (disabled) to 16.
 	Texture float64
@@ -61,7 +62,7 @@ type Config struct {
 	// Bats use world coordinates and are hidden outside ViewShaded.
 	BatsPerMinute float64
 	// MushroomDensity is the probability of retaining a mushroom cluster,
-	// from 0 (disabled) to 1 (the default appearance). Placement remains
+	// from 0 (disabled) to 1 (all eligible groups). The viewer default is 0.5. Placement remains
 	// deterministic for a seed; lower density preserves surviving clusters.
 	MushroomDensity float64
 	// MossDensity controls green and yellow moss on upward-facing foreground

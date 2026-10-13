@@ -1,12 +1,17 @@
 package terrain
 
-import "github.com/razzie/ebiten-infinicave/internal/geom"
+import (
+	"github.com/razzie/ebiten-infinicave/internal/geom"
+	"sort"
+)
 
 type webFaceBounds struct{ lo, hi geom.V }
 
 type webClearance struct {
-	grid   RockGrid
-	bounds []webFaceBounds
+	grid      RockGrid
+	bounds    []webFaceBounds
+	index     *geom.BoundsIndex
+	edgeIndex *geom.BoundsIndex
 }
 
 func newWebClearance(grid RockGrid) webClearance {
@@ -16,17 +21,24 @@ func newWebClearance(grid RockGrid) webClearance {
 			c.bounds[i].lo, c.bounds[i].hi = geom.PolygonBounds(face.Polygon)
 		}
 	}
+	bounds := make([]geom.Bounds, len(c.bounds))
+	for i, b := range c.bounds {
+		bounds[i] = geom.Bounds{Min: b.lo, Max: b.hi}
+	}
+	c.index = geom.NewBoundsIndex(bounds)
 	return c
 }
 
 func (c webClearance) nearby(lo, hi geom.V, reuse []int) []int {
 	reuse = reuse[:0]
-	for i, b := range c.bounds {
+	c.index.Query(geom.Bounds{Min: lo, Max: hi}, func(i int) bool {
+		b := c.bounds[i]
 		if c.grid[i].Raised && c.grid[i].Color.A != 0 &&
 			b.hi.X >= lo.X && b.lo.X <= hi.X && b.hi.Y >= lo.Y && b.lo.Y <= hi.Y {
 			reuse = append(reuse, i)
 		}
-	}
+		return true
+	})
 	return reuse
 }
 
@@ -80,7 +92,17 @@ func extraWebAnchor(w SpiderWeb, reach float64, edges []RockEdge, clearance webC
 	best := reach * reach * .50
 	var anchor geom.V
 	cell := -1
-	for _, edge := range edges {
+	var candidates []int
+	if clearance.edgeIndex != nil {
+		clearance.edgeIndex.Query(geom.Bounds{Min: probe.Sub(geom.V{X: reach, Y: reach}), Max: probe.Add(geom.V{X: reach, Y: reach})}, func(i int) bool { candidates = append(candidates, i); return true })
+		sort.Ints(candidates)
+	} else {
+		for i := range edges {
+			candidates = append(candidates, i)
+		}
+	}
+	for _, i := range candidates {
+		edge := edges[i]
 		d := edge.B.Sub(edge.A)
 		if d.Len2() < 1e-20 {
 			continue

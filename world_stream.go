@@ -87,8 +87,10 @@ func (w *world) startUpload(data render.SectionMesh) {
 }
 
 const (
-	uploadForegroundFaces = iota
+	uploadRockUnderlay = iota
+	uploadForegroundFaces
 	uploadForegroundOutlines
+	uploadRockGrowth
 	uploadGrass
 	uploadForegroundPublish
 	uploadBackgroundFaces
@@ -115,6 +117,7 @@ type sectionUpload struct {
 	needed                                             render.MeshLayers
 	surface                                            *ebiten.Image
 	faceNext                                           int
+	instancePart                                       int
 }
 
 // Limit draw submissions per tick as well as separating the large layer
@@ -125,10 +128,9 @@ const uploadTimePerTick = 2 * time.Millisecond
 
 const uploadIndicesPerTick = 128 * 1024
 
-// One budget covers every stage advanced in a tick. GPU stages stay on
-// separate ticks because CPU submission time cannot predict GPU cost. Empty
-// stages and publication can advance immediately. A single oversized mesh may
-// exceed the index budget so it can still make progress.
+// One budget covers every stage advanced in a tick. Large shader passes stay
+// on separate ticks; small attachment and outline stages can share the same
+// draw/time/index budget. A single oversized mesh can still make progress.
 type uploadBudget struct {
 	start          time.Time
 	draws, indices int
@@ -136,7 +138,10 @@ type uploadBudget struct {
 }
 
 func (b *uploadBudget) enter(stage int) bool {
-	if b.draws > 0 && b.stage != stage {
+	heavy := func(s int) bool {
+		return s == uploadForegroundFaces || s == uploadBackgroundFaces || s == uploadBackgroundFade || s == uploadVineFinish
+	}
+	if b.draws > 0 && b.stage != stage && (heavy(stage) || heavy(b.stage) || b.indices > 32*1024) {
 		return false
 	}
 	b.stage = stage
@@ -261,18 +266,38 @@ func (w *world) discardIncomplete(id int64) {
 }
 
 func (w *world) needsForeground(mesh render.SectionMesh) bool {
-	if mesh.LayerMask()&render.ForegroundLayer == 0 {
+	if mesh.LayerMask()&w.viewportLayers(mesh.ID)&render.ForegroundLayer == 0 {
 		return false
 	}
 	section := w.sections[mesh.ID]
 	return section == nil || section.foreground == nil || section.renderWidth() != w.renderWidth() || !terrain.SameTerrain(section.geometry, mesh.Geometry)
 }
 
+// Neighbor windows contribute crossing plants, while their rock bands are
+// entirely outside the viewport. Retain CPU recipes for later scrolling and
+// avoid uploading those offscreen rock images merely to publish their plants.
+func (w *world) viewportLayers(id int64) render.MeshLayers {
+	if render.ValidViewport(w.viewport) {
+		low, high := visibleSections(w.viewport.Y, w.viewport.Height)
+		if id < low || id > high {
+			return render.VegetationLayer
+		}
+	}
+	return render.ForegroundLayer | render.BackgroundLayer | render.VegetationLayer
+}
+
+func (w *world) needsVisibleRefresh(id int64, s *worldSection) bool {
+	if w.viewportLayers(id)&render.ForegroundLayer != 0 {
+		return s.needsRefresh(w.renderWidth())
+	}
+	return s.mesh != nil && s.mesh.LayerMask()&render.VegetationLayer != 0 && (s.vegetationPending || s.vegetationWidth() != w.renderWidth())
+}
+
 func (w *world) uploadPriority(mesh render.SectionMesh) int {
 	priority := 2 // Vegetation follows both rock layers.
 	if w.needsForeground(mesh) {
 		priority = 0
-	} else if mesh.LayerMask()&render.BackgroundLayer != 0 {
+	} else if mesh.LayerMask()&w.viewportLayers(mesh.ID)&render.BackgroundLayer != 0 {
 		s := w.sections[mesh.ID]
 		if s == nil || s.terrain == nil || s.backgroundWidth() != w.renderWidth() || s.mesh == nil || !sameGridMesh(s.mesh.Background, mesh.Background) {
 			priority = 1
@@ -338,7 +363,7 @@ func (w *world) receive(g *Scene) {
 	}
 	if !u.initialized {
 		g.applyStoredCuts(&u.data)
-		u.needed = u.data.LayerMask()
+		u.needed = u.data.LayerMask() & w.viewportLayers(u.data.ID)
 		section := w.sections[u.data.ID]
 		if section != nil {
 			if section.foreground != nil && section.renderWidth() == u.pixels && terrain.SameTerrain(section.geometry, u.data.Geometry) {
@@ -355,7 +380,12 @@ func (w *world) receive(g *Scene) {
 		u.stage = u.firstStage()
 	}
 	if u.stage == uploadDone {
+		previous := w.sections[u.data.ID]
+		newGeometry := u.data.Geometry != nil && (previous == nil || previous.geometry == nil)
 		w.updateSectionSource(u)
+		if newGeometry {
+			w.revision++
+		}
 		w.upload = nil
 		return
 	}
@@ -366,6 +396,17 @@ func (w *world) receive(g *Scene) {
 	top := terrain.SectionWindowTop(u.data.ID)
 	for {
 		switch u.stage {
+		case uploadRockUnderlay:
+			if !budget.available() {
+				return
+			}
+			if u.foreground == nil {
+				u.raster.Foreground = render.ScaleGridMesh(u.data.Foreground, u.pixels, 0)
+				u.foreground = render.NewSectionImageAt(terrain.SectionHeight, u.pixels)
+			}
+			if !w.uploadAttachments(g, u.foreground, u.raster.Foreground.Growth, false, true, &budget) {
+				return
+			}
 		case uploadForegroundFaces:
 			if !budget.available() {
 				return
@@ -381,6 +422,10 @@ func (w *world) receive(g *Scene) {
 			if !w.uploadMeshes(u.foreground, u.raster.Foreground.Outlines, &budget) {
 				return
 			}
+		case uploadRockGrowth:
+			if !w.uploadAttachments(g, u.foreground, u.raster.Foreground.Growth, false, false, &budget) {
+				return
+			}
 		case uploadGrass:
 			mesh := u.raster.Foreground.Grass
 			if len(mesh.Indices) > 0 {
@@ -394,7 +439,16 @@ func (w *world) receive(g *Scene) {
 					return
 				}
 			}
+			if render.HasLiveAttachments(u.raster.Foreground.Growth, true) {
+				if u.grass == nil {
+					u.grass = render.NewSectionImageAt(terrain.SectionHeight, u.pixels)
+				}
+				if !w.uploadAttachments(g, u.grass, u.raster.Foreground.Growth, true, false, &budget) {
+					return
+				}
+			}
 		case uploadForegroundPublish:
+			g.maskUploadForeground(u)
 			section := w.sectionForUpload(u)
 			changed := section.foreground == nil || !terrain.SameTerrain(section.geometry, u.data.Geometry)
 			if section.foreground != nil {
@@ -465,6 +519,7 @@ func (w *world) receive(g *Scene) {
 				u.raster.ForegroundVines, u.raster.ForegroundVinesBounds = plants.ForegroundVines, plants.ForegroundVinesBounds
 				u.raster.Mushrooms, u.raster.MushroomsBounds = plants.Mushrooms, plants.MushroomsBounds
 				u.raster.SpiderWebs, u.raster.SpiderWebsBounds = plants.SpiderWebs, plants.SpiderWebsBounds
+				u.raster.Plants, u.raster.Webs = plants.Plants, plants.Webs
 				if !plants.VinesBounds.Empty() {
 					u.vines = render.NewVegetationImage(plants.VinesBounds)
 				}
@@ -477,30 +532,35 @@ func (w *world) receive(g *Scene) {
 				return
 			}
 			u.vines = g.finishVinesAt(u.vines, u.raster.VinesBounds, top, u.pixels)
-			if u.data.Geometry != nil {
-				render.EraseVineCutsAt(u.vines, u.raster.VinesBounds, top, u.data.Geometry.Vegetation.Cuts, u.pixels)
-			}
 		case uploadSpiderWebs:
-			if !u.raster.SpiderWebsBounds.Empty() {
+			if !u.raster.SpiderWebsBounds.Empty() && (!u.data.BakedInstances || render.HasLiveAttachments(u.raster.Webs, false)) {
 				if !budget.available() {
 					return
 				}
 				if u.spiderWebs == nil {
 					u.spiderWebs = render.NewVegetationImage(u.raster.SpiderWebsBounds)
 				}
-				if !w.uploadFaces(g, u.spiderWebs, u.raster.SpiderWebs, top, false, &budget) {
+				if u.data.BakedInstances {
+					if !w.uploadPlantInstances(g, u.spiderWebs, u.raster.Webs, &budget) {
+						return
+					}
+				} else if !w.uploadFaces(g, u.spiderWebs, u.raster.SpiderWebs, top, false, &budget) {
 					return
 				}
 			}
 		case uploadMushrooms:
-			if !u.raster.MushroomsBounds.Empty() {
+			if !u.raster.MushroomsBounds.Empty() && (!u.data.BakedInstances || render.HasLiveAttachments(u.raster.Plants, false)) {
 				if !budget.available() {
 					return
 				}
 				if u.mushrooms == nil {
 					u.mushrooms = render.NewVegetationImage(u.raster.MushroomsBounds)
 				}
-				if !w.uploadFaces(g, u.mushrooms, u.raster.Mushrooms, top, false, &budget) {
+				if u.data.BakedInstances {
+					if !w.uploadPlantInstances(g, u.mushrooms, u.raster.Plants, &budget) {
+						return
+					}
+				} else if !w.uploadFaces(g, u.mushrooms, u.raster.Mushrooms, top, false, &budget) {
 					return
 				}
 			}
@@ -516,11 +576,9 @@ func (w *world) receive(g *Scene) {
 					return
 				}
 			}
-			if u.data.Geometry != nil {
-				render.EraseVineCutsAt(u.foregroundVines, u.raster.ForegroundVinesBounds, top, u.data.Geometry.Vegetation.Cuts, u.pixels)
-			}
 		case uploadPlantsPublish:
 			section := w.sectionForUpload(u)
+			newGeometry := section.geometry == nil && u.data.Geometry != nil
 			for _, img := range []*ebiten.Image{section.vines, section.foregroundVines, section.mushrooms, section.spiderWebs} {
 				if img != nil {
 					img.Deallocate()
@@ -533,7 +591,11 @@ func (w *world) receive(g *Scene) {
 			section.vinesBounds, section.foregroundVinesBounds, section.mushroomsBounds = u.raster.VinesBounds, u.raster.ForegroundVinesBounds, u.raster.MushroomsBounds
 			section.vegetationPixels = u.pixels
 			section.vegetationPending = false
+			g.maskUploadPlants(section, u)
 			w.updateSectionSource(u)
+			if newGeometry {
+				w.revision++
+			}
 			w.upload = nil
 			return
 		}
@@ -547,7 +609,7 @@ func sameGridMesh(a, b render.GridMesh) bool {
 }
 func (u *sectionUpload) firstStage() int {
 	if u.needed&render.ForegroundLayer != 0 {
-		return uploadForegroundFaces
+		return uploadRockUnderlay
 	}
 	if u.needed&render.BackgroundLayer != 0 {
 		return uploadBackgroundFaces

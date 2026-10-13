@@ -1,8 +1,9 @@
 package terrain
 
 import (
-	"github.com/razzie/ebiten-infinicave/internal/geom"
 	"math"
+
+	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
 
 const guideProjectionBlock = 8
@@ -21,6 +22,7 @@ type guideProjection struct {
 	length2        []float64
 	blocks         []projectionBounds
 	ax, ay, dx, dy []float64
+	index          *geom.BoundsIndex
 }
 
 func (g *Guide) prepareProjection() {
@@ -45,25 +47,50 @@ func (g *Guide) prepareProjection() {
 		cache.blocks = append(cache.blocks, b)
 	}
 	g.projection = cache
+	bounds := make([]geom.Bounds, len(cache.blocks))
+	for i, b := range cache.blocks {
+		bounds[i] = geom.Bounds{Min: b.lo, Max: b.hi}
+	}
+	cache.index = geom.NewBoundsIndex(bounds)
 }
 
 func guideNearestScalar(g *Guide, p geom.V) (segment int, u float64, q geom.V, best2 float64) {
-	best2 = math.Inf(1)
+	segment, u, q, best2 = guideNearestScalarLimit(g, p, math.Inf(1))
+	if segment < 0 {
+		segment = 0
+	}
+	return
+}
+func guideNearestScalarLimit(g *Guide, p geom.V, limit float64) (segment int, u float64, q geom.V, best2 float64) {
+	segment = -1
+	best2 = limit
+	if g.projection != nil {
+		c := g.projection
+		best2 = c.index.Nearest(p, best2, func(block int, best float64) float64 {
+			if c.blocks[block].distance2(p) > best {
+				return best
+			}
+			for i := block * guideProjectionBlock; i < min((block+1)*guideProjectionBlock, len(c.length2)); i++ {
+				if c.length2[i] == 0 {
+					continue
+				}
+				d := geom.V{X: c.dx[i], Y: c.dy[i]}
+				a := geom.V{X: c.ax[i], Y: c.ay[i]}
+				t := geom.Clamp(p.Sub(a).Dot(d)/c.length2[i], 0, 1)
+				point := a.Add(d.Mul(t))
+				distance := p.Sub(point).Len2()
+				if distance < best || (distance == best && (segment < 0 || i < segment)) {
+					best, segment, u, q = distance, i, t, point
+				}
+			}
+			return best
+		})
+		return
+	}
 	for i := 0; i < len(g.Pts)-1; i++ {
 		a := g.Pts[i]
-		var d geom.V
-		var l2 float64
-		if g.projection != nil {
-			if i%guideProjectionBlock == 0 && g.projection.blocks[i/guideProjectionBlock].distance2(p) >= best2 {
-				i = min(i+guideProjectionBlock, len(g.Pts)-1) - 1
-				continue
-			}
-			d = geom.V{X: g.projection.dx[i], Y: g.projection.dy[i]}
-			l2 = g.projection.length2[i]
-		} else {
-			d = g.Pts[i+1].Sub(a)
-			l2 = d.Len2()
-		}
+		d := g.Pts[i+1].Sub(a)
+		l2 := d.Len2()
 		if l2 == 0 {
 			continue
 		}

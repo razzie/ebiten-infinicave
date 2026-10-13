@@ -15,6 +15,8 @@ import (
 // Prepared meshes contain only CPU data. A worker owns them until it sends
 // the section through results; the game loop then owns all GPU resources.
 type TriangleMesh struct {
+	Index         *geom.BoundsIndex
+	Texture       AtlasKind
 	Vertices      []ebiten.Vertex
 	Indices       []uint32
 	fillRule      ebiten.FillRule
@@ -22,8 +24,10 @@ type TriangleMesh struct {
 }
 
 type GridMesh struct {
-	Faces    TriangleMesh
-	Outlines []TriangleMesh
+	GrowthIndex *geom.BoundsIndex
+	Growth      []Attachment
+	Faces       TriangleMesh
+	Outlines    []TriangleMesh
 	// Grass contains ground patches and blades, drawn after AboveRocks.
 	Grass TriangleMesh
 }
@@ -38,6 +42,12 @@ const (
 )
 
 type SectionMesh struct {
+	PlantIndex, WebIndex                                *geom.BoundsIndex
+	BakedInstances                                      bool
+	Webs                                                []Attachment
+	VisualCuts                                          []terrain.RockCut
+	AppliedCuts                                         uint64
+	Plants                                              []Attachment
 	Layers                                              MeshLayers
 	ID                                                  int64
 	TerrainOnly                                         bool
@@ -51,13 +61,14 @@ type SectionMesh struct {
 }
 
 func PrepareSection(data terrain.SectionData, view View, growth ...RockGrowthOptions) SectionMesh {
-	mesh := SectionMesh{ID: data.ID}
+	mesh := SectionMesh{ID: data.ID, BakedInstances: view == ViewShaded}
+	data = sectionBakeVegetation(data)
 	parallel.Run(
 		func() {
 			mesh.Background = prepareGridWithNeighbors(data.Background, view, nil, data.BackgroundNeighbors)
 		},
 		func() {
-			mesh.Foreground = PrepareGridWithTopology(data.Foreground, view, data.ForegroundTopology, sectionRockGrowth(data, growth))
+			mesh.Foreground = PrepareGridWithTopology(data.Foreground, view, sectionBakeTopology(data), sectionRockGrowth(data, growth))
 		},
 		func() {
 			if view == ViewShaded {
@@ -71,13 +82,16 @@ func PrepareSection(data terrain.SectionData, view View, growth ...RockGrowthOpt
 		},
 		func() {
 			if view == ViewShaded {
-				mesh.Mushrooms = PrepareMushrooms(data.Mushrooms, mushroomSectionTopology(data))
+				mesh.Mushrooms = prepareUnsampledMushrooms(data.Mushrooms, mushroomBakeTopology(data), false)
+				mesh.Plants = prepareMushroomAttachments(data.Mushrooms, mushroomBakeTopology(data), data.Orientation)
 			}
 		},
 	)
 	if view == ViewShaded && data.ForegroundTopology != nil {
-		mesh.SpiderWebs = prepareSpiderWebs(data.ForegroundTopology.SpiderWebs, false)
+		mesh.SpiderWebs = prepareSpiderWebs(sectionBakeTopology(data).SpiderWebs, false)
+		mesh.Webs = prepareWebAttachments(sectionBakeTopology(data).SpiderWebs, false)
 	}
+	applyAuthoredVisualCuts(&mesh, data)
 	return mesh
 }
 
@@ -90,28 +104,33 @@ func PrepareTerrain(data terrain.SectionData, view View, growth ...RockGrowthOpt
 			mesh.Background = prepareGridBand(data.Background, view, nil, data.BackgroundNeighbors, true)
 		},
 		func() {
-			mesh.Foreground = PrepareOwnedGridWithTopology(data.Foreground, view, data.ForegroundTopology, sectionRockGrowth(data, growth))
+			mesh.Foreground = PrepareOwnedGridWithTopology(data.Foreground, view, sectionBakeTopology(data), sectionRockGrowth(data, growth))
 		},
 	)
+	applyAuthoredVisualCuts(&mesh, data)
 	return mesh
 }
 
 func PrepareVegetation(data terrain.SectionData, view View) SectionMesh {
-	mesh := SectionMesh{ID: data.ID, Layers: VegetationLayer}
+	mesh := SectionMesh{ID: data.ID, Layers: VegetationLayer, BakedInstances: view == ViewShaded}
+	data = sectionBakeVegetation(data)
 	if view == ViewShaded {
 		parallel.Run(
 			func() { mesh.Vines = PrepareVines(data.Vines) },
 			func() { mesh.ForegroundVines = PrepareForegroundVines(data.ForegroundVines, data.Orientation) },
 			func() {
-				mesh.Mushrooms = PrepareOwnedMushrooms(data.Mushrooms, mushroomSectionTopology(data))
+				mesh.Mushrooms = prepareUnsampledMushrooms(data.Mushrooms, mushroomBakeTopology(data), true)
+				mesh.Plants = prepareMushroomAttachments(data.Mushrooms, mushroomBakeTopology(data), data.Orientation)
 			},
 			func() {
 				if data.ForegroundTopology != nil {
-					mesh.SpiderWebs = PrepareOwnedSpiderWebs(data.ForegroundTopology.SpiderWebs)
+					mesh.SpiderWebs = PrepareOwnedSpiderWebs(sectionBakeTopology(data).SpiderWebs)
+					mesh.Webs = prepareWebAttachments(sectionBakeTopology(data).SpiderWebs, true)
 				}
 			},
 		)
 	}
+	applyAuthoredVisualCuts(&mesh, data)
 	FinishSectionMesh(&mesh)
 	return mesh
 }
@@ -158,6 +177,7 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 	vertices := make([]ebiten.Vertex, 0, capacity)
 	indices := make([]uint32, 0, capacity)
 	var boundary []terrain.RockEdge
+	var walls []Attachment
 	raised := len(grid) > 0 && grid[0].Raised
 	if raised {
 		if topology != nil {
@@ -171,12 +191,16 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 	} else {
 		grid = terrain.ShadeRockFaces(grid, boundary, neighbors)
 	}
+	var trim []Attachment
+	if raised && (view == ViewShaded || view == ViewClay) {
+		grid, boundary, trim = visualBoundaryGrid(grid, boundary, density, owned, view)
+	}
 	if raised {
 		if view == ViewShaded {
-			vertices, indices = appendHangingRockGrowth(vertices, indices, grid, boundary, owned, density.Hanging)
+			// Growth is instanced from shared procedural atlas pages below.
 		}
 		if view == ViewShaded || view == ViewClay {
-			vertices, indices = appendRockWalls(vertices, indices, grid, boundary, view, owned)
+			walls = prepareWallAttachments(grid, boundary, view, owned)
 		}
 	}
 	type cellEdge struct {
@@ -193,7 +217,7 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 		}
 		vertices, indices = appendCellMesh(vertices, indices, poly, s, clr, cell.Normal)
 		if raised && view == ViewShaded {
-			vertices, indices = appendRockMoss(vertices, indices, cell, density.Moss)
+			// Surface moss is clipped atlas geometry, generated below.
 		}
 		if raised {
 			continue // Foreground seams are selected from actual shared relief.
@@ -226,13 +250,35 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 	if view == ViewShaded || view == ViewClay {
 		vertices, indices = appendRockBevels(vertices, indices, grid, boundary, view, owned)
 	}
-	if topology != nil && len(topology.Cuts) > 0 && (view == ViewShaded || view == ViewClay) {
-		vertices, indices = appendCarveRims(vertices, indices, topology, view, owned)
-	}
 	mesh := GridMesh{Faces: TriangleMesh{Vertices: vertices, Indices: indices}}
+	mesh.Growth = append(walls, trim...)
 	if raised && view == ViewShaded {
-		mesh.Grass = prepareRockGrass(grid, density.Guides, owned, density.Grass)
+		growth := prepareGrowthAttachments(grid, boundary, density, owned)
+		growth = append(growth, trim...)
+		var ordered []Attachment
+		for _, a := range growth {
+			if a.Underlay {
+				ordered = append(ordered, a)
+			}
+		}
+		ordered = append(ordered, walls...)
+		for _, a := range growth {
+			if !a.Underlay {
+				ordered = append(ordered, a)
+			}
+		}
+		mesh.Growth = ordered
 	}
+	if len(grid) > 0 {
+		for i := range mesh.Growth {
+			p := geom.LerpVector(mesh.Growth[i].Min, mesh.Growth[i].Max, .5)
+			if len(mesh.Growth[i].Anchors) > 0 {
+				p = mesh.Growth[i].Anchors[0]
+			}
+			mesh.Growth[i].ID = terrain.CollisionVertexKey(terrain.RockMaterialPoint(grid[0], p))
+		}
+	}
+	mesh.GrowthIndex = AttachmentIndex(mesh.Growth)
 	if len(indices) == 0 {
 		return mesh
 	}
@@ -301,6 +347,9 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 			})
 		}
 	}
+	if raised {
+		mesh.Faces.Index = MeshIndex(mesh.Faces)
+	}
 	return mesh
 }
 
@@ -325,6 +374,9 @@ func MergeSectionMeshes(previous, next SectionMesh) SectionMesh {
 		previous.Background = next.Background
 	}
 	if mask&VegetationLayer != 0 {
+		previous.BakedInstances = next.BakedInstances
+		previous.Plants, previous.Webs = next.Plants, next.Webs
+		previous.PlantIndex, previous.WebIndex = next.PlantIndex, next.WebIndex
 		previous.Vines, previous.ForegroundVines, previous.Mushrooms = next.Vines, next.ForegroundVines, next.Mushrooms
 		previous.VinesBounds, previous.ForegroundVinesBounds, previous.MushroomsBounds = next.VinesBounds, next.ForegroundVinesBounds, next.MushroomsBounds
 		previous.SpiderWebs, previous.SpiderWebsBounds = next.SpiderWebs, next.SpiderWebsBounds
@@ -335,12 +387,32 @@ func MergeSectionMeshes(previous, next SectionMesh) SectionMesh {
 	if next.Geometry != nil {
 		previous.Geometry = next.Geometry
 	}
+	previous.AppliedCuts = min(previous.AppliedCuts, next.AppliedCuts)
+	cuts := append([]terrain.RockCut(nil), previous.VisualCuts...)
+	for _, cut := range next.VisualCuts {
+		found := false
+		for _, old := range cuts {
+			if old.Min == cut.Min && old.Max == cut.Max {
+				found = true
+				break
+			}
+		}
+		if !found {
+			cuts = append(cuts, cut)
+		}
+	}
+	previous.VisualCuts = cuts
+	top := terrain.SectionTop(previous.ID)
+	previous.Foreground.Growth = FilterAttachments(previous.Foreground.Growth, cuts, top)
+	previous.Plants = FilterAttachments(previous.Plants, cuts, top)
+	previous.Webs = FilterAttachments(previous.Webs, cuts, top)
 	return previous
 }
 
 func PrepareForeground(data terrain.SectionData, view View, growth ...RockGrowthOptions) SectionMesh {
-	return SectionMesh{ID: data.ID, TerrainOnly: true, Layers: ForegroundLayer,
-		Foreground: PrepareOwnedGridWithTopology(data.Foreground, view, data.ForegroundTopology, sectionRockGrowth(data, growth))}
+	mesh := SectionMesh{ID: data.ID, TerrainOnly: true, Layers: ForegroundLayer, Foreground: PrepareOwnedGridWithTopology(data.Foreground, view, sectionBakeTopology(data), sectionRockGrowth(data, growth))}
+	applyAuthoredVisualCuts(&mesh, data)
+	return mesh
 }
 
 func PrepareBackground(data terrain.SectionData, view View) SectionMesh {
@@ -397,4 +469,38 @@ func SupersampledBatch(mesh TriangleMesh, start, end int) TriangleMesh {
 	}
 	transformVertices(mesh.Vertices, 2, image.Point{})
 	return mesh
+}
+
+func sectionBakeTopology(data terrain.SectionData) *terrain.RockTopology {
+	if data.ForegroundBake != nil {
+		return data.ForegroundBake
+	}
+	return data.ForegroundTopology
+}
+func mushroomBakeTopology(data terrain.SectionData) *terrain.RockTopology {
+	if t := sectionBakeTopology(data); t != nil {
+		return t
+	}
+	return mushroomSectionTopology(data)
+}
+func sectionBakeVegetation(data terrain.SectionData) terrain.SectionData {
+	if data.VegetationBake != nil {
+		p := data.VegetationBake
+		data.Vines, data.ForegroundVines, data.Mushrooms = p.Vines, p.ForegroundVines, p.Mushrooms
+	}
+	return data
+}
+func applyAuthoredVisualCuts(mesh *SectionMesh, data terrain.SectionData) {
+	mesh.PlantIndex, mesh.WebIndex = AttachmentIndex(mesh.Plants), AttachmentIndex(mesh.Webs)
+	for _, list := range [][]Attachment{mesh.Plants, mesh.Webs} {
+		stampAttachmentIDs(list, terrain.SectionTop(data.ID))
+	}
+	if data.ForegroundTopology == nil {
+		return
+	}
+	mesh.VisualCuts = data.ForegroundTopology.Cuts
+	top := terrain.SectionTop(data.ID)
+	mesh.Foreground.Growth = FilterAttachments(mesh.Foreground.Growth, mesh.VisualCuts, top)
+	mesh.Plants = FilterAttachments(mesh.Plants, mesh.VisualCuts, top)
+	mesh.Webs = FilterAttachments(mesh.Webs, mesh.VisualCuts, top)
 }

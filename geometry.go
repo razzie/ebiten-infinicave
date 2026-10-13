@@ -40,6 +40,16 @@ type VinePoint = terrain.VinePoint
 // Vine holds a generated stem and its attachment to a parent stem.
 type Vine = terrain.Vine
 
+// VineRoute identifies free growth, cell edges, cell centers, or guide following.
+type VineRoute = terrain.VineRoute
+
+const (
+	FreeVineRoute       = terrain.FreeVineRoute
+	CellEdgeVineRoute   = terrain.CellEdgeVineRoute
+	CellCenterVineRoute = terrain.CellCenterVineRoute
+	GuideVineRoute      = terrain.GuideVineRoute
+)
+
 // VineStyle describes a vine family's hues and transition distances.
 type VineStyle = terrain.VineStyle
 

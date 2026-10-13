@@ -38,42 +38,47 @@ func (cut RockCut) vegetation(source Vegetation, top float64) (Vegetation, bool)
 	return updated, removed || backHit || frontHit
 }
 
-// The guide attachment is the authoritative root. Test it against the actual
-// cut polygon; a cap/stalk hit or a bounds-only overlap leaves the plant intact.
-// Copy only after a hit so missed cuts allocate nothing and snapshots stay immutable.
+// Damage to a support, stalk, or cap removes the complete attached group.
+// A bounds miss allocates nothing and retains the immutable source slice.
 func (cut RockCut) mushrooms(source []MushroomGroup, top float64) ([]MushroomGroup, bool) {
 	var groups []MushroomGroup
-	removed := false
-	for i, group := range source {
-		var kept []Mushroom
-		groupHit := false
-		for j, mushroom := range group.Mushrooms {
-			root := mushroom.Anchor.Add(geom.V{Y: top})
-			hit := root.X >= cut.Min.X && root.X <= cut.Max.X && root.Y >= cut.Min.Y && root.Y <= cut.Max.Y && geom.InsidePolygon(root, cut.Poly)
-			if hit {
-				if !groupHit {
-					kept = make([]Mushroom, j, len(group.Mushrooms)-1)
-					copy(kept, group.Mushrooms[:j])
-					groupHit = true
+	changed := false
+	for i, g := range source {
+		hit := false
+		for _, m := range g.Mushrooms {
+			root := m.Anchor.Add(geom.V{Y: top})
+			if root.X >= cut.Min.X && root.X <= cut.Max.X && root.Y >= cut.Min.Y && root.Y <= cut.Max.Y && geom.InsidePolygon(root, cut.Poly) {
+				hit = true
+				break
+			}
+			radius := m.StemWidth() / 2
+			for j := 1; j < len(m.Stem); j++ {
+				if cut.segmentTouches(m.Stem[j-1], m.Stem[j], top, radius) {
+					hit = true
+					break
 				}
-			} else if groupHit {
-				kept = append(kept, mushroom)
+			}
+			if hit {
+				break
+			}
+			if m.CapWidth > 0 && m.CapHeight > 0 {
+				reach := m.CapWidth + m.CapHeight
+				if m.CapCenter.X+reach > cut.Min.X && m.CapCenter.X-reach < cut.Max.X && m.CapCenter.Y+top+reach > cut.Min.Y && m.CapCenter.Y+top-reach < cut.Max.Y && cut.Intersects(MushroomCapFootprint(m), top) {
+					hit = true
+					break
+				}
 			}
 		}
-		if groupHit {
-			if !removed {
-				groups = make([]MushroomGroup, i, len(source))
-				copy(groups, source[:i])
-				removed = true
+		if hit {
+			if !changed {
+				groups = append([]MushroomGroup(nil), source[:i]...)
+				changed = true
 			}
-			if len(kept) > 0 {
-				groups = append(groups, MushroomGroup{Mushrooms: kept})
-			}
-		} else if removed {
-			groups = append(groups, group)
+		} else if changed {
+			groups = append(groups, g)
 		}
 	}
-	if !removed {
+	if !changed {
 		return source, false
 	}
 	return groups, true
@@ -84,11 +89,18 @@ func (cut RockCut) Plants(old *Geometry) (*Geometry, bool) {
 		return old, false
 	}
 	vegetation, changed := cut.vegetation(old.Vegetation, old.Top)
-	if !changed {
+	webs := cut.SpiderWebs(old.Topology.SpiderWebs, old.Top)
+	websChanged := len(webs) != len(old.Topology.SpiderWebs)
+	if !changed && !websChanged {
 		return old, false
 	}
 	updated := *old
 	updated.Vegetation = vegetation
+	if websChanged {
+		topology := *old.Topology
+		topology.SpiderWebs = webs
+		updated.Topology = &topology
+	}
 	return &updated, true
 }
 

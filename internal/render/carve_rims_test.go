@@ -1,7 +1,6 @@
 package render
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/razzie/ebiten-infinicave/internal/geom"
@@ -18,24 +17,18 @@ func TestCarveRimsFollowCutBoundariesAndDiagnosticViews(t *testing.T) {
 	if !changed {
 		t.Fatal("blast did not change terrain")
 	}
-	topology := terrain.CarvedTopology(h.Grid, h.Cuts, h.Top)
-	vs, is := AppendCarveRims(nil, nil, topology, ViewShaded)
-	if len(is) == 0 {
-		t.Fatal("blast did not expose any crater walls/rim")
+	mesh := PrepareShapeRims(h, ViewShaded)
+	if len(mesh.Indices) == 0 {
+		t.Fatal("cut boundary has no local rim")
 	}
-	checkMesh(t, TriangleMesh{Vertices: vs, Indices: is})
-	for _, v := range vs {
+	checkMesh(t, mesh)
+	for _, v := range mesh.Vertices {
 		p := geom.V{X: float64(v.DstX) / RasterPixelsPerUnit, Y: float64(v.DstY)/RasterPixelsPerUnit + terrain.GenerationMinY}
 		if distance := p.Sub(geom.V{X: .5, Y: .5}).Len(); distance < .10 || distance > .14 {
-			t.Fatalf("decorative rim escaped cut boundary: %v", p)
+			t.Fatalf("rim escaped cut: %v", p)
 		}
 	}
-	shaded := PrepareGridWithTopology(nil, ViewShaded, topology)
-	normals := PrepareGridWithTopology(nil, ViewNormals, topology)
-	withoutCuts := *topology
-	withoutCuts.Cuts = nil
-	normalsNoRim := PrepareGridWithTopology(nil, ViewNormals, &withoutCuts)
-	if len(shaded.Faces.Indices) <= len(normals.Faces.Indices) || !reflect.DeepEqual(normals, normalsNoRim) {
-		t.Fatal("rim should appear in shaded/clay views and leave diagnostic geometry alone")
+	if len(PrepareShapeRims(h, ViewClay).Indices) == 0 || len(PrepareShapeRims(h, ViewNormals).Indices) != 0 {
+		t.Fatal("rim appeared in diagnostic view or disappeared from clay")
 	}
 }

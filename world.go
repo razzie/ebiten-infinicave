@@ -47,10 +47,15 @@ type world struct {
 	working           bool
 	upload            *sectionUpload
 	white             *ebiten.Image
+	atlases           *render.AtlasCache
 	revision          uint64 // queryable terrain version for the lazy query index
 	collisionRevision uint64 // early collision availability changes
 	queries           *worldQueryIndex
-	cuts              []terrain.RockCut // world-space edits survive section eviction
+	cuts              []cutCommand // compact world-space edits survive eviction
+	cutKeys           map[Hole]bool
+	cutBuckets        map[int64][]int
+	largeCuts         []int
+	indexedCuts       int
 	pixels            int
 	pending           map[int64]render.SectionMesh
 	viewport          Viewport
@@ -205,6 +210,16 @@ func (w *world) close() {
 		w.white.Deallocate()
 		w.white = nil
 	}
+	if w.atlases != nil {
+		w.atlases.Close()
+		w.atlases = nil
+	}
+	w.cuts = nil
+	w.queries = nil
+	w.cutKeys = nil
+	w.cutBuckets = nil
+	w.largeCuts = nil
+	w.indexedCuts = 0
 	for id, section := range w.sections {
 		section.deallocate()
 		delete(w.sections, id)
@@ -326,7 +341,7 @@ func (w *world) ensure(y float64, height float64, velocity float64) bool {
 			continue
 		}
 		if section := w.sections[id]; section != nil {
-			if section.mesh != nil && section.needsRefresh(w.renderWidth()) && meshVisible(*section.mesh, viewport) {
+			if section.mesh != nil && w.needsVisibleRefresh(id, section) && meshVisible(*section.mesh, viewport) {
 				if w.upload == nil {
 					w.startUpload(*section.mesh)
 				}

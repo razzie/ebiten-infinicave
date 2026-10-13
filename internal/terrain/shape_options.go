@@ -37,7 +37,7 @@ func ParseBranchingStrategy(name string) (BranchingStrategy, error) {
 	}
 }
 
-// ShapeOptions affects solid geometry, including collision and vegetation.
+// ShapeOptions selects structural branches and independent visual edge detail.
 type ShapeOptions struct {
 	BranchingStrategy  BranchingStrategy
 	BranchMinThickness float64

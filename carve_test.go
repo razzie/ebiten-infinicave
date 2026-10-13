@@ -241,7 +241,8 @@ func TestCarveUnloadedTerrainAndQueuedMesh(t *testing.T) {
 		t.Fatalf("unloaded blast: %+v / %v", result, err)
 	}
 	data := terrain.SectionData{ID: 2, Foreground: RockGrid{terrainRect(.2, .2, .4, .6)}}
-	mesh := render.SectionMesh{ID: 2, Geometry: terrain.PrepareTerrainGeometry(data, 0)}
+	mesh := render.PrepareForeground(data, ViewShaded)
+	mesh.Geometry = terrain.PrepareTerrainGeometry(data, 0)
 	scene.applyStoredCuts(&mesh)
 	if mesh.Geometry.Collision.Contains(V{X: .4, Y: -2.5}) || len(mesh.Foreground.Faces.Indices) == 0 {
 		t.Fatal("queued mesh ignored stored blast")
@@ -359,8 +360,8 @@ func TestCarveDuringEveryUploadStage(t *testing.T) {
 			if u.data.Geometry.Collision.Contains(V{X: .5, Y: -.5}) {
 				t.Fatal("upload geometry ignored cut")
 			}
-			if stage <= uploadForegroundPublish && (u.stage != uploadForegroundFaces || u.next != 0 || u.foreground != nil) {
-				t.Fatal("partially drawn foreground was not restarted")
+			if u.stage != stage || u.next != 3 || len(u.data.VisualCuts) != 1 {
+				t.Fatal("cut discarded upload progress or its publication mask")
 			}
 			if stage > uploadForegroundPublish && scene.world.sections[0].geometry.Collision.Contains(V{X: .5, Y: -.5}) {
 				t.Fatal("published terrain ignored cut during vegetation upload")
@@ -369,7 +370,7 @@ func TestCarveDuringEveryUploadStage(t *testing.T) {
 	}
 }
 
-func TestCarveRemovesWholeRootHitMushroomsIndividually(t *testing.T) {
+func TestCarveRemovesWholeRootHitMushroomGroup(t *testing.T) {
 	group := MushroomGroup{Mushrooms: []Mushroom{
 		testGroundedMushroom(.3, .4), testGroundedMushroom(.5, .4), testGroundedMushroom(.7, .4),
 	}}
@@ -378,8 +379,8 @@ func TestCarveRemovesWholeRootHitMushroomsIndividually(t *testing.T) {
 		t.Fatal(err)
 	}
 	plants := scene.world.sections[0].geometry.Vegetation
-	if len(plants.Mushrooms) != 1 || !reflect.DeepEqual(plants.Mushrooms[0].Mushrooms, group.Mushrooms[1:]) {
-		t.Fatalf("root-hit mushroom was not removed independently: %+v", plants.Mushrooms)
+	if len(plants.Mushrooms) != 0 {
+		t.Fatalf("root damage retained part of an attached group: %+v", plants.Mushrooms)
 	}
 	if len(group.Mushrooms) != 3 || group.Mushrooms[0].Stem[0] != (V{X: .3, Y: .404}) {
 		t.Fatal("carving modified source plant slices")
@@ -407,15 +408,15 @@ func TestCarveRemovesMushroomWhenGuideRootIsCut(t *testing.T) {
 	}
 }
 
-func TestCarveRetainsMushroomWhenOnlyCapIsCut(t *testing.T) {
+func TestCarveRemovesMushroomGroupWhenOnlyCapIsCut(t *testing.T) {
 	m := testGroundedMushroom(.5, .4)
 	scene := queryScene(terrain.SectionData{Foreground: RockGrid{terrainRect(.1, .4, .8, .3)}, Mushrooms: []MushroomGroup{{Mushrooms: []Mushroom{m}}}})
-	// A cut through the cap alone does not remove a supported mushroom.
+	// Cap damage removes the complete attachment, including its stalk.
 	if _, err := scene.CarveCircle(m.CapCenter.Add(V{Y: -1}), .009); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(scene.world.sections[0].geometry.Vegetation.Mushrooms, []MushroomGroup{{Mushrooms: []Mushroom{m}}}) {
-		t.Fatal("cap overlap removed a grounded mushroom")
+	if len(scene.world.sections[0].geometry.Vegetation.Mushrooms) != 0 {
+		t.Fatal("cap damage retained a mushroom attachment")
 	}
 }
 

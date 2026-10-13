@@ -25,9 +25,6 @@ func TestCanceledBuildDoesNotLoadOrDecorate(t *testing.T) {
 	if !published || ok || len(data.Vines)+len(data.ForegroundVines)+len(data.Mushrooms) != 0 {
 		t.Fatal("cancellation after terrain did not stop decoration")
 	}
-	if len(builder.fields.free)+len(builder.frontFields.free) != 0 {
-		t.Fatal("canceled decoration allocated vine workspaces")
-	}
 }
 
 type sectionStats struct {
@@ -52,13 +49,13 @@ func statsOf(s SectionData) sectionStats {
 // Procedural guide lips survive edge fade and omit short final spline knots.
 // Open tips taper before their endpoints; spurs retain a sampled solid width.
 // Shared contour junctions are sampled and polished together across faces.
-// Background counts use sparse forks and retain every other viable seam offshoot.
+// Background families retain curved paths with branches and free offshoots.
 // Foreground uses recursive branches, the default even for zero options.
 // Branch thickness varies within its bounds; negative points open shoulders.
 func TestSectionStatsStable(t *testing.T) {
 	want := map[int64]sectionStats{
-		1:  {9710, 1877, 135, .9745942911},
-		42: {9651, 1473, 132, .7554265958},
+		1:  {9710, 1877, 77, .9722268212},
+		42: {9651, 1473, 69, .7534366642},
 	}
 	for seed, w := range want {
 		got := statsOf(BuildSection(seed, 0))

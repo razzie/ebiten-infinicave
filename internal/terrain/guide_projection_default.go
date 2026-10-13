@@ -1,5 +1,3 @@
-//go:build !goexperiment.simd
-
 package terrain
 
 import "github.com/razzie/ebiten-infinicave/internal/geom"

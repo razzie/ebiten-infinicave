@@ -48,5 +48,10 @@ func run() error {
 		controls = "Left / Right"
 	}
 	ebiten.SetWindowTitle("ebiten-infinicave | Scroll / " + controls + " | R: regenerate")
+	// Queue the initial viewport before RunGame initializes the graphics device.
+	// CPU generation can overlap window creation and the first shader draws.
+	g.layoutNative(float64(windowWidth), float64(windowHeight), ebiten.Monitor().DeviceScaleFactor())
+	g.scene.SetRenderWidth(g.renderPixels())
+	g.loading = !g.scene.Update(g.viewport())
 	return ebiten.RunGame(g)
 }

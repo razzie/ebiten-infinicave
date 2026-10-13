@@ -169,6 +169,7 @@ func findWebCornersContext(ctx context.Context, grid RockGrid, edges []RockEdge,
 		add(outgoing, e.A, i)
 	}
 	clearance := newWebClearance(grid)
+	clearance.edgeIndex = geom.NewBoundsIndex(edgeBounds(edges, 0))
 	var corners []webCorner
 	var nearby []int
 	for _, i := range webSearchVertices(edges, incoming, outgoing) {
@@ -185,6 +186,9 @@ func findWebCornersContext(ctx context.Context, grid RockGrid, edges []RockEdge,
 			continue
 		}
 		worldKey := CollisionVertexKey(RockMaterialPoint(grid[e.Cell], e.A))
+		if len(maxSize) > 1 && SiteRandom(0x737069646572, worldKey[0], worldKey[1], 0) >= maxSize[1] {
+			continue
+		}
 		random := func(channel int64) float64 {
 			return SiteRandom(0x737069646572, worldKey[0], worldKey[1], channel)
 		}
@@ -345,7 +349,7 @@ func prepareSpiderWebsContext(ctx context.Context, topology *RockTopology, optio
 	t := *PrepareRockAppearance(topology)
 	t.webCorners, t.SpiderWebs = nil, nil
 	if density > 0 {
-		t.webCorners = findWebCornersContext(ctx, t.Grid, t.Boundary, size)
+		t.webCorners = findWebCornersContext(ctx, t.Grid, t.Boundary, size, density)
 		if ctx.Err() != nil {
 			return nil, false
 		}

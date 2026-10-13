@@ -101,7 +101,7 @@ func TestViewerMushroomDensityFlag(t *testing.T) {
 		args []string
 		want float64
 	}{
-		{nil, 1},
+		{nil, infinicave.DefaultConfig().MushroomDensity},
 		{[]string{"-mushroom-density", "0.5"}, .5},
 		{[]string{"-mushroom-density", "0"}, 0},
 		{[]string{"-mushroom-density", "1"}, 1},

@@ -42,7 +42,10 @@ func reliefHeight(p geom.V, guides []Guide, noise *Perlin, branches *BranchField
 		if g.distanceBound2(p) > 0.16*0.16 {
 			continue
 		}
-		pr := g.project(p)
+		pr, near := g.projectWithin(p, .16)
+		if !near {
+			continue
+		}
 		if pr.Signed < 0 {
 			branchMask *= geom.Smoothstep(guideSpacing*2.7, guideSpacing*5, pr.Dist)
 			continue

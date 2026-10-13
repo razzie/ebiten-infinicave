@@ -131,23 +131,56 @@ func (cut RockCut) Geometry(id int64, old *Geometry, tolerance float64) (*Geomet
 	if old == nil {
 		return old, nil, false
 	}
-	grid, parents, changed := cut.grid(old.Grid, old.Top)
+	if cut.Max.Y <= old.Top+GenerationMinY || cut.Min.Y >= old.Top+generationMaxY || cut.Max.X <= 0 || cut.Min.X >= Width {
+		return old, nil, false
+	}
+	var shapes []RockShape
+	var parents []int
+	var hole []geom.V
+	changed := false
+	for i, s := range old.Shapes {
+		parts := []RockShape{s}
+		edited := false
+		if s.Max.X > cut.Min.X && s.Min.X < cut.Max.X && s.Max.Y+old.Top > cut.Min.Y && s.Min.Y+old.Top < cut.Max.Y {
+			if hole == nil {
+				hole = cut.localPolygon(old.Top)
+			}
+			parts, edited = DifferenceShape(s, hole)
+		}
+		changed = changed || edited
+		shapes = append(shapes, parts...)
+		for range parts {
+			parents = append(parents, i)
+		}
+	}
 	if !changed {
 		return old, nil, false
 	}
-	cuts := append(append([]RockCut(nil), old.Cuts...), cut)
-	topology := carveTopology(old.Topology, grid, parents, cuts, old.Top)
-	updated := PrepareTerrainGeometry(SectionData{ID: id, Guides: old.Guides, ForegroundTopology: topology}, tolerance)
-	updated.source = old.source
-	updated.Vegetation = old.Vegetation
-	return updated, parents, true
+	updated := *old
+	updated.setShapes(shapes)
+	// Preserve untouched face slices and keys for query cache reuse.
+	for i, p := range parents {
+		if len(shapes[i].Loops) > 0 && len(old.Shapes[p].Loops) > 0 && &shapes[i].Loops[0][0] == &old.Shapes[p].Loops[0][0] {
+			updated.Faces[i] = old.Faces[p]
+			updated.Faces[i].block = i
+		}
+	}
+	updated.Cuts = append(append([]RockCut(nil), old.Cuts...), cut)
+	topology := *old.Topology
+	topology.Cuts = updated.Cuts
+	topology.Top = old.Top
+	// Base material remains immutable, including its original lighting.
+	topology.SpiderWebs = cut.SpiderWebs(old.Topology.SpiderWebs, old.Top)
+	updated.Topology = &topology
+	updated.Collision = updated.shapeCollision(id, tolerance)
+	return &updated, parents, true
 }
 
 func (cut RockCut) grid(source RockGrid, top float64) (RockGrid, []int, bool) {
 	var grid RockGrid
 	var parents []int
 	changed := false
-	hole := cut.localPolygon(top)
+	var hole []geom.V
 	for i, cell := range source {
 		if !cut.Intersects(cell.Polygon, top) {
 			if changed {
@@ -166,6 +199,9 @@ func (cut RockCut) grid(source RockGrid, top float64) (RockGrid, []int, bool) {
 				parents[j] = j
 			}
 			changed = true
+		}
+		if hole == nil {
+			hole = cut.localPolygon(top)
 		}
 		for _, poly := range subtractRockCut(cell.Polygon, hole) {
 			fragment := cell

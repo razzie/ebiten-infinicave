@@ -33,12 +33,14 @@ func scaleTriangleMesh(mesh TriangleMesh, scale float64, offset image.Point) Tri
 		return mesh
 	}
 	mesh.Vertices = append([]ebiten.Vertex(nil), mesh.Vertices...)
+	mesh.Index = nil
 	transformVertices(mesh.Vertices, scale, offset)
 	return mesh
 }
 
 // Render the owned band directly; padded CPU geometry is clipped by the image.
 func ScaleGridMesh(mesh GridMesh, pixels, offsetX int) GridMesh {
+	mesh.Growth = ScaleAttachments(mesh.Growth, pixels, image.Pt(offsetX, -pixels))
 	scale := float64(pixels) / RasterPixelsPerUnit
 	mesh.Faces = scaleTriangleMesh(mesh.Faces, scale, image.Pt(offsetX, -pixels))
 	mesh.Grass = scaleTriangleMesh(mesh.Grass, scale, image.Pt(offsetX, -pixels))
@@ -75,6 +77,8 @@ func ScaleSectionMesh(mesh SectionMesh, pixels int) SectionMesh {
 }
 
 func ScaleVegetationMesh(mesh SectionMesh, pixels int) SectionMesh {
+	mesh.Plants = scaleCroppedAttachments(mesh.Plants, mesh.MushroomsBounds, pixels)
+	mesh.Webs = scaleCroppedAttachments(mesh.Webs, mesh.SpiderWebsBounds, pixels)
 	mesh.Vines, mesh.VinesBounds = scaleVegetationMeshes(mesh.Vines, mesh.VinesBounds, pixels)
 	mesh.ForegroundVines, mesh.ForegroundVinesBounds = scaleVegetationMeshes(mesh.ForegroundVines, mesh.ForegroundVinesBounds, pixels)
 	mushrooms, bounds := scaleVegetationMeshes([]TriangleMesh{mesh.Mushrooms}, mesh.MushroomsBounds, pixels)

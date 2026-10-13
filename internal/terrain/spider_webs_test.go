@@ -189,39 +189,26 @@ func TestSpiderWebsPreferTheLargestFullyShadedFit(t *testing.T) {
 	}
 }
 
-func TestCarvingDefersWebSitesWithoutChangingThePublishedTopology(t *testing.T) {
+func TestCarvingRetainsPreparedWebNetworksAndRemovesDamagedSupport(t *testing.T) {
 	grid, p := acuteWebFixture(t, math.Pi/3)
 	topology := NewRockTopology(grid)
 	topology.Appearance = append(RockGrid(nil), topology.Grid...)
 	topology = PrepareSpiderWebs(topology)
 	if len(topology.SpiderWebs) != 1 {
-		t.Fatal("fixture has no web to remove")
+		t.Fatal("fixture has no web")
 	}
 	original := append([]SpiderWeb(nil), topology.SpiderWebs...)
 	geometry := PrepareTerrainGeometry(SectionData{ForegroundTopology: topology}, 0)
-	cut, err := CutFromHole(Hole{Shape: HoleCircle, Center: p.Sub(geom.V{Y: 1}), Radius: .04})
-	if err != nil {
-		t.Fatal(err)
-	}
+	cut, _ := CutFromHole(Hole{Shape: HoleCircle, Center: p.Sub(geom.V{Y: 1}), Radius: .04})
 	updated, _, changed := cut.Geometry(0, geometry, 0)
-	if !changed || updated.Topology.Appearance == nil {
-		t.Fatal("cut did not rebuild the prepared appearance")
+	if !changed || !updated.Topology.websPrepared || len(updated.Topology.SpiderWebs) != 0 {
+		t.Fatal("cut retained damaged web or invalidated prepared networks")
 	}
-	if updated.Topology.webCorners != nil || updated.Topology.SpiderWebs != nil || updated.Topology.websPrepared {
-		t.Fatal("carving fitted decorations while rebuilding rock geometry")
+	if &updated.Topology.Appearance[0] != &topology.Appearance[0] || !reflect.DeepEqual(topology.SpiderWebs, original) {
+		t.Fatal("cut changed original lighting or web snapshot")
 	}
-	decorated := PrepareSpiderWebs(updated.Topology)
-	for _, w := range decorated.SpiderWebs {
-		if w.Corner.Sub(p).Len() < .04 {
-			t.Fatal("web retained a removed rock corner")
-		}
-	}
-	if !reflect.DeepEqual(topology.SpiderWebs, original) {
-		t.Fatal("cut changed the previously published web sites")
-	}
-	full := PrepareSpiderWebs(CarvedTopology(updated.Grid, updated.Cuts, updated.Top))
-	if !reflect.DeepEqual(decorated.SpiderWebs, full.SpiderWebs) || !reflect.DeepEqual(updated.Topology.Appearance, full.Appearance) {
-		t.Fatal("incremental carving differs from a full web/lighting rebuild")
+	if PrepareSpiderWebs(updated.Topology) != updated.Topology {
+		t.Fatal("cut caused web regeneration")
 	}
 }
 

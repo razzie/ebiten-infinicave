@@ -3,6 +3,7 @@ package terrain
 import (
 	"context"
 	"math/rand"
+	"time"
 
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
@@ -23,8 +24,6 @@ type Builder struct {
 	seed             int64
 	loadSection      SectionLoader
 	guides           *guideCache
-	fields           vineWorkspace
-	frontFields      vineWorkspace
 }
 
 func NewSectionBuilder(seed int64, loadSection SectionLoader, orientation ...Orientation) *Builder {
@@ -62,6 +61,9 @@ func (b *Builder) BuildWithContext(ctx context.Context, id int64, onTerrain func
 // Rocks use world-space seeds; vines belong to one section but retain their
 // complete geometry across its neighbors, so section edges cannot cut a fork.
 type SectionData struct {
+	ForegroundBake         *RockTopology
+	VegetationBake         *Vegetation
+	Shape                  ShapeOptions
 	Orientation            Orientation
 	ID                     int64
 	Background, Foreground RockGrid
@@ -79,7 +81,13 @@ func BuildSection(seed, id int64) SectionData {
 	return NewSectionBuilder(seed, nil).Build(id)
 }
 
-func (b *Builder) Begin(ctx context.Context, id int64) *SectionBuild {
+func (b *Builder) Begin(ctx context.Context, id int64) (s *SectionBuild) {
+	start := time.Now()
+	defer func() {
+		if s != nil {
+			s.timings.Geometry = time.Since(start)
+		}
+	}()
 	seed, loadSection, guideCache := b.seed, b.loadSection, b.guides
 	if ctx.Err() != nil {
 		return nil
@@ -109,7 +117,8 @@ func (b *Builder) Begin(ctx context.Context, id int64) *SectionBuild {
 	if ctx.Err() != nil {
 		return nil
 	}
-	branches := newShapedBranchField(generateBranchesWithOptions(guides, noise, rand.New(rand.NewSource(seed)), b.Shape), b.Shape.BranchingStrategy)
+	segments := generateBranchesWithOptions(guides, noise, rand.New(rand.NewSource(seed)), b.Shape)
+	branches := newShapedBranchField(segments, b.Shape.BranchingStrategy)
 	foreground := guideRockFaces(seeds, guides)
 	if ctx.Err() != nil {
 		return nil
@@ -123,7 +132,7 @@ func (b *Builder) Begin(ctx context.Context, id int64) *SectionBuild {
 		return nil
 	}
 	polishRockContours(foreground, guides, func(p geom.V) float64 { return reliefHeight(p, guides, noise, branches) })
-	roughenRockEdges(foreground, guides, seed, top, b.Shape)
+	trimRockNeedles(foreground, guides)
 	cleanRockJunctions(foreground)
 
 	if ctx.Err() != nil {
@@ -138,8 +147,9 @@ func (b *Builder) Begin(ctx context.Context, id int64) *SectionBuild {
 	inset, parents := insetForegroundGrid(foreground, true)
 	topology := &RockTopology{Grid: inset, neighbors: RockNeighbors(inset)}
 	topology.prepareBoundary()
-	s := &SectionBuild{seed: seed, raw: foreground, uncut: topology, uncutParents: parents}
+	s = &SectionBuild{seed: seed, raw: foreground, uncut: topology, uncutParents: parents, branches: branchPaths(segments)}
 	s.data = SectionData{Orientation: orientation, ID: id, Foreground: foreground, Guides: guides, Holes: holes}
+	s.data.Shape = b.Shape
 	for _, hole := range holes {
 		if ctx.Err() != nil {
 			return nil

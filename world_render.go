@@ -105,7 +105,7 @@ func (w *world) DrawBackground(dst *ebiten.Image, y, height float64, view render
 }
 
 // Cached rocks include moss and hanging growth; grass draws separately.
-// Runtime cuts redraw these images immediately, so no shadow cache goes stale.
+// Runtime cuts mask images and replay dirty tiles before the next draw.
 func (w *world) DrawForegroundRocks(dst *ebiten.Image, y, height, offsetX float64, view render.RenderTransform) {
 	low, high := visibleSections(y, height)
 	for id := low; id <= high; id++ {

@@ -94,6 +94,18 @@ func (g *Guide) NearestPoint(p geom.V) (geom.V, float64) {
 
 func (g *Guide) project(p geom.V) Projection {
 	segment, u, q, best2 := guideNearest(g, p)
+	return g.projectionAt(p, segment, u, q, best2)
+}
+
+func (g *Guide) projectWithin(p geom.V, radius float64) (Projection, bool) {
+	segment, u, q, best2 := guideNearestScalarLimit(g, p, radius*radius)
+	if segment < 0 {
+		return Projection{}, false
+	}
+	return g.projectionAt(p, segment, u, q, best2), true
+}
+
+func (g *Guide) projectionAt(p geom.V, segment int, u float64, q geom.V, best2 float64) Projection {
 	tangent := g.segmentTangent(segment, u)
 	normal := tangent.Perp().Mul(g.BrightSign)
 	return Projection{Q: q, T: tangent, N: normal, S: geom.Lerp(g.S[segment], g.S[segment+1], u), Signed: p.Sub(q).Dot(normal), Dist: math.Sqrt(best2)}

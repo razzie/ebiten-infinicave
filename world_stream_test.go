@@ -34,7 +34,7 @@ func TestGrassAndDecorationCachesPublishResizeAndCarveTogether(t *testing.T) {
 	mesh := render.PrepareSection(data, ViewShaded, render.RockGrowthOptions{Grass: 1})
 	mesh.Geometry = terrain.PrepareTerrainGeometry(data, 0)
 	render.FinishSectionMesh(&mesh)
-	if len(mesh.Foreground.Grass.Indices) == 0 || len(mesh.Mushrooms.Indices) == 0 || len(mesh.SpiderWebs.Indices) == 0 {
+	if len(mesh.Foreground.Growth) == 0 || len(mesh.Mushrooms.Indices) == 0 || len(mesh.SpiderWebs.Indices) == 0 {
 		t.Fatal("fixture must supply grass, mushrooms, and webs")
 	}
 	w := g.world
@@ -66,8 +66,12 @@ func TestGrassAndDecorationCachesPublishResizeAndCarveTogether(t *testing.T) {
 	if _, err := g.CarveCircle(V{X: .5, Y: -.5}, 1); err != nil {
 		t.Fatal(err)
 	}
-	if s.grass != nil || s.mushrooms != nil || s.spiderWebs != nil {
-		t.Fatal("carving left unsupported decorations")
+	for _, list := range [][]render.Attachment{s.mesh.Foreground.Growth, s.mesh.Plants, s.mesh.Webs} {
+		for _, a := range list {
+			if a.Kind != render.SurfaceMoss && !a.Dead {
+				t.Fatal("carving left a live unsupported attachment")
+			}
+		}
 	}
 }
 
@@ -139,8 +143,28 @@ func TestResizeRefreshesNeighborOnlyForVisibleVegetation(t *testing.T) {
 	neighbor.mesh.VinesBounds = image.Rect(100, 2100, 110, 2300)
 	g.SetRenderWidth(1500)
 	finishResolutionRefresh(t, g, Viewport{Y: -.8, Height: .8})
-	if g.world.sections[1].renderWidth() != 1500 || g.world.sections[2].renderWidth() != 1000 {
+	if g.world.sections[1].vegetationWidth() != 1500 || g.world.sections[1].renderWidth() != 1000 || g.world.sections[2].renderWidth() != 1000 {
 		t.Fatal("resize did not restrict neighbor refreshes to contributing vegetation")
+	}
+}
+
+func TestNeighborPlantsDeferRockUploadUntilScrolling(t *testing.T) {
+	g := resolutionTestScene(t)
+	w := g.world
+	source := *w.sections[1].mesh
+	source.VinesBounds = image.Rect(100, 2100, 110, 2300)
+	geometry := source.Geometry
+	w.sections[1].deallocate()
+	w.sections[1] = &worldSection{mesh: &source, geometry: geometry, vegetationPending: true}
+	finishResolutionRefresh(t, g, Viewport{Y: -.8, Height: .8})
+	s := w.sections[1]
+	if s.foreground != nil || s.terrain != nil || s.vegetationPending || s.mesh == nil {
+		t.Fatal("neighbor plants required offscreen rock images or lost their recipes")
+	}
+	finishResolutionRefresh(t, g, Viewport{Y: -1.8, Height: .8})
+	s = w.sections[1]
+	if s.foreground == nil || s.terrain == nil || s.geometry != geometry {
+		t.Fatal("scrolling failed to upload retained neighbor rock recipes")
 	}
 }
 

@@ -23,9 +23,10 @@ func batchTriangleMeshes(meshes []TriangleMesh) []TriangleMesh {
 			continue
 		}
 		if len(result) == 0 || result[len(result)-1].fillRule != mesh.fillRule ||
+			result[len(result)-1].Texture != mesh.Texture ||
 			result[len(result)-1].premultiplied != mesh.premultiplied ||
 			len(result[len(result)-1].Vertices)+len(mesh.Vertices) > maxBatchVertices {
-			result = append(result, TriangleMesh{fillRule: mesh.fillRule, premultiplied: mesh.premultiplied})
+			result = append(result, TriangleMesh{Texture: mesh.Texture, fillRule: mesh.fillRule, premultiplied: mesh.premultiplied})
 		}
 		batch := &result[len(result)-1]
 		offset := uint32(len(batch.Vertices))
@@ -75,11 +76,19 @@ func FinishSectionMesh(mesh *SectionMesh) {
 	// snapshots cannot draw the same translucent thread twice.
 	mesh.SpiderWebsBounds = triangleMeshesBounds([]TriangleMesh{mesh.SpiderWebs}).Intersect(
 		image.Rect(0, RasterPixelsPerUnit, RasterPixelsPerUnit, 2*RasterPixelsPerUnit))
-	mesh.MushroomsBounds = triangleMeshesBounds([]TriangleMesh{mesh.Mushrooms})
+	mesh.MushroomsBounds = triangleMeshesBounds(append([]TriangleMesh{mesh.Mushrooms}, attachmentMeshes(mesh.Plants)...))
 	mesh.Vines = batchTriangleMeshes(mesh.Vines)
 	mesh.ForegroundVines = batchTriangleMeshes(mesh.ForegroundVines)
 	translateTriangleMeshes(mesh.Vines, mesh.VinesBounds.Min)
 	translateTriangleMeshes(mesh.ForegroundVines, mesh.ForegroundVinesBounds.Min)
 	translateTriangleMeshes([]TriangleMesh{mesh.Mushrooms}, mesh.MushroomsBounds.Min)
 	translateTriangleMeshes([]TriangleMesh{mesh.SpiderWebs}, mesh.SpiderWebsBounds.Min)
+	translateAttachments(mesh.Plants, mesh.MushroomsBounds.Min)
+	translateAttachments(mesh.Webs, mesh.SpiderWebsBounds.Min)
+	for i := range mesh.Vines {
+		mesh.Vines[i].Index = MeshIndex(mesh.Vines[i])
+	}
+	for i := range mesh.ForegroundVines {
+		mesh.ForegroundVines[i].Index = MeshIndex(mesh.ForegroundVines[i])
+	}
 }

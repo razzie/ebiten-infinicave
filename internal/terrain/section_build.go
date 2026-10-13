@@ -4,14 +4,16 @@ import (
 	"context"
 	"image/color"
 	"math/rand"
+	"time"
 
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 	"github.com/razzie/ebiten-infinicave/internal/parallel"
 )
 
 // SectionBuild owns immutable shape snapshots between independently scheduled
-// geometry, material, and decoration phases. Reusable fields belong to Builder.
+// geometry, material, and decoration phases, plus immutable appearance recipes.
 type SectionBuild struct {
+	timings               GenerationTimings
 	seed                  int64
 	data                  SectionData
 	raw                   RockGrid
@@ -19,8 +21,8 @@ type SectionBuild struct {
 	parents, uncutParents []int
 	cuts                  []RockCut
 	vegetationGrid        RockGrid
-	growthGrid            RockGrid
 	materialized          bool
+	branches              []BranchPath
 }
 
 func (s *SectionBuild) Data() SectionData { return s.data }
@@ -35,7 +37,10 @@ func (s *SectionBuild) Materialize(ctx context.Context) bool {
 	if s.materialized {
 		return true
 	}
+	start := time.Now()
+	defer func() { s.timings.Material = time.Since(start) }()
 	noise := NewPerlin(rand.New(rand.NewSource(s.seed ^ 0x62617365)))
+	backgroundVines := backgroundPathVines(s.seed, s.data.ID, s.data.Orientation)
 	noise.OffsetY = SectionTop(s.data.ID)
 	seeds := worldSeedsInRange(s.seed^0x62617365, noise.OffsetY, noise, BackgroundMinX, BackgroundMaxX)
 	if ctx.Err() != nil {
@@ -48,6 +53,18 @@ func (s *SectionBuild) Materialize(ctx context.Context) bool {
 	neighbors := shapeRockGrid(background, nil, noise)
 	foreground := append(RockGrid(nil), s.raw...)
 	shadeRockGrids(background, foreground, noise, s.data.Orientation)
+	var supportVines []Vine
+	for owner := s.data.ID - 2; owner <= s.data.ID+2; owner++ {
+		vines := backgroundPathVines(s.seed, owner, s.data.Orientation)
+		dy := SectionTop(owner) - SectionTop(s.data.ID)
+		for i := range vines {
+			for j := range vines[i].Points {
+				vines[i].Points[j].P.Y += dy
+			}
+		}
+		supportVines = append(supportVines, vines...)
+	}
+	supportBackgroundVines(background, supportVines)
 	if ctx.Err() != nil {
 		return false
 	}
@@ -62,13 +79,18 @@ func (s *SectionBuild) Materialize(ctx context.Context) bool {
 	}
 	topology := *s.data.ForegroundTopology
 	topology.Grid = apply(topology.Grid, s.parents)
-	topology = *PrepareRockAppearance(&topology)
 	if ctx.Err() != nil {
 		return false
 	}
 	s.vegetationGrid = apply(s.uncut.Grid, s.uncutParents)
-	s.growthGrid = foreground
+	base := *s.uncut
+	base.Grid = s.vegetationGrid
+	s.data.ForegroundBake = PrepareRockAppearance(&base)
+	if len(topology.Cuts) == 0 {
+		topology = *s.data.ForegroundBake
+	}
 	s.data.Background, s.data.BackgroundNeighbors = background, neighbors
+	s.data.Vines = backgroundVines
 	s.data.Foreground = foreground
 	s.data.ForegroundTopology = &topology
 	if len(topology.Cuts) > 0 {
@@ -81,13 +103,20 @@ func (s *SectionBuild) Materialize(ctx context.Context) bool {
 // Decorate can be canceled at stage and vine-trial boundaries, then retried
 // deterministically on another builder. It never exposes incomplete decorations.
 func (b *Builder) Decorate(ctx context.Context, s *SectionBuild) bool {
+	start := time.Now()
+	defer func() { s.timings.Decoration = time.Since(start) }()
 	if ctx.Err() != nil || !s.materialized {
 		return false
 	}
 	data := s.data
-	var plants Vegetation
+	plants := Vegetation{}
 	var topology *RockTopology
 	parallel.Run(
+		func() {
+			if ctx.Err() == nil {
+				plants.Vines = data.Vines
+			}
+		},
 		func() {
 			topology, _ = prepareSpiderWebsContext(ctx, data.ForegroundTopology, b.SpiderWebMaxSize, b.SpiderWebDensity)
 		},
@@ -97,30 +126,26 @@ func (b *Builder) Decorate(ctx context.Context, s *SectionBuild) bool {
 			}
 		},
 		func() {
-			if ctx.Err() != nil {
-				return
-			}
-			field := newVineTerrainWithWorkspace(data.Background, s.growthGrid, false, &b.fields)
-			defer field.release()
 			if ctx.Err() == nil {
-				plants.Vines = generateVinesInBandContext(ctx, field, rand.New(rand.NewSource(SectionSeed(s.seed^0x76696e6573, data.ID))), 0, SectionHeight, 5)
-			}
-		},
-		func() {
-			if ctx.Err() == nil {
-				plants.ForegroundVines = generateForegroundVinesContext(ctx, s.growthGrid, data.Guides, rand.New(rand.NewSource(SectionSeed(s.seed^0x73757266616365, data.ID))), &b.frontFields)
+				plants.ForegroundVines = foregroundPathVines(ctx, s.branches, data.ForegroundBake, data.Guides, s.seed, data.ID)
 			}
 		},
 	)
 	if ctx.Err() != nil {
 		return false
 	}
+	bake := plants
+	baseWebs := topology
+	s.data.VegetationBake = &bake
 	for _, cut := range s.cuts {
 		plants, _ = cut.vegetation(plants, SectionTop(data.ID))
 	}
 	if ctx.Err() != nil {
 		return false
 	}
+	baked := *s.data.ForegroundBake
+	baked.SpiderWebs = baseWebs.SpiderWebs
+	s.data.ForegroundBake = &baked
 	s.data.ForegroundTopology = topology
 	s.data.Vines, s.data.ForegroundVines, s.data.Mushrooms = plants.Vines, plants.ForegroundVines, plants.Mushrooms
 	s.data.vegetationCuts = plants.Cuts

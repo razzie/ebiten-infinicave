@@ -25,7 +25,7 @@ func TestCollisionReadyDuringUploadIncludesStoredCutsAndOwnsPolygons(t *testing.
 	g.world = w
 	defer g.Close()
 	cut, _ := terrain.CutFromHole((Hole{Shape: HoleCircle, Center: V{X: .5, Y: -1.5}, Radius: .1}))
-	w.cuts = []terrain.RockCut{cut}
+	w.appendCut(Hole{Shape: HoleCircle, Center: V{X: .5, Y: -1.5}, Radius: .1}, cut)
 	early := terrain.PrepareTerrainGeometry(terrain.SectionData{ID: 1, Foreground: RockGrid{terrainRect(.2, .2, .6, .6)}}, 0)
 	w.terrain <- sectionTerrain{id: 1, geometry: early}
 	called := 0

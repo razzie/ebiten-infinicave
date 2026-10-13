@@ -31,8 +31,8 @@ func TestCarveMushroomsUsesGuideRootAndExactCut(t *testing.T) {
 		hit    bool
 	}{
 		{"guide root", m.Anchor, .001, true},
-		{"buried stalk only", m.Stem[0], .001, false},
-		{"cap only", m.CapCenter, .003, false},
+		{"buried stalk only", m.Stem[0], .001, true},
+		{"stalk end", m.CapCenter, .003, true},
 		{"bounds overlap outside circle", m.Anchor.Add(geom.V{X: .009, Y: .009}), .01, false},
 		{"root on cut boundary", m.Anchor.Add(geom.V{X: .01}), .01, false},
 		{"distant cut", geom.V{X: .8, Y: .8}, .01, false},

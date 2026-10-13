@@ -102,12 +102,14 @@ func TestPrepareSectionMatchesSerialLayers(t *testing.T) {
 	previous := runtime.GOMAXPROCS(0)
 	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
 	for _, view := range []View{ViewShaded, ViewClay, ViewHeight, ViewNormals, ViewShadows} {
-		want := SectionMesh{ID: data.ID, Background: prepareGrid(data.Background, view), Foreground: prepareGrid(data.Foreground, view)}
+		want := SectionMesh{ID: data.ID, BakedInstances: view == ViewShaded, Background: prepareGrid(data.Background, view), Foreground: prepareGrid(data.Foreground, view)}
 		if view == ViewShaded {
 			want.Vines = PrepareVines(data.Vines)
 			want.ForegroundVines = PrepareForegroundVines(data.ForegroundVines)
 			want.Mushrooms = PrepareMushrooms(data.Mushrooms, terrain.NewRockTopology(data.Foreground))
+			want.Plants = prepareMushroomAttachments(data.Mushrooms, terrain.NewRockTopology(data.Foreground), data.Orientation)
 		}
+		applyAuthoredVisualCuts(&want, data)
 		for _, procs := range []int{1, 2, 4, 8} {
 			t.Run(fmt.Sprintf("%s/procs%d", view, procs), func(t *testing.T) {
 				runtime.GOMAXPROCS(procs)

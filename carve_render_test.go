@@ -66,17 +66,25 @@ func TestCarvePlantsDuringEveryUploadStage(t *testing.T) {
 				t.Fatal(err)
 			}
 			plants := u.data.Geometry.Vegetation
-			if len(plants.Mushrooms) != 0 || len(plants.Vines) != 2 || len(u.data.Mushrooms.Indices) != 0 || !u.data.MushroomsBounds.Empty() {
-				t.Fatal("upload kept stale mushroom/vine meshes or crop bounds")
+			if len(plants.Mushrooms) != 0 || len(plants.Vines) != 2 {
+				t.Fatal("upload geometry retained damaged plants")
 			}
-			if stage >= uploadVines && (u.stage != uploadVines || u.next != 0 || u.vines != nil || u.mushrooms != nil || u.foregroundVines != nil) {
-				t.Fatal("partially uploaded plants were not restarted")
+			for _, a := range u.data.Plants {
+				if !a.Dead {
+					t.Fatal("damaged mushroom instance stayed alive")
+				}
+			}
+			if !reflect.DeepEqual(u.data.Vines, mesh.Vines) || u.data.VinesBounds != mesh.VinesBounds || u.data.MushroomsBounds != mesh.MushroomsBounds {
+				t.Fatal("cut regenerated recipes or changed their crop origin")
+			}
+			if u.stage != stage || u.next != 3 {
+				t.Fatal("cut restarted unrelated upload work")
+			}
+			if len(u.data.VisualCuts) != 1 {
+				t.Fatal("upload lost its final cut mask")
 			}
 			if stage >= uploadVines && !reflect.DeepEqual(scene.world.sections[0].geometry.Vegetation, plants) {
-				t.Fatal("published section and pending plants disagree")
-			}
-			if stage >= uploadGrass && stage <= uploadForegroundPublish && u.grass != nil {
-				t.Fatal("partially uploaded grass was not restarted")
+				t.Fatal("pending/published plants disagree")
 			}
 			u.deallocate()
 		})
@@ -89,8 +97,10 @@ func TestCarvePlantCropBoundsRemainStableThroughReplay(t *testing.T) {
 	if _, err := scene.CarveCircle(V{X: .5, Y: -.5}, .1); err != nil {
 		t.Fatal(err)
 	}
-	first := render.SectionMesh{Geometry: scene.world.sections[0].geometry}
-	scene.prepareCarvedVegetation(&first)
+	first := render.PrepareSection(data, ViewShaded)
+	first.Geometry = terrain.PrepareTerrainGeometry(data, 0)
+	render.FinishSectionMesh(&first)
+	scene.applyStoredCuts(&first)
 	for replay := 0; replay < 2; replay++ {
 		mesh := render.PrepareSection(data, ViewShaded)
 		mesh.Geometry = terrain.PrepareTerrainGeometry(data, 0)
@@ -132,7 +142,7 @@ func TestAuthoredAndRuntimeHolesProduceTheSamePlants(t *testing.T) {
 		t.Fatal("authored holes regrew or reshuffled vegetation instead of applying the same damage")
 	}
 	// Public section geometry carries the same clipped paths and whole plants.
-	section, err := GenerateSectionWithConfig(Config{Seed: 42, MushroomDensity: 1, LoadSection: load}, 0)
+	section, err := GenerateSectionWithConfig(Config{Seed: 42, MushroomDensity: terrain.DefaultMushroomDensity, LoadSection: load}, 0)
 	if err != nil || !reflect.DeepEqual(section.Vines, want.Vines) || !reflect.DeepEqual(section.ForegroundVines, want.ForegroundVines) || !reflect.DeepEqual(section.Mushrooms, want.Mushrooms) {
 		t.Fatalf("public authored section lost vegetation edits: %v", err)
 	}

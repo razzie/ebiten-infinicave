@@ -18,6 +18,7 @@ const (
 // Explicit zero densities disable growth; omitted mesh options use the defaults.
 type RockGrowthOptions struct {
 	Moss, Hanging, Grass float64
+	Shape                terrain.ShapeOptions
 	Guides               []terrain.Guide // Grass roots follow the section's actual guide edges.
 }
 
@@ -31,6 +32,7 @@ func rockGrowthOptions(options []RockGrowthOptions) RockGrowthOptions {
 func sectionRockGrowth(data terrain.SectionData, options []RockGrowthOptions) RockGrowthOptions {
 	growth := rockGrowthOptions(options)
 	growth.Guides = data.Guides
+	growth.Shape = data.Shape
 	return growth
 }
 

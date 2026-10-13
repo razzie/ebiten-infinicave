@@ -106,6 +106,15 @@ func sameQueryBlocks(old, current []queryBlock) bool {
 			if len(p) != len(q) || &p[0] != &q[0] {
 				return false
 			}
+			ah, bh := a.geometry.Faces[face].Holes, b.geometry.Faces[b.faces[j]].Holes
+			if len(ah) != len(bh) {
+				return false
+			}
+			for k := range ah {
+				if len(ah[k]) != len(bh[k]) || &ah[k][0] != &bh[k][0] {
+					return false
+				}
+			}
 		}
 	}
 	return true
@@ -170,6 +179,23 @@ func (q *worldQueryIndex) rebuild(w *world) {
 			}
 		}
 	}
+	// Structural components in overlapping windows need not have matching
+	// facet keys. Join exact shared area/edges; corner contact stays separate.
+	for i, a := range blocks {
+		for j := i + 1; j < len(blocks); j++ {
+			b := blocks[j]
+			if a.section == b.section || a.section-b.section > 2 || b.section-a.section > 2 {
+				continue
+			}
+			for _, ai := range a.faces {
+				for _, bi := range b.faces {
+					if terrain.ShapesConnect(a.geometry.Shapes[ai], b.geometry.Shapes[bi], V{Y: b.geometry.Top - a.geometry.Top}) {
+						join(i, j)
+					}
+				}
+			}
+		}
+	}
 	groups := make(map[int][]int)
 	var roots []int
 	for i := range blocks {
@@ -227,17 +253,16 @@ func (q *worldQueryIndex) rebuild(w *world) {
 				// Padding discovers connections and missing continuation, but
 				// only the owned band contributes geometry to the union.
 				complete = complete && queryFaceComplete(w, face, h.Top)
-				poly := geom.ClipHalfPlane(face.Poly, V{X: 0, Y: -1}, 0)
-				poly = geom.ClipHalfPlane(poly, V{X: 0, Y: 1}, SectionHeight)
-				if len(poly) < 3 || math.Abs(geom.PolygonArea(poly)) < 1e-15 {
-					continue
+				for _, part := range terrain.ClipShapeBand(h.Shapes[i], 0, SectionHeight) {
+					for _, poly := range part.Loops {
+						worldPoly := make([]V, len(poly))
+						for j, p := range poly {
+							worldPoly[j] = p.Add(V{Y: h.Top})
+						}
+						grid = append(grid, RockCell{Polygon: worldPoly, Raised: true})
+						sectionIDs[-block.section] = true
+					}
 				}
-				worldPoly := make([]V, len(poly))
-				for j, p := range poly {
-					worldPoly[j] = p.Add(V{Y: h.Top})
-				}
-				grid = append(grid, RockCell{Polygon: worldPoly, Raised: true})
-				sectionIDs[-block.section] = true
 			}
 		}
 		if len(grid) == 0 {
@@ -258,7 +283,7 @@ func (q *worldQueryIndex) rebuild(w *world) {
 			f.SectionIDs = append(f.SectionIDs, section)
 		}
 		sort.Slice(f.SectionIDs, func(i, j int) bool { return f.SectionIDs[i] > f.SectionIDs[j] })
-		edges := terrain.RockBoundaryEdges(grid, terrain.RockNeighbors(grid), true)
+		edges := terrain.OwnedBoundaryEdges(grid)
 		loops, ok := terrain.TraceCollisionLoops(edges)
 		if !ok {
 			// Match CollisionGeometry's degenerate-junction fallback. Ray

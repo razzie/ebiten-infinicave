@@ -8,6 +8,83 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
 
+func TestSampledMushroomsVarySizesOnSupportedGuides(t *testing.T) {
+	lo, hi := math.Inf(1), 0.0
+	unequalHeights := 0
+	for seed := int64(1); seed <= 20; seed++ {
+		guide := SplineGuide([]geom.V{{X: .3, Y: .9}, {X: .3, Y: .1}}, 1)
+		guide.Seed = seed
+		groups := MushroomsForGuides([]Guide{guide}, RockGrid{terrainRect(.3, .05, .4, .9)}, 1)
+		for _, g := range groups {
+			_, _, _, scale, ok := MushroomPlacement(g)
+			if !ok {
+				t.Fatal("generated group lost its shared sample")
+			}
+			lo, hi = min(lo, scale), max(hi, scale)
+			heights := make(map[int]bool)
+			for _, m := range g.Mushrooms {
+				heights[int(m.CapCenter.Sub(m.Anchor).Len()*10000)] = true
+			}
+			if len(heights) > 1 {
+				unequalHeights++
+			}
+		}
+	}
+	if lo > .82 || hi < 1.08 || unequalHeights < 10 {
+		t.Fatalf("supported groups have too little size variation: %.3f–%.3f", lo, hi)
+	}
+}
+
+func TestMushroomSpritesUseTheActualGuideRoot(t *testing.T) {
+	for _, mode := range []Orientation{Vertical, Horizontal} {
+		guide := SplineGuide([]geom.V{{X: .30, Y: .9}, {X: .34, Y: .6}, {X: .30, Y: .1}}, 1)
+		guide.Seed = 42
+		poly := append([]geom.V(nil), guide.Pts...)
+		poly = append(poly, geom.V{X: .7, Y: .1}, geom.V{X: .7, Y: .9})
+		groups := MushroomsForGuides([]Guide{guide}, RockGrid{{Polygon: poly, Center: geom.PolygonCenter(poly)}}, 1, mode)
+		if len(groups) == 0 {
+			t.Fatal("curved guide lost all sampled clusters")
+		}
+		for _, g := range groups {
+			for _, m := range g.Mushrooms {
+				sample, root, rotation, scale, ok := MushroomSpritePlacement(m)
+				if !ok || root != m.Anchor {
+					t.Fatal("sprite support differs from its described root")
+				}
+				_, distance := guide.NearestPoint(root)
+				if distance > 1e-9 {
+					t.Fatal("rendered root misses guide")
+				}
+				source := MushroomSpriteSample(sample)
+				for i, p := range source.Stem {
+					q := root.Add(InternalPoint(mode, geom.Rotate(p, rotation).Mul(scale)))
+					if q != m.Stem[i] {
+						t.Fatal("atlas stem differs from public plant geometry")
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestMushroomCapBorderDamageRemovesWholeGroup(t *testing.T) {
+	m := Mushroom{Anchor: geom.V{X: .4, Y: .5}, CapCenter: geom.V{X: .4, Y: .48}, CapWidth: .012, CapHeight: .006, Stem: []geom.V{{X: .4, Y: .5}, {X: .4, Y: .48}}}
+	body, border := MushroomCapOutline(m), MushroomCapFootprint(m)
+	point := geom.LerpVector(body[0], border[0], .8)
+	cut, err := CutFromHole(Hole{Shape: HoleCircle, Center: point, Radius: .00005})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cut.Intersects(body, 0) || !cut.Intersects(border, 0) {
+		t.Fatal("fixture does not isolate the visible cap border")
+	}
+	source := []MushroomGroup{{Mushrooms: []Mushroom{m, {Anchor: geom.V{X: .45, Y: .5}}}}}
+	groups, changed := cut.mushrooms(source, 0)
+	if !changed || len(groups) != 0 {
+		t.Fatal("border damage left the group alive")
+	}
+}
+
 func TestMushroomDensityPreservesSurvivingClusters(t *testing.T) {
 	for _, mode := range []Orientation{Vertical, Horizontal} {
 		fullCount, sparseCount := 0, 0
@@ -88,7 +165,7 @@ func TestMushroomStalksKeepClearanceAcrossGuides(t *testing.T) {
 				guides = append(guides, g)
 				ground = append(ground, terrainRect(x, .05, .4, .9))
 			}
-			groups := MushroomsForGuides(guides, ground, DefaultMushroomDensity, mode)
+			groups := MushroomsForGuides(guides, ground, 1, mode)
 			var all []Mushroom
 			for _, group := range groups {
 				if len(group.Mushrooms) < 3 || len(group.Mushrooms) > 5 {
@@ -107,12 +184,15 @@ func TestMushroomStalksKeepClearanceAcrossGuides(t *testing.T) {
 							minDistance = math.Min(minDistance, math.Sqrt(geom.SegmentDistanceSquared(a.Stem[j-1], a.Stem[j], b.Stem[k-1], b.Stem[k])))
 						}
 					}
-					if gap := minDistance - (a.CapWidth+b.CapWidth)*.19/2; gap < .0006-1e-12 {
+					if gap := minDistance - (a.CapWidth+b.CapWidth)*.19/2; gap < .0015-1e-12 {
 						t.Fatalf("seed %d mode %v: stalks overlap or crowd each other (gap %g)", seed, mode, gap)
+					}
+					if gap := a.Anchor.Sub(b.Anchor).Len() - (a.CapWidth+b.CapWidth)*.55; gap < .003-1e-12 {
+						t.Fatalf("seed %d mode %v: mushroom roots leave too little room for caps (gap %g)", seed, mode, gap)
 					}
 				}
 			}
-			if again := MushroomsForGuides(guides, ground, DefaultMushroomDensity, mode); !reflect.DeepEqual(groups, again) {
+			if again := MushroomsForGuides(guides, ground, 1, mode); !reflect.DeepEqual(groups, again) {
 				t.Fatalf("seed %d mode %v: spaced mushrooms are not deterministic", seed, mode)
 			}
 		}
@@ -156,7 +236,7 @@ func TestMushroomsFollowGuidesAndKeepCapsUpright(t *testing.T) {
 		{Center: geom.V{X: 0.5, Y: 0.45}, Polygon: []geom.V{{X: 0.018, Y: 0.3}, {X: 0.982, Y: 0.3}, {X: 0.982, Y: 0.6}, {X: 0.018, Y: 0.6}}},
 		{Center: geom.V{X: 0.325, Y: 0.45}, Polygon: []geom.V{{X: 0.15, Y: 0.018}, {X: 0.5, Y: 0.018}, {X: 0.5, Y: 0.982}, {X: 0.15, Y: 0.982}}},
 	}
-	groups := MushroomsForGuides(guides, ground, DefaultMushroomDensity)
+	groups := MushroomsForGuides(guides, ground, 1)
 	if len(groups) < 4 {
 		t.Fatalf("expected mushroom groups along both guides, got %d", len(groups))
 	}
@@ -202,7 +282,7 @@ func TestMushroomsFollowGuidesAndKeepCapsUpright(t *testing.T) {
 	if len(widths) < 3 {
 		t.Fatal("mushrooms do not vary in size")
 	}
-	if again := MushroomsForGuides(guides, ground, DefaultMushroomDensity); !reflect.DeepEqual(groups, again) {
+	if again := MushroomsForGuides(guides, ground, 1); !reflect.DeepEqual(groups, again) {
 		t.Fatal("mushroom groups are not deterministic")
 	}
 }

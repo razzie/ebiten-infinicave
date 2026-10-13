@@ -2,13 +2,12 @@ package terrain
 
 import (
 	"reflect"
-	"slices"
 	"testing"
 
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
 
-func TestCarveTopologyMatchesFullRebuild(t *testing.T) {
+func TestBoundaryCarvingPreservesMaterialAndExactOccupancy(t *testing.T) {
 	fixtures := []SectionData{
 		BuildSection(42, 0),
 		{Foreground: RockGrid{
@@ -26,30 +25,37 @@ func TestCarveTopologyMatchesFullRebuild(t *testing.T) {
 	}
 	for _, data := range fixtures {
 		geometry := PrepareTerrainGeometry(data, 0)
+		original := geometry.Collision
+		var applied []RockCut
+		recipe := geometry.Grid
 		for _, hole := range holes {
 			old := geometry.Topology
-			neighbors := make([][]int, len(old.neighbors))
-			for i := range neighbors {
-				neighbors[i] = slices.Clone(old.neighbors[i])
-			}
-			boundary := slices.Clone(old.allBoundary)
 			cut, err := CutFromHole(hole)
 			if err != nil {
 				t.Fatal(err)
 			}
+			applied = append(applied, cut)
 			geometry, _, _ = cut.Geometry(data.ID, geometry, 0)
-			if !reflect.DeepEqual(old.neighbors, neighbors) || !reflect.DeepEqual(old.allBoundary, boundary) {
-				t.Fatal("carving modified published topology")
+			if !reflect.DeepEqual(geometry.Grid, recipe) || !reflect.DeepEqual(old.Grid, recipe) {
+				t.Fatal("carve replaced material facets")
 			}
-			want := CarvedTopology(geometry.Grid, geometry.Cuts, geometry.Top)
-			if !reflect.DeepEqual(geometry.Topology.neighbors, want.neighbors) ||
-				!reflect.DeepEqual(geometry.Topology.allBoundary, want.allBoundary) ||
-				!reflect.DeepEqual(geometry.Topology.Boundary, want.Boundary) {
-				t.Fatalf("incremental topology differs from full rebuild after %+v", hole)
+			if len(recipe) > 0 && &geometry.Grid[0].Polygon[0] != &recipe[0].Polygon[0] {
+				t.Fatal("material recipe was copied")
 			}
-			full := PrepareTerrainGeometry(SectionData{ID: data.ID, ForegroundTopology: want}, 0)
-			if !reflect.DeepEqual(geometry.Blocks, full.Blocks) || !reflect.DeepEqual(geometry.Collision, full.Collision) {
-				t.Fatal("incremental topology changed connectivity or collision loops")
+			for y := GenerationMinY + .017; y < 2; y += .047 {
+				for x := .017; x < 1; x += .047 {
+					p := geom.V{X: x, Y: y + geometry.Top}
+					want := original.Contains(p)
+					for _, c := range applied {
+						if (CollisionGeometry{Polygons: [][]geom.V{c.Poly}}).Contains(p) {
+							want = false
+							break
+						}
+					}
+					if got := geometry.Collision.Contains(p); got != want {
+						t.Fatalf("boundary subtraction changed occupancy at %v after %+v: %v/%v", p, hole, got, want)
+					}
+				}
 			}
 		}
 	}

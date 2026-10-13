@@ -37,7 +37,7 @@ func generateVineLeaves(field *VineTerrain, vine Vine, rng *rand.Rand) []VineLea
 			continue
 		}
 		tangent := vine.Points[i+1].P.Sub(vine.Points[i-1].P).Norm()
-		length := geom.Clamp(p.Radius*geom.Lerp(6, 9, rng.Float64()), .009, .025)
+		length := geom.Clamp(p.Radius*geom.Lerp(9, 13, rng.Float64()), .014, .035)
 		if field.onForeground && p.Radius <= .0015 {
 			length *= 1.3
 		}

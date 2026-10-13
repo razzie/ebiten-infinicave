@@ -42,8 +42,7 @@ persistent runtime cuts belong to the root, where the world cache is owned.
 
 ## Ownership and execution
 
-The section worker owns its builder, random streams, guide cache, and reusable
-vine fields. It publishes immutable foreground geometry before generating
+The section worker owns its builder, random streams, guide cache, retained branch paths, and generation timings. It publishes immutable foreground geometry before generating
 vegetation or preparing meshes. The game goroutine receives that early geometry
 and invokes the collision callback. Final vegetation is attached to a separate
 geometry value so it cannot mutate already published data.
@@ -51,8 +50,21 @@ geometry value so it cannot mutate already published data.
 Mesh preparation uses CPU data, even though vertices use Ebitengine types. GPU
 images and shaders are created, uploaded, drawn, resized, and released on the game
 goroutine. Upload budgets and cache publication live in `world_stream.go`.
-Carving replaces geometry, updates the query index, and refreshes affected images;
-stored cuts are replayed when sections regenerate. Resizing reuses CPU meshes.
+Carving replaces connected outer/inner loops independently of material facets.
+Finished rock/vine images receive cut masks; removed attachments and overlapping
+edits replay only dirty image tiles. Compact commands are selected by section
+range and replayed before publication. Resizing reuses immutable bake recipes.
+
+Shared CPU atlas samples contain 8×8 grass, moss, and hanging-growth variants,
+and paired 16×16 mushroom stem/cap pages. Workers transform and batch the sample
+meshes into page coordinates; each world incrementally uploads bounded GPU
+pages on the game goroutine. Section recipes retain stable
+attachment IDs, anchors, footprints, bounds indexes, and dead flags. Finished web
+networks retain meshes and anchors; edits remove them without regeneration.
+Foreground vines use the generated branch graph to guide connected cell-edge
+routes; forks attach at facet junctions. Background routes branch twice and use
+sparse seam graphs near their seeded paths. Background paths precede
+their supporting material. Scene builders allocate no dense vine fields.
 
 `Scene.DrawWithPasses` inserts optional drawing after fog (`BehindRocks`) and
 after foreground rocks, mushrooms, webs, and foreground vines (`AboveRocks`).
@@ -62,8 +74,9 @@ world coordinates into the current target, including the intermediate rotated
 target used by horizontal scenes. Hooks run once on the game goroutine and are
 excluded from offscreen background and shadow composition.
 
-Grass has its own mesh and image, including ground patches. It shares the
-foreground layer's upload, publication, resizing, and carving lifecycle, and
+Grass has its own image, with clipped vector ground patches aligned to cell
+normals and atlas blades rooted along the surface but angled toward world-up.
+It shares the foreground layer's upload, publication, resizing, and carving lifecycle, and
 supplies the shadow silhouette alongside rocks. Mushrooms and webs use cropped
 images published together with vegetation. The viewer's optional `ribbon.go`
 trail demonstrates both hooks with mouse input and world coordinates,

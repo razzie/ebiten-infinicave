@@ -46,8 +46,8 @@ type CarveResult struct {
 // CarveCircle removes foreground rock in a blast centered at a world point.
 // Radius must be finite and positive. The circle uses a 96-sided inscribed
 // polygon (maximum radial error about 0.00054 * radius). Rendering, exact
-// queries and collision use the same cut. Unsupported mushrooms are
-// removed and both vine layers are cut. Background rock is retained.
+// queries and collision use the same cut. Damaged mushroom groups and webs are
+// removed, and both vine layers are masked. Background rock is retained.
 // Edits persist until Reset or Close, including across eviction.
 // Call on the game goroutine after Update. Closed scenes return an error.
 func (g *Scene) CarveCircle(center V, radius float64) (CarveResult, error) {
@@ -72,10 +72,10 @@ func (g *Scene) Carve(hole Hole) (CarveResult, error) {
 	if err != nil {
 		return CarveResult{}, err
 	}
-	return g.carve(cut)
+	return g.carve(cut, hole)
 }
 
-func (g *Scene) carve(cut terrain.RockCut) (CarveResult, error) {
+func (g *Scene) carve(cut terrain.RockCut, hole Hole) (CarveResult, error) {
 	if g.closed || g.world == nil {
 		return CarveResult{}, fmt.Errorf("infinicave: cannot carve a closed scene")
 	}
@@ -85,6 +85,9 @@ func (g *Scene) carve(cut terrain.RockCut) (CarveResult, error) {
 	w := g.world
 	q := w.queryIndex()
 	result := CarveResult{Complete: cut.Covered(q.sections)}
+	if !w.appendCut(hole, cut) {
+		return result, nil
+	}
 	affected := make(map[uint64]bool)
 	// Track each replacement face's origin, including unchanged faces from
 	// the same formation. This maps both sides of a split to their parent.
@@ -94,10 +97,11 @@ func (g *Scene) carve(cut terrain.RockCut) (CarveResult, error) {
 		old := section.geometry
 		updated, parents, changed := cut.Geometry(id, old, g.collisionTolerance)
 		updated, plantsChanged := cut.Plants(updated)
+		section.geometry = updated
+		g.editSectionImages(section, id, cut)
 		if !changed {
 			if plantsChanged {
 				section.geometry = updated
-				g.redrawCarvedVegetation(section, id)
 			}
 			for _, face := range old.Faces {
 				origins[face.Key] = q.faceIDs[face.Key]
@@ -109,14 +113,18 @@ func (g *Scene) carve(cut terrain.RockCut) (CarveResult, error) {
 		}
 		// Only actual removed area marks a formation affected, not a bounds
 		// overlap or a boundary touch.
-		for i, face := range old.Faces {
-			if cut.Intersects(face.Poly, old.Top) {
+		counts := make([]int, len(old.Faces))
+		unchanged := make([]bool, len(old.Faces))
+		for i, parent := range parents {
+			counts[parent]++
+			unchanged[parent] = len(updated.Faces[i].Poly) > 0 && &updated.Faces[i].Poly[0] == &old.Faces[parent].Poly[0] && len(updated.Faces[i].Holes) == len(old.Faces[parent].Holes)
+		}
+		for i := range old.Faces {
+			if counts[i] != 1 || !unchanged[i] {
 				affected[q.faceIDs[old.Faces[i].Key]] = true
 			}
 		}
 		section.geometry = updated
-		g.redrawCarvedSection(section)
-		g.redrawCarvedVegetation(section, id)
 		result.SectionIDs = append(result.SectionIDs, -id)
 	}
 	delete(affected, 0) // padding-only geometry has no query ID
@@ -145,7 +153,6 @@ func (g *Scene) carve(cut terrain.RockCut) (CarveResult, error) {
 		}
 	}
 	sort.Slice(result.SectionIDs, func(i, j int) bool { return result.SectionIDs[i] > result.SectionIDs[j] })
-	w.cuts = append(w.cuts, cut)
 	g.carveUpload(cut)
 	if len(result.SectionIDs) > 0 {
 		w.revision++

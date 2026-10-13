@@ -105,8 +105,20 @@ type VinePoint struct {
 	Radius float64
 }
 
+// VineRoute describes the cell geometry followed by a stem. Free offshoots
+// can leave either kind of route while keeping their parent attachment.
+type VineRoute uint8
+
+const (
+	FreeVineRoute VineRoute = iota
+	CellEdgeVineRoute
+	CellCenterVineRoute
+	GuideVineRoute
+)
+
 type Vine struct {
 	Points []VinePoint
+	Route  VineRoute
 	// Along retains original material distances when carving splits a stem.
 	Along  []float64
 	Style  VineStyle
@@ -120,6 +132,10 @@ type Vine struct {
 	EdgeAligned bool
 	// Foreground stems use a richer material and are drawn over the rock.
 	Foreground bool
+	// Generation shares a small immutable set of permitted top cells across a
+	// family. Carving keeps it with the original material and attachment recipe.
+	topCellLimit    int
+	allowedTopCells []int
 	// Keep the original material when carving creates independent fragments.
 	styleFamily int
 	styleSet    bool
