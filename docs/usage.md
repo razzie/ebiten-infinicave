@@ -163,4 +163,4 @@ go run ./cmd/infinicave -seed 42 -branching loops
 go run ./cmd/infinicave -seed 42 -view normals -output normals.png
 ```
 
-The viewer defaults to portrait/vertical scrolling. Arrow keys or W/S scroll vertically; in landscape mode use Left/Right or A/D. Page Up and Page Down move by most of a viewport; Home and End return to the starting edge. Hold the left mouse button to carve, and press R to regenerate while keeping the current position. PNG export captures the first 2400 pixels along the scrolling axis and exits; bats and hover effects are disabled for exports.
+The viewer defaults to portrait/vertical scrolling. Arrow keys or W/S scroll vertically; in landscape mode use Left/Right or A/D. Page Up and Page Down move by most of a viewport; Home and End return to the starting edge. Hold the left mouse button to carve, and press R to regenerate while keeping the current position. Press Esc to exit the viewer. PNG export captures the first 2400 pixels along the scrolling axis and exits; bats and hover effects are disabled for exports.
