@@ -491,6 +491,7 @@ func (w *world) receive(g *Scene) {
 			g.maskUploadForeground(u)
 			section := w.sectionForUpload(u)
 			changed := section.foreground == nil || !terrain.SameTerrain(section.geometry, u.data.Geometry)
+			w.beginForegroundReveal(section, u)
 			if section.foreground != nil {
 				section.foreground.Deallocate()
 			}
@@ -538,6 +539,9 @@ func (w *world) receive(g *Scene) {
 			u.img = faded
 		case uploadBackgroundPublish:
 			section := w.sectionForUpload(u)
+			if w.appearanceFade != nil && section.terrain == nil {
+				section.backgroundReveal.Start(nil)
+			}
 			if section.terrain != nil {
 				section.terrain.Deallocate()
 			}
@@ -622,6 +626,9 @@ func (w *world) receive(g *Scene) {
 			}
 		case uploadPlantsPublish:
 			section := w.sectionForUpload(u)
+			if w.appearanceFade != nil && section.vegetationPending {
+				section.vegetationReveal.Start(nil)
+			}
 			newGeometry := section.geometry == nil && u.data.Geometry != nil
 			for _, img := range []*ebiten.Image{section.vines, section.foregroundVines, section.mushrooms, section.spiderWebs} {
 				if img != nil {

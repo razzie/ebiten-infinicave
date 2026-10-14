@@ -36,6 +36,7 @@ type Scene struct {
 	disableBackground    bool
 	bats                 *render.BatFlock
 	decorationBurn       *render.BurnDissolve
+	appearanceFade       *render.FadeRenderer
 	geometryRevisionBase uint64 // revisions accumulated across world resets
 	texture              float64
 	view                 View
@@ -65,6 +66,13 @@ func NewScene(config Config) (*Scene, error) {
 		g.texture = 0
 	}
 	var err error
+	if (config.AppearanceFade || config.AppearanceBurn) && g.view == ViewShaded {
+		g.appearanceFade, err = render.NewFadeRenderer()
+		if err != nil {
+			g.Close()
+			return nil, fmt.Errorf("infinicave: compile appearance fade shader: %w", err)
+		}
+	}
 	if config.DecorationBurn && g.view == ViewShaded {
 		g.decorationBurn, err = render.NewBurnDissolve()
 		if err != nil {
@@ -114,6 +122,7 @@ func NewScene(config Config) (*Scene, error) {
 	}
 	g.world = newWorld(config.Seed, g.view, g.collisionTolerance, g.spiderWebMaxSize, g.spiderWebDensity, g.mushroomDensity, g.forceGuidesUp, terrain.OrientedSectionLoader(g.orientation, g.loadSection), g.rockGrowth, g.shape, g.orientation)
 	g.world.disableBackground = g.disableBackground
+	g.world.appearanceFade = g.appearanceFade
 	g.world.antialiasing = g.antialiasing
 	g.world.retainSections, g.world.lookaheadSections = g.retainSections, g.lookaheadSections
 	if config.BatsPerMinute > 0 && g.view == ViewShaded {
@@ -147,6 +156,12 @@ func (g *Scene) Update(viewport Viewport) bool {
 	}
 	if g.decorationBurn != nil {
 		g.decorationBurn.Update()
+	}
+	for _, section := range w.sections {
+		section.foregroundReveal.Update()
+		section.backgroundReveal.Update()
+		section.vegetationReveal.Update()
+		section.grassReveal.Update()
 	}
 	g.world.viewport = viewport
 	if u := g.world.upload; u != nil && !g.world.meshUploadEligible(u.data, viewport) {
@@ -271,6 +286,7 @@ func (g *Scene) Reset(seed int64) {
 	g.world.close()
 	g.world = newWorld(seed, g.view, g.collisionTolerance, g.spiderWebMaxSize, g.spiderWebDensity, g.mushroomDensity, g.forceGuidesUp, terrain.OrientedSectionLoader(g.orientation, g.loadSection), g.rockGrowth, g.shape, g.orientation)
 	g.world.disableBackground = g.disableBackground
+	g.world.appearanceFade = g.appearanceFade
 	g.world.antialiasing = g.antialiasing
 	g.world.retainSections, g.world.lookaheadSections = g.retainSections, g.lookaheadSections
 	g.world.pixels = pixels
@@ -289,6 +305,10 @@ func (g *Scene) Close() {
 	g.geometryRevisionBase = g.GeometryRevision() + 1
 	g.closed = true
 	g.bats = nil
+	if g.appearanceFade != nil {
+		g.appearanceFade.Close()
+		g.appearanceFade = nil
+	}
 	if g.decorationBurn != nil {
 		g.decorationBurn.Close()
 		g.decorationBurn = nil

@@ -66,6 +66,34 @@ func TestBackgroundConfigurationAndLifecycle(t *testing.T) {
 	}
 }
 
+func TestAppearanceFadeConfigurationAndLifecycle(t *testing.T) {
+	configs := []Config{{}, DefaultConfig(), {AppearanceFade: true}, {AppearanceBurn: true}}
+	for view := ViewClay; view <= ViewShadows; view++ {
+		configs = append(configs, Config{AppearanceFade: true, View: view})
+	}
+	for _, config := range configs {
+		scene, err := NewScene(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		enabled := (config.AppearanceFade || config.AppearanceBurn) && config.View == ViewShaded
+		if (scene.appearanceFade != nil) != enabled || scene.world.appearanceFade != scene.appearanceFade {
+			t.Fatalf("appearance fade enabled incorrectly for %+v", config)
+		}
+		fade := scene.appearanceFade
+		scene.SetRenderWidth(384)
+		scene.Reset(42)
+		if scene.appearanceFade != fade || scene.world.appearanceFade != fade {
+			t.Fatal("reset lost appearance fade configuration")
+		}
+		scene.Close()
+		scene.Close()
+		if scene.appearanceFade != nil {
+			t.Fatal("close retained appearance renderer")
+		}
+	}
+}
+
 func TestDecorationBurnConfigurationAndLifecycle(t *testing.T) {
 	configs := []Config{{}, DefaultConfig(), {DecorationBurn: true}}
 	for view := ViewClay; view <= ViewShadows; view++ {

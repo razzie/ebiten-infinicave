@@ -125,6 +125,16 @@ remnants on the original side of `AboveRocks`. Cached images and geometry change
 immediately. Snapshots expire during `Update` and are released on reset or close;
 stored cuts, loading, and upload replay never start animations.
 
+Optional appearance fades blend in each cached rock or vegetation layer as it
+publishes. The root keeps independent reveal
+clocks on each section and advances them in `Update`; drawing and background
+shadow composition share those clocks. Crossing plants also respect their
+supporting band's reveal. Replacing an early rock base with completed growth
+retains its displayed image temporarily, so existing rock stays visible. Runtime
+cuts mask this retained base too. Expiry, eviction, reset, and close release it;
+resizing existing layers does not restart a reveal. Readiness describes published
+resources independently of their animation progress.
+
 Synchronous generation uses `terrain.GenerationOptions`, populated by the public
 `GenerateSectionWithConfig` entry point after validating the full configuration.
 Its collision callback runs on the calling goroutine.

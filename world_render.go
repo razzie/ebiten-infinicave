@@ -62,18 +62,18 @@ func (w *world) draw(dst *ebiten.Image, y, height float64, fog *render.FogRender
 	w.DrawForegroundRocks(dst, y, height, 0, view)
 	for id := max(0, low-1); id <= high+1; id++ {
 		if section := w.sections[id]; section != nil {
-			w.drawSupportedVegetation(dst, section.mushrooms, section.mushroomsBounds, terrain.SectionWindowTop(id), y, height, section.vegetationWidth(), view, false)
+			w.drawSupportedVegetation(dst, section.mushrooms, section.mushroomsBounds, terrain.SectionWindowTop(id), y, height, section.vegetationWidth(), view, false, &section.vegetationReveal)
 		}
 	}
 	for id := low; id <= high; id++ {
 		if section := w.sections[id]; section != nil {
-			w.drawSupportedVegetation(dst, section.spiderWebs, section.spiderWebsBounds, terrain.SectionWindowTop(id), y, height, section.vegetationWidth(), view, false)
+			w.drawSupportedVegetation(dst, section.spiderWebs, section.spiderWebsBounds, terrain.SectionWindowTop(id), y, height, section.vegetationWidth(), view, false, &section.vegetationReveal)
 		}
 	}
 	// Keep complete foreground stems in their owner's padded window.
 	for id := max(0, low-1); id <= high+1; id++ {
 		if section := w.sections[id]; section != nil {
-			w.drawSupportedVegetation(dst, section.foregroundVines, section.foregroundVinesBounds, terrain.SectionWindowTop(id), y, height, section.vegetationWidth(), view, false)
+			w.drawSupportedVegetation(dst, section.foregroundVines, section.foregroundVinesBounds, terrain.SectionWindowTop(id), y, height, section.vegetationWidth(), view, false, &section.vegetationReveal)
 		}
 	}
 	if burns != nil {
@@ -102,13 +102,13 @@ func (w *world) DrawBackground(dst *ebiten.Image, y, height float64, view render
 			op.GeoM.Translate(float64(render.BackgroundRasterBounds(pixels).Min.X), (terrain.SectionTop(id)-y)*float64(pixels))
 			op.GeoM.Scale(scale, scale)
 			op.GeoM.Translate(view.OffsetX, 0)
-			dst.DrawImage(section.terrain, op)
+			w.appearanceFade.DrawReveal(dst, section.terrain, nil, section.backgroundReveal.Progress(), op.GeoM)
 		}
 	}
 	// A vine is drawn once in world coordinates, even while crossing a seam.
 	for id := max(0, low-1); id <= high+1; id++ {
 		if section := w.sections[id]; section != nil {
-			w.drawSupportedVegetation(dst, section.vines, section.vinesBounds, terrain.SectionWindowTop(id), y, height, section.vegetationWidth(), view, true)
+			w.drawSupportedVegetation(dst, section.vines, section.vinesBounds, terrain.SectionWindowTop(id), y, height, section.vegetationWidth(), view, true, &section.vegetationReveal)
 		}
 	}
 }
@@ -125,7 +125,7 @@ func (w *world) DrawForegroundRocks(dst *ebiten.Image, y, height, offsetX float6
 			op.GeoM.Translate(offsetX*float64(pixels), (terrain.SectionTop(id)-y)*float64(pixels))
 			op.GeoM.Scale(scale, scale)
 			op.GeoM.Translate(view.OffsetX, 0)
-			dst.DrawImage(section.foreground, op)
+			w.appearanceFade.DrawReveal(dst, section.foreground, section.foregroundReveal.Previous, section.foregroundReveal.Progress(), op.GeoM)
 		}
 	}
 }
@@ -147,7 +147,7 @@ func (w *world) drawGrass(dst *ebiten.Image, y, height, offsetX float64, view re
 		scale := float64(view.Pixels) / float64(section.renderWidth())
 		op.GeoM.Scale(scale, scale)
 		op.GeoM.Translate(view.OffsetX+offsetX*float64(view.Pixels), (terrain.SectionTop(id)-y)*float64(view.Pixels))
-		dst.DrawImage(section.grass, op)
+		w.appearanceFade.DrawReveal(dst, section.grass, nil, min(section.grassReveal.Progress(), section.foregroundReveal.Progress()), op.GeoM)
 	}
 }
 
@@ -183,7 +183,7 @@ func (s *worldSection) needsRefresh(pixels int, layers render.MeshLayers) bool {
 
 // Cross-band plants are visible only where their supporting rock layer exists.
 // Adjacent clips partition the destination, preserving each stem's world origin.
-func (w *world) drawSupportedVegetation(dst, layer *ebiten.Image, bounds image.Rectangle, top, y, height float64, pixels int, view render.RenderTransform, background bool) {
+func (w *world) drawSupportedVegetation(dst, layer *ebiten.Image, bounds image.Rectangle, top, y, height float64, pixels int, view render.RenderTransform, background bool, reveal *render.Reveal) {
 	if layer == nil {
 		return
 	}
@@ -199,7 +199,22 @@ func (w *world) drawSupportedVegetation(dst, layer *ebiten.Image, bounds image.R
 		if clip.Empty() {
 			continue
 		}
-		render.DrawVegetation(dst.SubImage(clip).(*ebiten.Image), layer, bounds, top, y, pixels, view)
+		progress := reveal.Progress()
+		if background {
+			progress = min(progress, section.backgroundReveal.Progress())
+		} else {
+			progress = min(progress, section.foregroundReveal.Progress())
+		}
+		if w.appearanceFade == nil || progress >= 1 {
+			render.DrawVegetation(dst.SubImage(clip).(*ebiten.Image), layer, bounds, top, y, pixels, view)
+			continue
+		}
+		var transform ebiten.GeoM
+		scale := float64(view.Pixels) / float64(pixels)
+		transform.Translate(float64(bounds.Min.X), (top-y)*float64(pixels)+float64(bounds.Min.Y))
+		transform.Scale(scale, scale)
+		transform.Translate(view.OffsetX, 0)
+		w.appearanceFade.DrawReveal(dst.SubImage(clip).(*ebiten.Image), layer, nil, progress, transform)
 	}
 }
 

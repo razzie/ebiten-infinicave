@@ -121,7 +121,7 @@ func TestViewerDecorationBurnFlag(t *testing.T) {
 		args []string
 		want bool
 	}{
-		{nil, false},
+		{nil, infinicave.DefaultConfig().DecorationBurn},
 		{[]string{"-decoration-burn"}, true},
 		{[]string{"-decoration-burn=false"}, false},
 	} {
@@ -130,6 +130,29 @@ func TestViewerDecorationBurnFlag(t *testing.T) {
 		options, err := parseOptions()
 		if err != nil || options.config.DecorationBurn != tc.want {
 			t.Fatalf("burn flag: got %v, want %v, error %v", options.config.DecorationBurn, tc.want, err)
+		}
+	}
+}
+
+func TestViewerAppearanceFadeFlag(t *testing.T) {
+	oldFlags, oldArgs := flag.CommandLine, os.Args
+	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{nil, true},
+		{[]string{"-appearance-fade=false"}, false},
+		{[]string{"-appearance-fade=true"}, true},
+		{[]string{"-appearance-burn=false"}, false},
+		{[]string{"-appearance-burn=true"}, true},
+		{[]string{"-output", "scene.png", "-appearance-fade=true"}, false},
+	} {
+		flag.CommandLine = flag.NewFlagSet("appearance-options", flag.ContinueOnError)
+		os.Args = append([]string{"infinicave"}, tc.args...)
+		options, err := parseOptions()
+		if err != nil || options.config.AppearanceFade != tc.want {
+			t.Fatalf("appearance flag: got %v, want %v, error %v", options.config.AppearanceFade, tc.want, err)
 		}
 	}
 }

@@ -10,8 +10,8 @@ import (
 
 // Config controls generation, streaming, and rendering. Start with DefaultConfig to use
 // the viewer's appearance. A zero Config disables texture, background effects,
-// fog, bats, decoration burn, mushrooms, spider webs, moss, grass, hanging growth,
-// and fine edge detail.
+// fog, bats, arrival fading, decoration burn, mushrooms, spider webs, moss,
+// grass, hanging growth, and fine edge detail.
 type Config struct {
 	Seed int64
 	// Antialiasing selects full geometry antialiasing (the zero value), no
@@ -87,9 +87,20 @@ type Config struct {
 	// Bats use world coordinates and are hidden outside ViewShaded.
 	BatsPerMinute float64
 	// DecorationBurn enables a brief glowing burn dissolve for decorations
-	// removed by runtime carving. Disabled by default and in diagnostic views.
+	// removed by runtime carving. DefaultConfig enables it; the zero Config
+	// and diagnostic views disable it.
 	// Collision and queries change immediately; only the disappearing pixels linger.
 	DecorationBurn bool
+	// AppearanceFade fades in newly uploaded rocks and vegetation over about
+	// 0.7 seconds. DefaultConfig enables it;
+	// the zero Config and diagnostic views disable it. Update advances the effect.
+	// Collision, queries, and readiness remain available during the transition.
+	// Resizing existing layers does not restart it.
+	AppearanceFade bool
+	// AppearanceBurn is a compatibility alias for AppearanceFade. Either field
+	// enables the fade-in effect; arriving content no longer uses a burn dissolve.
+	// Deprecated: use AppearanceFade instead.
+	AppearanceBurn bool
 	// MushroomDensity is the probability of retaining a mushroom cluster,
 	// from 0 (disabled) to 1 (all eligible groups). The viewer default is 0.5. Placement remains
 	// deterministic for a seed; lower density preserves surviving clusters.
@@ -156,6 +167,7 @@ func DefaultConfig() Config {
 		Fog:                  2,
 		BatsPerMinute:        7.5,
 		DecorationBurn:       true,
+		AppearanceFade:       true,
 		MushroomDensity:      terrain.DefaultMushroomDensity,
 		MossDensity:          render.DefaultMossDensity,
 		GrassDensity:         render.DefaultGrassDensity,

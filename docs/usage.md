@@ -32,6 +32,17 @@ uploads. Growth and grass arrive later through a replacement foreground image;
 the published rock base stays drawable while that image uploads. Continue to
 call `Draw` during loading. Use `Update`'s full-readiness result for exports.
 
+With `config.AppearanceFade = true`, arriving rocks and vegetation fade in
+uniformly over about 0.7 seconds. `DefaultConfig()` enables
+it; a zero `Config` and diagnostic views disable it. Each layer starts when its
+upload publishes, including prefetched layers offscreen. Existing rock stays
+visible as growth arrives, and resizing does not restart the effect. Collision,
+queries, and readiness are immediate; the animation advances only in `Update`.
+For a fully revealed still image, disable it before `NewScene`. The viewer does
+this automatically for PNG exports; use `-appearance-fade=false` to disable it
+interactively. `AppearanceBurn` and `-appearance-burn` remain compatibility
+aliases for the fade-in setting.
+
 ## Coordinates and Orientation
 
 All positions, distances, radii, velocities, and collision tolerances use scene units. A section is one unit square and `infinicave.Width` and `infinicave.SectionHeight` are each 1.
@@ -77,7 +88,8 @@ The order is background and fog, `BehindRocks`, foreground rocks, mushrooms and 
 | `BranchingStrategy` | `BranchingSimple`, `BranchingRecursive`, or `BranchingLoops`. |
 | `Texture` | Surface grain strength, from 0 to 16. |
 | `Fog`, `BatsPerMinute` | Animated atmosphere and bat arrivals; zero disables each. |
-| `DecorationBurn` | Burn dissolve decorations removed by runtime carving; defaults to false. |
+| `DecorationBurn` | Burn dissolve decorations removed by runtime carving; enabled by `DefaultConfig()`. |
+| `AppearanceFade` | Fade in arriving rocks and vegetation; enabled by `DefaultConfig()`. |
 | `MushroomDensity`, `MossDensity`, `GrassDensity`, `HangingGrowthDensity`, `SpiderWebDensity` | Decoration occurrence or coverage from 0 to 1. |
 | `BackgroundBlur`, `ShadowBlur` | Softness in scene units, from 0 to 0.05. |
 | `DisableBackground` | Skip background rocks, vines, blur, shadows, and their GPU uploads. Defaults to false; fog remains controlled by `Fog`. |
@@ -167,7 +179,7 @@ _ = result
 
 Foreground vines, their leaves, moss and rock surface details are carved by erasing their rendered textures. Background rock and background vines remain intact. Original geometry remains available for baking after resizing or reloading; vine paths returned by section generation are not split around holes. Mushroom groups disappear when any inset root support is cut, and webs disappear when any rock attachment support is cut. Cutting only a mushroom cap, stalk or free web strand retains the supported decoration. Grass and hanging growth are erased locally, with the whole tuft or instance removed when a support anchor is cut.
 
-Set `config.DecorationBurn = true` (viewer: `-decoration-burn`) to let removed mushrooms, webs, grass, hanging growth, moss, and foreground vine pixels dissolve with a glowing ember edge over about 0.7 seconds. The effect is disabled by default and in diagnostic views. Collision and queries update immediately. Only already published decorations animate; authored holes and stored cuts applied during loading do not start an effect. Call `Update` to advance the animation; `Reset` and `Close` release its snapshots.
+Set `config.DecorationBurn = true` (viewer: `-decoration-burn`) to let removed mushrooms, webs, grass, hanging growth, moss, and foreground vine pixels dissolve with a glowing ember edge over about 0.7 seconds. `DefaultConfig()` enables it; a zero `Config` and diagnostic views disable it. Collision and queries update immediately. Only already published decorations animate; authored holes and stored cuts applied during loading do not start an effect. Call `Update` to advance the animation; `Reset` and `Close` release its snapshots.
 
 `CarveResult.Changes` maps affected formation IDs to the remaining formations: no IDs means destroyed, one means reshaped, and multiple means split. Reports can be provisional when a cut reaches unloaded terrain. `SectionIDs` identifies collision sections to refresh. Previously returned geometry remains an independent snapshot.
 

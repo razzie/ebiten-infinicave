@@ -39,6 +39,20 @@ func TestPublicStreamingConfiguration(t *testing.T) {
 	}
 }
 
+func TestPublicAppearanceFadeConfiguration(t *testing.T) {
+	if !infinicave.DefaultConfig().AppearanceFade {
+		t.Fatal("default appearance fade is disabled")
+	}
+	for _, enabled := range []bool{false, true} {
+		scene, err := infinicave.NewScene(infinicave.Config{AppearanceFade: enabled})
+		if err != nil {
+			t.Fatal(err)
+		}
+		scene.Reset(42)
+		scene.Close()
+	}
+}
+
 func TestPublicSectionGeneration(t *testing.T) {
 	if _, err := infinicave.GenerateSection(42, 1); err == nil {
 		t.Fatal("positive section ID accepted")

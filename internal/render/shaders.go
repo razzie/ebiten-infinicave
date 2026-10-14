@@ -24,3 +24,6 @@ var fogShaderSource []byte
 
 //go:embed shaders/burn.kage
 var burnShaderSource []byte
+
+//go:embed shaders/reveal.kage
+var revealShaderSource []byte

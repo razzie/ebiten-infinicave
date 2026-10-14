@@ -41,8 +41,12 @@ func (g *Scene) captureDecorationBurns(s *worldSection, id int64, cut terrain.Ro
 				partial = append(partial, a)
 			}
 		}
-		g.burnAttachments(dst, whole, image.Rectangle{}, bounds, id, pixels, grass, oldCuts, nil)
-		g.burnAttachments(dst, partial, image.Rectangle{}, bounds, id, pixels, grass, oldCuts, &cut)
+		progress := s.foregroundReveal.Progress()
+		if grass {
+			progress = min(progress, s.grassReveal.Progress())
+		}
+		g.burnAttachments(dst, whole, image.Rectangle{}, bounds, id, pixels, grass, progress, oldCuts, nil)
+		g.burnAttachments(dst, partial, image.Rectangle{}, bounds, id, pixels, grass, progress, oldCuts, &cut)
 	}
 	if s.vegetationPending {
 		return
@@ -54,8 +58,8 @@ func (g *Scene) captureDecorationBurns(s *worldSection, id int64, cut terrain.Ro
 		}
 		return out
 	}
-	g.burnAttachments(s.mushrooms, selected(mesh.Plants, edits.plants), mesh.MushroomsBounds, s.mushroomsBounds, id, s.vegetationWidth(), false, nil, nil)
-	g.burnAttachments(s.spiderWebs, selected(mesh.Webs, edits.webs), mesh.SpiderWebsBounds, s.spiderWebsBounds, id, s.vegetationWidth(), false, nil, nil)
+	g.burnAttachments(s.mushrooms, selected(mesh.Plants, edits.plants), mesh.MushroomsBounds, s.mushroomsBounds, id, s.vegetationWidth(), false, s.vegetationReveal.Progress(), nil, nil)
+	g.burnAttachments(s.spiderWebs, selected(mesh.Webs, edits.webs), mesh.SpiderWebsBounds, s.spiderWebsBounds, id, s.vegetationWidth(), false, s.vegetationReveal.Progress(), nil, nil)
 	if s.foregroundVines != nil {
 		pixels := s.vegetationWidth()
 		bounds := s.foregroundVinesBounds
@@ -64,7 +68,7 @@ func (g *Scene) captureDecorationBurns(s *worldSection, id int64, cut terrain.Ro
 			patch := ebiten.NewImage(rect.Dx(), rect.Dy())
 			patch.DrawImage(s.foregroundVines.SubImage(rect).(*ebiten.Image), nil)
 			g.keepBurnCut(patch, rect.Add(bounds.Min), id, pixels, cut)
-			g.addBurnPatch(patch, rect.Add(bounds.Min), id, pixels, false)
+			g.addBurnPatch(patch, rect.Add(bounds.Min), id, pixels, false, s.vegetationReveal.Progress())
 		}
 	}
 }
@@ -75,7 +79,7 @@ func burnRaster(region geom.Bounds, bounds image.Rectangle, top float64, pixels 
 		int(math.Ceil(region.Max.X*p))+1, int(math.Ceil((region.Max.Y-top)*p))+1).Sub(bounds.Min)
 }
 
-func (g *Scene) burnAttachments(dst *ebiten.Image, source []render.Attachment, referenceBounds, nativeBounds image.Rectangle, id int64, pixels int, grass bool, oldCuts []terrain.RockCut, cut *terrain.RockCut) {
+func (g *Scene) burnAttachments(dst *ebiten.Image, source []render.Attachment, referenceBounds, nativeBounds image.Rectangle, id int64, pixels int, grass bool, progress float64, oldCuts []terrain.RockCut, cut *terrain.RockCut) {
 	if dst == nil || len(source) == 0 {
 		return
 	}
@@ -110,7 +114,7 @@ func (g *Scene) burnAttachments(dst *ebiten.Image, source []render.Attachment, r
 		if cut != nil {
 			g.keepBurnCut(patch, bounds, id, pixels, *cut)
 		}
-		g.addBurnPatch(patch, bounds, id, pixels, grass)
+		g.addBurnPatch(patch, bounds, id, pixels, grass, progress)
 	}
 }
 
@@ -123,6 +127,35 @@ func (g *Scene) keepBurnCut(patch *ebiten.Image, bounds image.Rectangle, id int6
 	mask.Deallocate()
 }
 
-func (g *Scene) addBurnPatch(patch *ebiten.Image, bounds image.Rectangle, id int64, pixels int, grass bool) {
-	g.decorationBurn.Add(patch, V{X: float64(bounds.Min.X) / float64(pixels), Y: terrain.SectionWindowTop(id) + float64(bounds.Min.Y)/float64(pixels)}, pixels, grass)
+func (g *Scene) addBurnPatch(patch *ebiten.Image, bounds image.Rectangle, id int64, pixels int, grass bool, progress float64) {
+	origin := V{X: float64(bounds.Min.X) / float64(pixels), Y: terrain.SectionWindowTop(id) + float64(bounds.Min.Y)/float64(pixels)}
+	// Capture only pixels already revealed, including plants in neighboring
+	// support bands. Carving must not flash decorations that are still hidden.
+	if g.appearanceFade != nil {
+		low, high := visibleSections(origin.Y, float64(bounds.Dy())/float64(pixels))
+		complete := progress >= 1
+		for band := low; band <= high; band++ {
+			if s := g.world.sections[band]; s != nil && s.foregroundReveal.Progress() < 1 {
+				complete = false
+			}
+		}
+		if !complete {
+			visible := ebiten.NewImage(bounds.Dx(), bounds.Dy())
+			for band := low; band <= high; band++ {
+				s := g.world.sections[band]
+				if s == nil || s.foreground == nil {
+					continue
+				}
+				minY := int(math.Round((terrain.SectionTop(band) - origin.Y) * float64(pixels)))
+				clip := image.Rect(0, minY, bounds.Dx(), minY+pixels).Intersect(visible.Bounds())
+				if !clip.Empty() {
+					g.appearanceFade.DrawReveal(visible.SubImage(clip).(*ebiten.Image), patch, nil,
+						min(progress, s.foregroundReveal.Progress()), ebiten.GeoM{})
+				}
+			}
+			patch.Deallocate()
+			patch = visible
+		}
+	}
+	g.decorationBurn.Add(patch, origin, pixels, grass)
 }

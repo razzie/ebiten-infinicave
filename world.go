@@ -25,6 +25,8 @@ type worldSection struct {
 	mesh                                                *render.SectionMesh
 	pixels                                              int
 	backgroundPixels, vegetationPixels                  int
+	foregroundReveal, backgroundReveal                  render.Reveal
+	vegetationReveal, grassReveal                       render.Reveal
 }
 
 type world struct {
@@ -59,7 +61,8 @@ type world struct {
 	indexedCuts       int
 	pixels            int
 	antialiasing      AntialiasingMode
-	disableBackground bool // game goroutine only; CPU generation retains all layers
+	disableBackground bool                 // game goroutine only; CPU generation retains all layers
+	appearanceFade    *render.FadeRenderer // owned by Scene
 	pending           map[int64]render.SectionMesh
 	viewport          Viewport
 	priorities        chan Viewport
@@ -472,6 +475,10 @@ func (w *world) prune(y float64, height float64, velocity float64) {
 }
 
 func (s *worldSection) deallocate() {
+	s.foregroundReveal.Clear()
+	s.backgroundReveal.Clear()
+	s.vegetationReveal.Clear()
+	s.grassReveal.Clear()
 	for _, img := range []*ebiten.Image{s.terrain, s.foreground, s.vines, s.foregroundVines, s.mushrooms, s.spiderWebs, s.grass} {
 		if img != nil {
 			img.Deallocate()

@@ -128,6 +128,9 @@ func (g *Scene) editSectionImages(section *worldSection, id int64, cut terrain.R
 	pixels := section.renderWidth()
 	bounds := image.Rect(0, pixels, pixels, 2*pixels)
 	top := terrain.SectionWindowTop(id)
+	if previous := section.foregroundReveal.Previous; previous != nil {
+		g.eraseCuts(previous, bounds, top, []terrain.RockCut{cut}, pixels)
+	}
 	if overlap || len(edits.rock) > 0 {
 		g.replayGridRegions(section, id, append(edits.rock, dirty), false)
 	} else {
