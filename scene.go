@@ -22,6 +22,8 @@ type Scene struct {
 	shape                terrain.ShapeOptions
 	orientation          Orientation
 	forceGuidesUp        bool
+	retainSections       int
+	lookaheadSections    int
 	orientedTarget       *ebiten.Image
 	world                *world
 	material             *ebiten.Shader
@@ -53,6 +55,7 @@ func NewScene(config Config) (*Scene, error) {
 	}
 	g := &Scene{orientation: config.Orientation, forceGuidesUp: config.ForceGuidesUp, texture: config.Texture, view: config.View, collisionTolerance: config.CollisionTolerance, spiderWebMaxSize: config.SpiderWebMaxSize, spiderWebDensity: config.SpiderWebDensity, mushroomDensity: config.MushroomDensity, rockGrowth: render.RockGrowthOptions{Moss: config.MossDensity, Hanging: config.HangingGrowthDensity, Grass: config.GrassDensity}, loadSection: config.LoadSection, onCollisionReady: config.OnCollisionReady}
 	g.shape = config.shapeOptions()
+	g.retainSections, g.lookaheadSections = config.RetainSections, config.LookaheadSections
 	g.disableBackground = config.DisableBackground
 	if g.view != ViewShaded {
 		g.texture = 0
@@ -92,6 +95,7 @@ func NewScene(config Config) (*Scene, error) {
 	}
 	g.world = newWorld(config.Seed, g.view, g.collisionTolerance, g.spiderWebMaxSize, g.spiderWebDensity, g.mushroomDensity, g.forceGuidesUp, terrain.OrientedSectionLoader(g.orientation, g.loadSection), g.rockGrowth, g.shape, g.orientation)
 	g.world.disableBackground = g.disableBackground
+	g.world.retainSections, g.world.lookaheadSections = g.retainSections, g.lookaheadSections
 	if config.BatsPerMinute > 0 && g.view == ViewShaded {
 		g.bats = render.NewBatFlock(config.Seed, config.BatsPerMinute, g.orientation)
 	}
@@ -122,7 +126,7 @@ func (g *Scene) Update(viewport Viewport) bool {
 		g.bats.Update(viewport)
 	}
 	g.world.viewport = viewport
-	if u := g.world.upload; u != nil && !meshVisible(u.data, viewport) {
+	if u := g.world.upload; u != nil && !g.world.meshUploadEligible(u.data, viewport) {
 		g.world.deferUpload()
 	}
 	g.world.receive(g)
@@ -151,8 +155,9 @@ func (g *Scene) GeometryRevision() uint64 {
 
 // SetRenderWidth sets the number of cached pixels across one scene unit.
 // Pass min(nativeWidth, nativeHeight) before Update. Resizing retains generation,
-// queries, and runtime cuts, and rerasterizes only sections contributing to the
-// viewport. Offscreen sections keep their images until they become visible.
+// queries, and runtime cuts, and rerasterizes sections contributing to the
+// viewport, followed by neighbors and directional lookahead when enabled.
+// Other retained sections keep their images until needed.
 // Nonpositive widths and calls after Close are ignored. The default is 1000.
 func (g *Scene) SetRenderWidth(pixels int) {
 	if g.closed || pixels <= 0 || pixels == g.world.renderWidth() {
@@ -219,8 +224,8 @@ func (g *Scene) DrawWithPasses(dst *ebiten.Image, viewport Viewport, passes Rend
 // Orientation returns the scene's fixed scrolling orientation.
 func (g *Scene) Orientation() Orientation { return g.orientation }
 
-// Reset replaces the world with a new seed, keeping rendering settings and
-// the section content loader and collision callback. Enabled bats restart
+// Reset replaces the world with a new seed, keeping rendering and streaming
+// settings, the section content loader, and collision callback. Enabled bats restart
 // their arrival sequence with the new seed.
 // The next Update begins loading again. Reset does nothing after Close.
 func (g *Scene) Reset(seed int64) {
@@ -232,6 +237,7 @@ func (g *Scene) Reset(seed int64) {
 	g.world.close()
 	g.world = newWorld(seed, g.view, g.collisionTolerance, g.spiderWebMaxSize, g.spiderWebDensity, g.mushroomDensity, g.forceGuidesUp, terrain.OrientedSectionLoader(g.orientation, g.loadSection), g.rockGrowth, g.shape, g.orientation)
 	g.world.disableBackground = g.disableBackground
+	g.world.retainSections, g.world.lookaheadSections = g.retainSections, g.lookaheadSections
 	g.world.pixels = pixels
 	if g.bats != nil {
 		g.bats = render.NewBatFlock(seed, g.bats.PerMinute, g.orientation)

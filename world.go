@@ -63,6 +63,8 @@ type world struct {
 	viewport          Viewport
 	priorities        chan Viewport
 	parked            map[int64]*sectionUpload
+	retainSections    int
+	lookaheadSections int
 }
 
 type sectionJob struct {
@@ -256,7 +258,7 @@ func (w *world) request(id int64) {
 		if w.upload != nil {
 			outstanding[w.upload.data.ID] = true
 		}
-		if len(outstanding) >= sectionQueueLimit {
+		if len(outstanding) >= sectionQueueLimit && !w.reclaimSpeculativeResult(id) {
 			return
 		}
 		ctx, cancel := context.WithCancelCause(w.ctx)
@@ -282,9 +284,41 @@ func (w *world) request(id int64) {
 	}
 }
 
+// Long lookahead windows can fill the result queue before a camera jump or
+// resize exposes missing terrain. Required sections may reclaim the farthest
+// unpublished result, while published sections keep their configured residency.
+func (w *world) reclaimSpeculativeResult(requiredID int64) bool {
+	if !render.ValidViewport(w.viewport) {
+		return false
+	}
+	low, high := visibleSections(w.viewport.Y, w.viewport.Height)
+	if requiredID < low-1 || requiredID > high+1 {
+		return false
+	}
+	selected, farthest := int64(-1), int64(0)
+	for id := range w.pending {
+		if w.sections[id] != nil || w.parked[id] != nil || w.upload != nil && w.upload.data.ID == id {
+			continue
+		}
+		if _, active := w.inflight[id]; active {
+			continue
+		}
+		distance := max(low-id, id-high)
+		if distance > 1 && (distance > farthest || distance == farthest && id > selected) {
+			selected, farthest = id, distance
+		}
+	}
+	if selected < 0 {
+		return false
+	}
+	delete(w.pending, selected)
+	w.discardIncomplete(selected)
+	return true
+}
+
 // prefetch lists sections to keep, nearest first: the viewport, its neighbors
 // (their vines may reach in), then lookahead in the direction of travel.
-func prefetch(y float64, height float64, velocity float64) (ids []int64, required int) {
+func prefetch(y float64, height float64, velocity float64, lookahead int) (ids []int64, required int) {
 	low, high := visibleSections(y, height)
 	for id := low; id <= high; id++ {
 		ids = append(ids, id)
@@ -295,17 +329,14 @@ func prefetch(y float64, height float64, velocity float64) (ids []int64, require
 	if velocity == 0 {
 		return
 	}
-	ahead := 2 + min(2, int(math.Abs(velocity)/.008))
 	if velocity <= 0 {
-		for i := 0; i < ahead; i++ {
+		for i := 0; i < lookahead; i++ {
 			ids = append(ids, high+2+int64(i))
 		}
-		ids = append(ids, low-2)
 	} else {
-		for i := 0; i < ahead; i++ {
+		for i := 0; i < lookahead; i++ {
 			ids = append(ids, low-2-int64(i))
 		}
-		ids = append(ids, high+2)
 	}
 	return
 }
@@ -313,7 +344,7 @@ func prefetch(y float64, height float64, velocity float64) (ids []int64, require
 // ensure never blocks: it queues missing sections in viewport priority and reports
 // whether everything the viewport needs is already built.
 func (w *world) ensure(y float64, height float64, velocity float64) bool {
-	ids, required := prefetch(y, height, velocity)
+	ids, required := prefetch(y, height, velocity, w.lookaheadSections)
 	if w.priorities != nil {
 		select {
 		case <-w.priorities:
@@ -331,34 +362,36 @@ func (w *world) ensure(y float64, height float64, velocity float64) bool {
 		}
 		viewport := Viewport{Y: y, Height: height, Velocity: velocity}
 		if data, ok := w.pending[id]; ok {
-			if !meshVisible(data, viewport) {
+			if !w.meshUploadEligible(data, viewport) {
 				continue
 			}
 			if w.upload == nil {
 				w.startUpload(data)
 			}
-			if i < required {
+			if i < required && (data.TerrainOnly || meshVisible(data, viewport)) {
 				ready = false
 			}
 			continue
 		}
 		if section := w.sections[id]; section != nil {
-			if section.mesh != nil && w.needsVisibleRefresh(id, section) && meshVisible(*section.mesh, viewport) {
+			if section.mesh != nil && w.needsVisibleRefresh(id, section) && w.meshUploadEligible(*section.mesh, viewport) {
 				if w.upload == nil {
 					w.startUpload(*section.mesh)
 				}
-				if i < required {
+				if i < required && (section.mesh.TerrainOnly || meshVisible(*section.mesh, viewport)) {
 					ready = false
 				}
 				continue
 			}
-			if section.vegetationPending && i < required {
+			if section.vegetationPending && i < required && (section.mesh == nil || section.mesh.TerrainOnly || meshVisible(*section.mesh, viewport)) {
 				ready = false
 			}
 			continue
 		}
 		if w.upload != nil && w.upload.data.ID == id {
-			ready = ready && i >= required
+			if w.upload.data.TerrainOnly || meshVisible(w.upload.data, viewport) {
+				ready = ready && i >= required
+			}
 			continue
 		}
 		w.request(id)
@@ -375,10 +408,15 @@ func (w *world) ensure(y float64, height float64, velocity float64) bool {
 func (w *world) prune(y float64, height float64, velocity float64) {
 	revision := w.revision
 	low, high := visibleSections(y, height)
-	ids, _ := prefetch(y, height, velocity)
+	ids, _ := prefetch(y, height, velocity, w.lookaheadSections)
 	keep := make(map[int64]bool, len(ids))
 	for _, id := range ids {
 		keep[id] = true
+	}
+	retained := func(id int64) bool {
+		return keep[id] || id >= low && id <= high ||
+			id < low && low-id <= int64(w.retainSections) ||
+			id > high && id-high <= int64(w.retainSections)
 	}
 	for id, flight := range w.inflight {
 		if !keep[id] {
@@ -399,8 +437,7 @@ func (w *world) prune(y float64, height float64, velocity float64) {
 		if w.upload != nil && w.upload.data.ID == id {
 			continue
 		}
-		current := id >= max(0, low-2) && id <= high+3
-		if !current && !keep[id] {
+		if !retained(id) {
 			section.deallocate()
 			delete(w.sections, id)
 			w.revision++
@@ -410,12 +447,15 @@ func (w *world) prune(y float64, height float64, velocity float64) {
 		w.queries.expire(w)
 	}
 	for id := range w.pending {
-		if !keep[id] && (id < max(0, low-2) || id > high+3) {
+		// Unpublished results share the bounded request queue. Retaining them
+		// outside the prefetch window could prevent the new viewport loading.
+		// Published sections still retain their mesh for later refreshes.
+		if !keep[id] {
 			delete(w.pending, id)
 		}
 	}
 	for id := range w.collision {
-		if !keep[id] && (id < max(0, low-2) || id > high+3) {
+		if !retained(id) {
 			delete(w.collision, id)
 			w.collisionRevision++
 		}

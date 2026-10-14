@@ -10,6 +10,27 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
+func TestStreamingConfigurationSurvivesResetAndResize(t *testing.T) {
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		for _, counts := range [][2]int{{0, 0}, {2, 1}, {8, 12}} {
+			scene, err := NewScene(Config{Orientation: orientation, RetainSections: counts[0], LookaheadSections: counts[1]})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(scene.Close)
+			for _, seed := range []int64{0, 42} {
+				if seed != 0 {
+					scene.Reset(seed)
+				}
+				scene.SetRenderWidth(1200)
+				if scene.world.retainSections != counts[0] || scene.world.lookaheadSections != counts[1] {
+					t.Fatalf("%v reset/resize lost streaming configuration %v", orientation, counts)
+				}
+			}
+		}
+	}
+}
+
 func TestBackgroundConfigurationAndLifecycle(t *testing.T) {
 	configs := []Config{{}, DefaultConfig(), {BackgroundBlur: .003}, {ShadowOpacity: .5}, {ShadowBlur: .01}}
 	for view := ViewClay; view <= ViewShadows; view++ {
@@ -155,6 +176,7 @@ func TestGeometryRevisionTracksPublicationGrowthAndEviction(t *testing.T) {
 	}}
 	g := queryScene(bottom)
 	w := g.world
+	w.retainSections = 3
 	w.done = make(chan struct{})
 	w.terrain = make(chan sectionTerrain, 1)
 	t.Cleanup(g.Close)

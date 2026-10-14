@@ -40,6 +40,14 @@ Generation and geometry edits stay together because rocks, guides, and plants
 share topology and placement rules. Cross-section identity, availability, and
 persistent runtime cuts belong to the root, where the world cache is owned.
 
+`Config.RetainSections` controls symmetric retention of loaded sections around
+the viewport, while `Config.LookaheadSections` controls extra directional
+prefetching beyond the required immediate neighbors. Both counts follow the
+scrolling axis in either orientation; retention does not request generation.
+When lookahead is enabled, immediate neighbors and directional lookahead also
+upload complete GPU layers before becoming visible. Visible layers take priority,
+followed by the nearest offscreen sections, within the shared upload budget.
+
 ## Ownership and execution
 
 The section worker owns its builder, random streams, guide cache, retained branch paths, and generation timings. It publishes immutable foreground geometry before generating

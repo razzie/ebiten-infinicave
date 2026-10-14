@@ -8,7 +8,7 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
-// Config controls generation and rendering. Start with DefaultConfig to use
+// Config controls generation, streaming, and rendering. Start with DefaultConfig to use
 // the viewer's appearance. A zero Config disables texture, background effects,
 // fog, bats, mushrooms, spider webs, moss, grass, hanging growth, and fine edge detail.
 type Config struct {
@@ -16,6 +16,22 @@ type Config struct {
 	// Orientation fixes the scrolling axis for the scene's lifetime. The zero
 	// value is Vertical. Horizontal grows rightward and keeps plants upright.
 	Orientation Orientation
+	// RetainSections keeps published sections this many sections beyond
+	// each end of the viewport along the scrolling axis (up/down or left/right).
+	// It must be nonnegative; the default is 3. This does not request new sections.
+	// Immediate neighbors needed for vegetation, directional lookahead, and an
+	// active GPU upload remain retained even outside this range.
+	RetainSections int
+	// LookaheadSections requests this many extra sections beyond the immediate
+	// neighbor in the direction of travel. It must be nonnegative; the default
+	// is 4. Zero disables lookahead, and stationary viewports never look ahead.
+	// Lookahead sections stay retained while moving toward them. The count does
+	// not depend on speed, and Update readiness excludes these extra sections.
+	// When enabled, it also uploads all layers of immediate neighbors and
+	// lookahead sections before they become visible, after visible uploads.
+	// Requests and unpublished results share a bounded queue; lookahead fills
+	// as capacity permits. Pending results outside the request window are discarded.
+	LookaheadSections int
 	// ForceGuidesUp selects the overall upward-facing exposed side of each guide,
 	// regardless of point order or BrightSign, in both orientations. The rock side
 	// stays continuous through bends and curls. False preserves authored sides.
@@ -115,6 +131,8 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		Orientation:          Vertical,
+		RetainSections:       3,
+		LookaheadSections:    4,
 		ForceGuidesUp:        true,
 		BranchingStrategy:    BranchingRecursive,
 		BranchMinThickness:   terrain.DefaultShapeOptions().BranchMinThickness,
@@ -139,6 +157,9 @@ func DefaultConfig() Config {
 }
 
 func (c Config) validate() error {
+	if c.RetainSections < 0 || c.LookaheadSections < 0 {
+		return fmt.Errorf("infinicave: retain sections and lookahead sections must be nonnegative")
+	}
 	for _, value := range []float64{c.BranchMinThickness, c.BranchMaxThickness} {
 		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 1 {
 			return fmt.Errorf("infinicave: branch thickness must be between 0 and 1 (0 uses the default)")

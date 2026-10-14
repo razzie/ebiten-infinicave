@@ -8,6 +8,19 @@ import (
 	"github.com/razzie/ebiten-infinicave"
 )
 
+func TestPublicStreamingConfiguration(t *testing.T) {
+	defaults := infinicave.DefaultConfig()
+	if defaults.RetainSections != 3 || defaults.LookaheadSections != 4 {
+		t.Fatalf("unexpected streaming defaults: %d / %d", defaults.RetainSections, defaults.LookaheadSections)
+	}
+	for _, config := range []infinicave.Config{{RetainSections: -1}, {LookaheadSections: -1}} {
+		if scene, err := infinicave.NewScene(config); err == nil {
+			scene.Close()
+			t.Fatalf("accepted negative streaming counts: %+v", config)
+		}
+	}
+}
+
 func TestPublicSectionGeneration(t *testing.T) {
 	if _, err := infinicave.GenerateSection(42, 1); err == nil {
 		t.Fatal("positive section ID accepted")

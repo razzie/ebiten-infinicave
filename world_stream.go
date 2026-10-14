@@ -36,6 +36,24 @@ func meshVisible(mesh render.SectionMesh, viewport Viewport) bool {
 	return false
 }
 
+// With lookahead enabled, prepare complete images for the immediate neighbors
+// and the extra sections in the direction of travel before they become visible.
+func (w *world) preloadSection(id int64, viewport Viewport) bool {
+	if w.lookaheadSections == 0 || id < 0 || !render.ValidViewport(viewport) {
+		return false
+	}
+	low, high := visibleSections(viewport.Y, viewport.Height)
+	if id >= low-1 && id <= high+1 {
+		return true
+	}
+	return viewport.Velocity < 0 && id > high+1 && id-high-1 <= int64(w.lookaheadSections) ||
+		viewport.Velocity > 0 && id < low-1 && low-id-1 <= int64(w.lookaheadSections)
+}
+
+func (w *world) meshUploadEligible(mesh render.SectionMesh, viewport Viewport) bool {
+	return meshVisible(mesh, viewport) || w.preloadSection(mesh.ID, viewport)
+}
+
 func (w *world) savePending(data render.SectionMesh) {
 	if w.pending == nil {
 		w.pending = make(map[int64]render.SectionMesh)
@@ -273,11 +291,10 @@ func (w *world) needsForeground(mesh render.SectionMesh) bool {
 	return section == nil || section.foreground == nil || section.renderWidth() != w.renderWidth() || !terrain.SameTerrain(section.geometry, mesh.Geometry)
 }
 
-// Neighbor windows contribute crossing plants, while their rock bands are
-// entirely outside the viewport. Retain CPU recipes for later scrolling and
-// avoid uploading those offscreen rock images merely to publish their plants.
+// Lookahead prepares all layers before exposure. Without lookahead, neighboring
+// windows upload only crossing plants and retain their rock recipes for scrolling.
 func (w *world) viewportLayers(id int64) render.MeshLayers {
-	if render.ValidViewport(w.viewport) {
+	if render.ValidViewport(w.viewport) && !w.preloadSection(id, w.viewport) {
 		low, high := visibleSections(w.viewport.Y, w.viewport.Height)
 		if id < low || id > high {
 			return render.VegetationLayer
@@ -311,6 +328,11 @@ func (w *world) uploadPriority(mesh render.SectionMesh) int {
 		low, high := visibleSections(w.viewport.Y, w.viewport.Height)
 		if mesh.ID < low || mesh.ID > high {
 			priority += 3
+			if !meshVisible(mesh, w.viewport) {
+				// Finish the nearest offscreen section's decorations before
+				// starting farther rock layers. Visible layers come first.
+				priority += 3 * int(max(low-mesh.ID, mesh.ID-high))
+			}
 		}
 	}
 	return priority
@@ -324,7 +346,7 @@ func (w *world) receive(g *Scene) {
 	var selected render.SectionMesh
 	found := false
 	choose := func(mesh render.SectionMesh) {
-		if !meshVisible(mesh, w.viewport) {
+		if !w.meshUploadEligible(mesh, w.viewport) {
 			return
 		}
 		if !found || w.uploadPriority(mesh) < w.uploadPriority(selected) ||
@@ -338,11 +360,24 @@ func (w *world) receive(g *Scene) {
 	for _, u := range w.parked {
 		choose(u.data)
 	}
+	// Cached layers may need a resize or a newly exposed rock upload. Include
+	// these sources so visible refreshes can preempt speculative uploads too.
+	if render.ValidViewport(w.viewport) {
+		for id, section := range w.sections {
+			if section.mesh == nil || !w.needsVisibleRefresh(id, section) {
+				continue
+			}
+			if _, pending := w.pending[id]; pending || w.parked[id] != nil || w.upload != nil && w.upload.data.ID == id {
+				continue
+			}
+			choose(*section.mesh)
+		}
+	}
 	// Viewport bands precede contributing neighboring windows within a phase.
 	if render.ValidViewport(w.viewport) {
-		ids, _ := prefetch(w.viewport.Y, w.viewport.Height, w.viewport.Velocity)
+		ids, _ := prefetch(w.viewport.Y, w.viewport.Height, w.viewport.Velocity, w.lookaheadSections)
 		for _, id := range ids {
-			if mesh, ok := w.pending[id]; ok && meshVisible(mesh, w.viewport) && (!found || w.uploadPriority(mesh) == w.uploadPriority(selected)) {
+			if mesh, ok := w.pending[id]; ok && w.meshUploadEligible(mesh, w.viewport) && (!found || w.uploadPriority(mesh) == w.uploadPriority(selected)) {
 				selected, found = mesh, true
 				break
 			}

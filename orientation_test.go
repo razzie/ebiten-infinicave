@@ -36,8 +36,8 @@ func TestHorizontalViewportAndPrefetch(t *testing.T) {
 	}
 	forward, _ := orientedViewport(Horizontal, Viewport{X: 10, Width: 1, Velocity: .02})
 	backward, _ := orientedViewport(Horizontal, Viewport{X: 10, Width: 1, Velocity: -.02})
-	ahead, required := prefetch(forward.Y, forward.Height, forward.Velocity)
-	behind, _ := prefetch(backward.Y, backward.Height, backward.Velocity)
+	ahead, required := prefetch(forward.Y, forward.Height, forward.Velocity, DefaultConfig().LookaheadSections)
+	behind, _ := prefetch(backward.Y, backward.Height, backward.Velocity, DefaultConfig().LookaheadSections)
 	if ahead[required] <= 10 || behind[required] >= 10 {
 		t.Fatalf("wrong prefetch directions: %v / %v", ahead, behind)
 	}

@@ -1,6 +1,7 @@
 package infinicave
 
 import (
+	"context"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -174,12 +175,12 @@ func TestStreamingRequestsAndCacheStayBounded(t *testing.T) {
 }
 
 func TestPrefetchOnlyExpandsWhileMoving(t *testing.T) {
-	stationary, required := prefetch(-10.8, 1.8, 0)
+	stationary, required := prefetch(-10.8, 1.8, 0, DefaultConfig().LookaheadSections)
 	if !reflect.DeepEqual(stationary, []int64{9, 10, 8, 11}) || required != 4 {
 		t.Fatalf("stationary view queued distant sections: %v, required=%d", stationary, required)
 	}
 	for _, velocity := range []float64{-.008, .008} {
-		ids, gotRequired := prefetch(-10.8, 1.8, velocity)
+		ids, gotRequired := prefetch(-10.8, 1.8, velocity, DefaultConfig().LookaheadSections)
 		if gotRequired != required || !reflect.DeepEqual(ids[:required], stationary) || len(ids) > sectionQueueLimit {
 			t.Fatalf("moving prefetch lost required bands or exceeded its bound: %v", ids)
 		}
@@ -190,6 +191,156 @@ func TestPrefetchOnlyExpandsWhileMoving(t *testing.T) {
 		if ids[required] != want {
 			t.Fatalf("velocity %g looks ahead to %d, want %d", velocity, ids[required], want)
 		}
+	}
+}
+
+func TestConfiguredLookaheadInBothOrientations(t *testing.T) {
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		for _, count := range []int{0, 1, 4, 12} {
+			for _, velocity := range []float64{0, -.0001, -.02, .0001, .02} {
+				viewport := Viewport{Y: -11, Height: 1, Velocity: velocity}
+				if orientation == Horizontal {
+					viewport = Viewport{X: 10, Width: 1, Velocity: velocity}
+				}
+				v, valid := orientedViewport(orientation, viewport)
+				ids, required := prefetch(v.Y, v.Height, v.Velocity, count)
+				want := []int64{10, 9, 11}
+				if velocity != 0 {
+					first, step := int64(12), int64(1)
+					if v.Velocity > 0 {
+						first, step = 8, -1
+					}
+					for i := 0; i < count; i++ {
+						want = append(want, first+int64(i)*step)
+					}
+				}
+				if !valid || required != 3 || !reflect.DeepEqual(ids, want) {
+					t.Fatalf("%v count=%d velocity=%g: got %v/%d, want %v/3", orientation, count, velocity, ids, required, want)
+				}
+			}
+		}
+	}
+}
+
+func TestConfiguredRetentionAndLookahead(t *testing.T) {
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		for _, tc := range []struct {
+			retain, lookahead int
+			velocity          float64
+			first, last       int64
+		}{
+			{0, 0, 0, 9, 11}, // vegetation neighbors survive zero retention
+			{1, 4, 0, 9, 11}, // stationary views do not retain lookahead
+			{3, 0, 0, 7, 13},
+			{6, 1, 0, 4, 16},
+			{0, 4, -.01, 9, 15},
+			{0, 4, .01, 5, 11},
+		} {
+			viewport := Viewport{Y: -11, Height: 1, Velocity: tc.velocity}
+			if orientation == Horizontal {
+				viewport = Viewport{X: 10, Width: 1, Velocity: -tc.velocity}
+			}
+			v, _ := orientedViewport(orientation, viewport)
+			w := &world{retainSections: tc.retain, lookaheadSections: tc.lookahead,
+				sections: make(map[int64]*worldSection), collision: make(map[int64]*terrain.Geometry)}
+			for id := int64(0); id < 20; id++ {
+				w.sections[id] = &worldSection{}
+				w.collision[id] = &terrain.Geometry{}
+			}
+			// An active upload survives until the upload lifecycle releases it.
+			w.upload = &sectionUpload{data: render.SectionMesh{ID: 19}}
+			w.prune(v.Y, v.Height, v.Velocity)
+			for id := int64(0); id < 20; id++ {
+				want := id >= tc.first && id <= tc.last
+				if (w.sections[id] != nil) != (want || id == 19) || (w.collision[id] != nil) != want {
+					t.Fatalf("%v retention=%d lookahead=%d velocity=%g: wrong retention for section %d", orientation, tc.retain, tc.lookahead, tc.velocity, id)
+				}
+			}
+		}
+	}
+}
+
+func TestLookaheadDoesNotDelayReadinessOrExceedQueue(t *testing.T) {
+	w := &world{sections: map[int64]*worldSection{9: {}, 10: {}, 11: {}},
+		jobs: make(chan sectionJob, sectionQueueLimit), inflight: make(map[int64]sectionFlight),
+		ctx: context.Background(), lookaheadSections: 20}
+	defer func() {
+		for _, flight := range w.inflight {
+			flight.cancel(context.Canceled)
+		}
+	}()
+	if !w.ensure(-11, 1, -.01) {
+		t.Fatal("lookahead delayed a ready viewport")
+	}
+	if len(w.jobs) != sectionQueueLimit || len(w.inflight) != sectionQueueLimit {
+		t.Fatalf("lookahead did not respect queue capacity: %d jobs, %d flights", len(w.jobs), len(w.inflight))
+	}
+}
+
+func TestNeighborGenerationStillDelaysReadinessDuringPreload(t *testing.T) {
+	early := resolutionTestMesh(11)
+	early.Layers, early.TerrainOnly = render.ForegroundLayer, true
+	w := &world{sections: map[int64]*worldSection{9: {}, 10: {}, 11: {mesh: &early, vegetationPending: true}},
+		lookaheadSections: 1, viewport: Viewport{Y: -11, Height: 1}}
+	if w.ensure(-11, 1, 0) {
+		t.Fatal("neighbor generation reported ready before crossing plants were known")
+	}
+	complete := early
+	complete.Layers, complete.TerrainOnly = render.AllLayers, false
+	w.savePending(complete)
+	if !w.ensure(-11, 1, 0) {
+		t.Fatal("purely offscreen GPU uploads delayed completed neighbor generation")
+	}
+}
+
+func TestRetentionDoesNotBlockNewViewportRequests(t *testing.T) {
+	w := &world{sections: make(map[int64]*worldSection), pending: make(map[int64]render.SectionMesh),
+		jobs: make(chan sectionJob, sectionQueueLimit), inflight: make(map[int64]sectionFlight),
+		ctx: context.Background(), retainSections: 20}
+	defer func() {
+		for _, flight := range w.inflight {
+			flight.cancel(context.Canceled)
+		}
+	}()
+	for id := int64(0); id < sectionQueueLimit; id++ {
+		w.pending[id] = render.SectionMesh{ID: id}
+	}
+	// Completed offscreen results initially fill the queue. Pruning must free
+	// capacity even when those IDs lie inside the configured retention range.
+	w.ensure(-11, 1, 0)
+	w.prune(-11, 1, 0)
+	if w.ensure(-11, 1, 0) || len(w.jobs) != 3 {
+		t.Fatalf("obsolete pending results blocked the new viewport: %d requests", len(w.jobs))
+	}
+	if job := <-w.jobs; job.id != 10 {
+		t.Fatalf("first request is %d, want visible section 10", job.id)
+	}
+}
+
+func TestVisibleRequestsReclaimFullLookaheadQueue(t *testing.T) {
+	w := &world{sections: map[int64]*worldSection{9: {}, 11: {}}, pending: make(map[int64]render.SectionMesh),
+		jobs: make(chan sectionJob, sectionQueueLimit), inflight: make(map[int64]sectionFlight),
+		ctx: context.Background(), retainSections: 20, lookaheadSections: 20,
+		viewport: Viewport{Y: -11, Height: 1, Velocity: -.01}}
+	defer func() {
+		for _, flight := range w.inflight {
+			flight.cancel(context.Canceled)
+		}
+	}()
+	for id := int64(12); id < 12+sectionQueueLimit; id++ {
+		w.pending[id] = render.SectionMesh{ID: id}
+	}
+	if w.ensure(w.viewport.Y, w.viewport.Height, w.viewport.Velocity) || len(w.jobs) != 1 {
+		t.Fatalf("full lookahead queue blocked visible terrain: %d requests", len(w.jobs))
+	}
+	if job := <-w.jobs; job.id != 10 {
+		t.Fatalf("requested section %d instead of visible section 10", job.id)
+	}
+	if _, ok := w.pending[19]; ok {
+		t.Fatal("farthest speculative result was not reclaimed")
+	}
+	if _, ok := w.pending[12]; !ok && (w.upload == nil || w.upload.data.ID != 12) {
+		t.Fatal("nearest speculative result was discarded")
 	}
 }
 

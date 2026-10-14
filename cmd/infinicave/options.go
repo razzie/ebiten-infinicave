@@ -18,6 +18,8 @@ type viewerOptions struct {
 func parseOptions() (viewerOptions, error) {
 	defaults := infinicave.DefaultConfig()
 	mode := flag.String("mode", "portrait", "scrolling mode: portrait (vertical) or landscape (horizontal)")
+	retainSections := flag.Int("retain-sections", defaults.RetainSections, "loaded sections to retain beyond each end of the viewport (nonnegative; immediate neighbors always stay loaded)")
+	lookaheadSections := flag.Int("lookahead-sections", defaults.LookaheadSections, "extra sections to prefetch beyond the immediate neighbor in the direction of travel (0 disables lookahead)")
 	forceGuidesUp := flag.Bool("force-guides-up", defaults.ForceGuidesUp, "force exposed guide sides to face upward regardless of point order")
 	branching := flag.String("branching", defaults.BranchingStrategy.String(), "guide branching strategy: simple, recursive, loops")
 	branchMinThickness := flag.Float64("branch-min-thickness", defaults.BranchMinThickness, "minimum nominal branch thickness in scene units (0 uses default 0.048; range 0-1)")
@@ -52,6 +54,7 @@ func parseOptions() (viewerOptions, error) {
 		return viewerOptions{}, err
 	}
 	config.Orientation = orientation
+	config.RetainSections, config.LookaheadSections = *retainSections, *lookaheadSections
 	config.ForceGuidesUp = *forceGuidesUp
 	config.BranchingStrategy, err = infinicave.ParseBranchingStrategy(*branching)
 	if err != nil {

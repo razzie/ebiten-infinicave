@@ -168,6 +168,116 @@ func TestNeighborPlantsDeferRockUploadUntilScrolling(t *testing.T) {
 	}
 }
 
+func TestLookaheadUploadsAllLayersBeforeExposure(t *testing.T) {
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		for _, velocity := range []float64{0, -.00001, .00001} {
+			for _, disableBackground := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%v/velocity=%g/background-disabled=%v", orientation, velocity, disableBackground), func(t *testing.T) {
+					g := resolutionTestScene(t)
+					g.orientation = orientation
+					w := g.world
+					for id, s := range w.sections {
+						s.deallocate()
+						delete(w.sections, id)
+					}
+					w.lookaheadSections, w.disableBackground = 1, disableBackground
+					w.pixels = 32
+					for _, id := range []int64{9, 10, 11} {
+						w.sections[id] = &worldSection{}
+					}
+					viewport := Viewport{Y: -11, Height: 1, Velocity: velocity}
+					if orientation == Horizontal {
+						viewport = Viewport{X: 10, Width: 1, Velocity: -velocity}
+					}
+					target := int64(11) // stationary neighbor
+					if velocity < 0 {
+						target = 12
+					} else if velocity > 0 {
+						target = 8
+					}
+					mesh := resolutionTestMesh(target)
+					bounds := image.Rect(100, 1200, 200, 1400)
+					mesh.Vines, mesh.ForegroundVines = []render.TriangleMesh{{}}, []render.TriangleMesh{{}}
+					mesh.VinesBounds, mesh.ForegroundVinesBounds = bounds, bounds
+					mesh.MushroomsBounds, mesh.SpiderWebsBounds = bounds, bounds
+					mesh.Foreground.Grass = mesh.Foreground.Faces
+					v, _ := orientedViewport(orientation, viewport)
+					if meshVisible(mesh, v) {
+						t.Fatal("fixture must stay entirely outside the viewport")
+					}
+					w.savePending(mesh)
+					finish := func() *worldSection {
+						t.Helper()
+						for tick := 0; tick < 100; tick++ {
+							if !g.Update(viewport) {
+								t.Fatal("offscreen uploads delayed a ready viewport")
+							}
+							s := w.sections[target]
+							if s != nil && !s.vegetationPending && !w.needsVisibleRefresh(target, s) && w.upload == nil {
+								return s
+							}
+						}
+						t.Fatal("lookahead never finished its offscreen layers")
+						return nil
+					}
+					s := finish()
+					if s.foreground == nil || s.grass == nil || s.foregroundVines == nil || s.mushrooms == nil || s.spiderWebs == nil ||
+						(s.terrain == nil) != disableBackground || (s.vines == nil) != disableBackground {
+						t.Fatal("lookahead left an offscreen layer unprepared")
+					}
+					// Resize refreshes the same offscreen recipes without regeneration.
+					g.SetRenderWidth(48)
+					s = finish()
+					foreground, vines, mushrooms, webs := s.foreground, s.foregroundVines, s.mushrooms, s.spiderWebs
+					for _, id := range []int64{target - 1, target + 1} {
+						if w.sections[id] == nil {
+							w.sections[id] = &worldSection{}
+						}
+					}
+					viewport = Viewport{Y: -float64(target + 1), Height: 1}
+					if orientation == Horizontal {
+						viewport = Viewport{X: float64(target), Width: 1}
+					}
+					if !g.Update(viewport) || w.upload != nil || s.foreground != foreground || s.foregroundVines != vines || s.mushrooms != mushrooms || s.spiderWebs != webs || len(w.jobs) != 0 {
+						t.Fatal("entering a prefetched section restarted uploads or generation")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestVisibleRefreshPreemptsLookaheadVegetation(t *testing.T) {
+	g := resolutionTestScene(t)
+	w := g.world
+	w.lookaheadSections = 1
+	w.viewport = Viewport{Y: -1, Height: 1, Velocity: -.00001}
+	plants := resolutionTestMesh(2)
+	plants.Layers = render.VegetationLayer
+	plants.Vines = make([]render.TriangleMesh, uploadDrawsPerTick*2+1)
+	plants.VinesBounds = image.Rect(100, 1200, 200, 1400)
+	w.startUpload(plants)
+	w.receive(g)
+	paused := w.upload
+	if paused == nil || paused.stage != uploadVines || paused.next == 0 {
+		t.Fatal("offscreen vegetation did not begin uploading")
+	}
+	stage, next := paused.stage, paused.next
+	w.sections[0].foreground.Deallocate()
+	w.sections[0].foreground = nil
+	g.Update(w.viewport)
+	if w.upload == nil || w.upload.data.ID != 0 || w.parked[2] != paused {
+		t.Fatal("visible cached terrain did not preempt lookahead")
+	}
+	for tick := 0; tick < 20 && w.upload != nil; tick++ {
+		w.receive(g)
+	}
+	w.receive(g)
+	if w.upload != paused || paused.stage != stage || paused.next != next {
+		t.Fatal("lookahead vegetation restarted instead of resuming")
+	}
+}
+
 func TestResizeRefreshFollowsCameraAndRetainsCutsDuringUpload(t *testing.T) {
 	g := resolutionTestScene(t)
 	for _, id := range []int64{0, 1} {

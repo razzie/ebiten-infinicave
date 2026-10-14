@@ -35,7 +35,7 @@ Set `Config.Orientation = infinicave.Horizontal` before `NewScene` to grow right
 
 Viewport dimensions must be finite and positive. Vertical `Y` must be finite and no greater than `-Height`; horizontal `X` must be finite and nonnegative. `Viewport.Velocity` is movement per tick along the scrolling axis and is used for directional prefetching.
 
-Rendering uses the smaller target dimension as pixels per scene unit. Portrait and landscape targets center the cave on the bounded axis. Set `scene.SetRenderWidth(min(nativeWidth, nativeHeight))` before `Update` to match cached raster resolution to the target; the default is 1000 pixels per scene unit. Resizing reuses prepared geometry and preserves runtime cuts.
+Rendering uses the smaller target dimension as pixels per scene unit. Portrait and landscape targets center the cave on the bounded axis. Set `scene.SetRenderWidth(min(nativeWidth, nativeHeight))` before `Update` to match cached raster resolution to the target; the default is 1000 pixels per scene unit. Resizing reuses prepared geometry and preserves runtime cuts. Visible uploads take priority; when lookahead is enabled, neighbors and directional lookahead sections refresh afterward before entering the viewport.
 
 ## Rendering Hooks
 
@@ -64,6 +64,8 @@ The order is background and fog, `BehindRocks`, foreground rocks, mushrooms and 
 | --- | --- |
 | `Seed` | Reproducible world generation. |
 | `Orientation` | `Vertical` or `Horizontal`; fixed for the scene's lifetime. |
+| `RetainSections` | Keep published sections this far beyond each end of the viewport along the scrolling axis; default 3, nonnegative. |
+| `LookaheadSections` | Prefetch this many extra sections beyond the immediate neighbor in the direction of travel; default 4, nonnegative. Zero disables lookahead. |
 | `BranchingStrategy` | `BranchingSimple`, `BranchingRecursive`, or `BranchingLoops`. |
 | `Texture` | Surface grain strength, from 0 to 16. |
 | `Fog`, `BatsPerMinute` | Animated atmosphere and bat arrivals; zero disables each. |
@@ -75,6 +77,12 @@ The order is background and fog, `BehindRocks`, foreground rocks, mushrooms and 
 | `View` | `ViewShaded`, `ViewClay`, `ViewHeight`, `ViewNormals`, or `ViewShadows`. |
 
 Diagnostic views hide vegetation and disable texture, background effects, fog, and bats. See the `Config` documentation for validation ranges and complete defaults.
+
+Streaming uses the same two counts in both orientations: retention applies to up/down in vertical scenes and left/right in horizontal scenes, while lookahead follows `Viewport.Velocity`. Retention preserves published CPU geometry, meshes, and uploaded images without requesting new sections. Lookahead requests and retains extra sections only while moving; its count is independent of speed. Requests and unpublished results share a bounded queue, so long lookahead windows fill as capacity permits. Required viewport sections take priority over unpublished speculative results. Unpublished results and paused uploads outside the request window can be discarded to make room for the current viewport. Both settings survive `Reset`.
+
+Immediate neighbors remain requested and retained because their vegetation can reach into the viewport. `Update` waits for missing required sections and uploads that contribute to the viewport; purely offscreen uploads and extra lookahead do not delay readiness. Lookahead and an active GPU upload may extend beyond the retention range. A zero `Config` keeps only visible sections and required neighbors, with no extra retention or lookahead. Defaults now use symmetric retention and fixed lookahead, replacing the previous asymmetric retention and speed-dependent lookahead.
+
+With `LookaheadSections > 0`, prefetching includes GPU uploads for rocks, vines, and decorations, so completed sections are ready to draw before they enter the viewport. Immediate neighbors also prepare all layers, including while stationary. Visible uploads take priority, then the nearest offscreen sections finish before farther ones. Offscreen uploads do not delay viewport readiness; generation and uploads still advance within their per-tick budgets. Zero lookahead keeps offscreen rock images deferred and uploads neighboring plants only when they contribute to the viewport.
 
 Set `config.DisableBackground = true` to draw the foreground over your own background. This leaves generation and collision/query geometry unchanged. Set `config.Fog = 0` too if you want to disable mist.
 
@@ -164,6 +172,7 @@ Run `go run ./cmd/infinicave -h` for the complete flag list. Useful examples:
 go run ./cmd/infinicave -seed 42 -mode landscape
 go run ./cmd/infinicave -seed 42 -branching loops
 go run ./cmd/infinicave -seed 42 -disable-background
+go run ./cmd/infinicave -retain-sections 2 -lookahead-sections 1
 go run ./cmd/infinicave -seed 42 -view normals -output normals.png
 ```
 

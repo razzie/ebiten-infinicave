@@ -8,6 +8,27 @@ import (
 	infinicave "github.com/razzie/ebiten-infinicave"
 )
 
+func TestViewerStreamingFlags(t *testing.T) {
+	oldFlags, oldArgs := flag.CommandLine, os.Args
+	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })
+	defaults := infinicave.DefaultConfig()
+	for _, tc := range []struct {
+		args              []string
+		retain, lookahead int
+	}{
+		{nil, defaults.RetainSections, defaults.LookaheadSections},
+		{[]string{"-retain-sections", "2", "-lookahead-sections", "1"}, 2, 1},
+		{[]string{"-mode", "landscape", "-retain-sections", "0", "-lookahead-sections", "0"}, 0, 0},
+	} {
+		flag.CommandLine = flag.NewFlagSet("streaming-options", flag.ContinueOnError)
+		os.Args = append([]string{"infinicave"}, tc.args...)
+		options, err := parseOptions()
+		if err != nil || options.config.RetainSections != tc.retain || options.config.LookaheadSections != tc.lookahead {
+			t.Fatalf("streaming flags: got %d/%d, want %d/%d, error %v", options.config.RetainSections, options.config.LookaheadSections, tc.retain, tc.lookahead, err)
+		}
+	}
+}
+
 func TestViewerModesAndWindowSizing(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
