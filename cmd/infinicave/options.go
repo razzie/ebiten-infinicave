@@ -38,6 +38,7 @@ func parseOptions() (viewerOptions, error) {
 	shadowY := flag.Float64("shadow-y", defaults.ShadowOffset.Y, "rock shadow vertical offset in scene units (positive is down, range -1 to 1)")
 	fog := flag.Float64("fog", defaults.Fog, "moving fog strength between background and foreground layers (0 disables it, values above 1 increase density)")
 	batsPerMinute := flag.Float64("bats-per-minute", defaults.BatsPerMinute, "average bat arrivals per minute (0 disables them, interactive viewer only)")
+	decorationBurn := flag.Bool("decoration-burn", defaults.DecorationBurn, "burn dissolve decorations removed by carving")
 	mushroomDensity := flag.Float64("mushroom-density", defaults.MushroomDensity, "mushroom cluster occurrence probability (0 disables mushrooms, range 0-1)")
 	mossDensity := flag.Float64("moss-density", defaults.MossDensity, "green and yellow moss coverage on upward-facing rocks (0 disables moss, range 0-1)")
 	grassDensity := flag.Float64("grass-density", defaults.GrassDensity, "yellow or green grass tuft coverage beside guides on upward-facing rocks (0 disables grass, range 0-1)")
@@ -74,6 +75,7 @@ func parseOptions() (viewerOptions, error) {
 	config.ShadowOffset = infinicave.V{X: *shadowX, Y: *shadowY}
 	config.Fog = *fog
 	config.BatsPerMinute = *batsPerMinute
+	config.DecorationBurn = *decorationBurn
 	config.MushroomDensity = *mushroomDensity
 	config.MossDensity = *mossDensity
 	config.GrassDensity = *grassDensity

@@ -53,6 +53,7 @@ func (g *carvePixelGame) Draw(*ebiten.Image) {
 		return
 	}
 	g.done = true
+	checkDecorationBurnPixels(g.t)
 	scene, err := NewScene(Config{View: ViewShaded})
 	if err != nil {
 		g.t.Fatal(err)

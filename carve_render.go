@@ -114,6 +114,7 @@ func (g *Scene) editSectionImages(section *worldSection, id int64, cut terrain.R
 		g.world.white = ebiten.NewImage(1, 1)
 		g.world.white.Fill(color.White)
 	}
+	g.captureDecorationBurns(section, id, cut, oldCuts, edits)
 	// Includes bevels, new rims, and filter reach. Snap native regions to small
 	// tiles so attachment overlap and raster antialiasing have stable origins.
 	dirty := geom.Bounds{Min: cut.Min.Sub(V{X: .012, Y: .012}), Max: cut.Max.Add(V{X: .012, Y: .012})}

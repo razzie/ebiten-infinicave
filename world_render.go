@@ -42,7 +42,7 @@ func (g *Scene) drawGridFacesWithAA(dst *ebiten.Image, mesh render.TriangleMesh,
 	})
 }
 
-func (w *world) draw(dst *ebiten.Image, y, height float64, fog *render.FogRenderer, background *render.BackgroundRenderer, passes RenderPasses, context RenderContext) {
+func (w *world) draw(dst *ebiten.Image, y, height float64, fog *render.FogRenderer, background *render.BackgroundRenderer, passes RenderPasses, context RenderContext, burns *render.BurnDissolve) {
 	view := render.TargetTransform(dst)
 	y = render.RenderAlignedY(y, view.Pixels)
 	if !w.disableBackground && background != nil {
@@ -76,10 +76,16 @@ func (w *world) draw(dst *ebiten.Image, y, height float64, fog *render.FogRender
 			w.drawSupportedVegetation(dst, section.foregroundVines, section.foregroundVinesBounds, terrain.SectionWindowTop(id), y, height, section.vegetationWidth(), view, false)
 		}
 	}
+	if burns != nil {
+		burns.Draw(dst, y, view, false)
+	}
 	if passes.AboveRocks != nil {
 		passes.AboveRocks(context)
 	}
 	w.drawGrass(dst, y, height, 0, view)
+	if burns != nil {
+		burns.Draw(dst, y, view, true)
+	}
 }
 
 // DrawBackground supplies cached background rock and vines to the effect pass.

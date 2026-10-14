@@ -114,6 +114,26 @@ func TestViewerDisableBackgroundFlag(t *testing.T) {
 	}
 }
 
+func TestViewerDecorationBurnFlag(t *testing.T) {
+	oldFlags, oldArgs := flag.CommandLine, os.Args
+	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{nil, false},
+		{[]string{"-decoration-burn"}, true},
+		{[]string{"-decoration-burn=false"}, false},
+	} {
+		flag.CommandLine = flag.NewFlagSet("burn-options", flag.ContinueOnError)
+		os.Args = append([]string{"infinicave"}, tc.args...)
+		options, err := parseOptions()
+		if err != nil || options.config.DecorationBurn != tc.want {
+			t.Fatalf("burn flag: got %v, want %v, error %v", options.config.DecorationBurn, tc.want, err)
+		}
+	}
+}
+
 func TestViewerSpiderWebMaximumSizeFlag(t *testing.T) {
 	oldFlags, oldArgs := flag.CommandLine, os.Args
 	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })

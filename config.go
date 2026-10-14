@@ -10,7 +10,8 @@ import (
 
 // Config controls generation, streaming, and rendering. Start with DefaultConfig to use
 // the viewer's appearance. A zero Config disables texture, background effects,
-// fog, bats, mushrooms, spider webs, moss, grass, hanging growth, and fine edge detail.
+// fog, bats, decoration burn, mushrooms, spider webs, moss, grass, hanging growth,
+// and fine edge detail.
 type Config struct {
 	Seed int64
 	// Antialiasing selects full geometry antialiasing (the zero value), no
@@ -85,6 +86,10 @@ type Config struct {
 	// It must be finite and nonnegative; zero disables bats.
 	// Bats use world coordinates and are hidden outside ViewShaded.
 	BatsPerMinute float64
+	// DecorationBurn enables a brief glowing burn dissolve for decorations
+	// removed by runtime carving. Disabled by default and in diagnostic views.
+	// Collision and queries change immediately; only the disappearing pixels linger.
+	DecorationBurn bool
 	// MushroomDensity is the probability of retaining a mushroom cluster,
 	// from 0 (disabled) to 1 (all eligible groups). The viewer default is 0.5. Placement remains
 	// deterministic for a seed; lower density preserves surviving clusters.
@@ -150,6 +155,7 @@ func DefaultConfig() Config {
 		ShadowOffset:         V{X: .018, Y: .025},
 		Fog:                  2,
 		BatsPerMinute:        7.5,
+		DecorationBurn:       true,
 		MushroomDensity:      terrain.DefaultMushroomDensity,
 		MossDensity:          render.DefaultMossDensity,
 		GrassDensity:         render.DefaultGrassDensity,

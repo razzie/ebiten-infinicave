@@ -66,6 +66,34 @@ func TestBackgroundConfigurationAndLifecycle(t *testing.T) {
 	}
 }
 
+func TestDecorationBurnConfigurationAndLifecycle(t *testing.T) {
+	configs := []Config{{}, DefaultConfig(), {DecorationBurn: true}}
+	for view := ViewClay; view <= ViewShadows; view++ {
+		configs = append(configs, Config{DecorationBurn: true, View: view})
+	}
+	for _, config := range configs {
+		scene, err := NewScene(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		enabled := config.DecorationBurn && config.View == ViewShaded
+		if (scene.decorationBurn != nil) != enabled {
+			t.Fatalf("burn enabled incorrectly for %+v", config)
+		}
+		burn := scene.decorationBurn
+		scene.SetRenderWidth(384)
+		scene.Reset(42)
+		if scene.decorationBurn != burn {
+			t.Fatal("reset lost burn configuration")
+		}
+		scene.Close()
+		scene.Close()
+		if scene.decorationBurn != nil {
+			t.Fatal("close retained burn renderer")
+		}
+	}
+}
+
 func TestBatsConfigurationAndLifecycle(t *testing.T) {
 	configs := []Config{{}, DefaultConfig(), {BatsPerMinute: .5}, {BatsPerMinute: 30}}
 	for view := ViewClay; view <= ViewShadows; view++ {

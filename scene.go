@@ -35,6 +35,7 @@ type Scene struct {
 	background           *render.BackgroundRenderer
 	disableBackground    bool
 	bats                 *render.BatFlock
+	decorationBurn       *render.BurnDissolve
 	geometryRevisionBase uint64 // revisions accumulated across world resets
 	texture              float64
 	view                 View
@@ -64,9 +65,17 @@ func NewScene(config Config) (*Scene, error) {
 		g.texture = 0
 	}
 	var err error
+	if config.DecorationBurn && g.view == ViewShaded {
+		g.decorationBurn, err = render.NewBurnDissolve()
+		if err != nil {
+			g.Close()
+			return nil, fmt.Errorf("infinicave: compile decoration burn shader: %w", err)
+		}
+	}
 	if g.antialiasing == AntialiasingFXAA {
 		g.fxaa, err = render.NewFXAARenderer()
 		if err != nil {
+			g.Close()
 			return nil, fmt.Errorf("infinicave: compile FXAA shader: %w", err)
 		}
 	}
@@ -135,6 +144,9 @@ func (g *Scene) Update(viewport Viewport) bool {
 	}
 	if g.bats != nil {
 		g.bats.Update(viewport)
+	}
+	if g.decorationBurn != nil {
+		g.decorationBurn.Update()
 	}
 	g.world.viewport = viewport
 	if u := g.world.upload; u != nil && !g.world.meshUploadEligible(u.data, viewport) {
@@ -222,7 +234,7 @@ func (g *Scene) DrawWithPasses(dst *ebiten.Image, viewport Viewport, passes Rend
 	}
 	context := newRenderContext(target, publicViewport, g.orientation, viewport.Y)
 	context.Antialiasing = g.antialiasing
-	g.world.draw(target, viewport.Y, viewport.Height, g.fog, g.background, passes, context)
+	g.world.draw(target, viewport.Y, viewport.Height, g.fog, g.background, passes, context, g.decorationBurn)
 	if g.bats != nil {
 		g.bats.DrawWithAntialiasing(target, viewport, g.antialiasing.GeometryAA())
 	}
@@ -252,6 +264,9 @@ func (g *Scene) Reset(seed int64) {
 		return
 	}
 	pixels := g.world.renderWidth()
+	if g.decorationBurn != nil {
+		g.decorationBurn.Clear()
+	}
 	g.geometryRevisionBase = g.GeometryRevision() + 1
 	g.world.close()
 	g.world = newWorld(seed, g.view, g.collisionTolerance, g.spiderWebMaxSize, g.spiderWebDensity, g.mushroomDensity, g.forceGuidesUp, terrain.OrientedSectionLoader(g.orientation, g.loadSection), g.rockGrowth, g.shape, g.orientation)
@@ -274,6 +289,10 @@ func (g *Scene) Close() {
 	g.geometryRevisionBase = g.GeometryRevision() + 1
 	g.closed = true
 	g.bats = nil
+	if g.decorationBurn != nil {
+		g.decorationBurn.Close()
+		g.decorationBurn = nil
+	}
 	if g.fxaa != nil {
 		g.fxaa.Close()
 		g.fxaa = nil

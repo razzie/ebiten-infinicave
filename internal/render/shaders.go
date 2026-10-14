@@ -21,3 +21,6 @@ var backgroundShaderSource []byte
 
 //go:embed shaders/fog.kage
 var fogShaderSource []byte
+
+//go:embed shaders/burn.kage
+var burnShaderSource []byte

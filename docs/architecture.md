@@ -118,6 +118,13 @@ images published together with vegetation. The viewer's optional `ribbon.go`
 trail demonstrates both hooks with mouse input and world coordinates,
 advancing its samples during `Game.Update`.
 
+Optional decoration burn dissolves capture cropped removed growth recipes and
+foreground vine pixels during runtime carving. `internal/render` owns their
+shader, animation, and temporary images; the root coordinates capture and draws
+remnants on the original side of `AboveRocks`. Cached images and geometry change
+immediately. Snapshots expire during `Update` and are released on reset or close;
+stored cuts, loading, and upload replay never start animations.
+
 Synchronous generation uses `terrain.GenerationOptions`, populated by the public
 `GenerateSectionWithConfig` entry point after validating the full configuration.
 Its collision callback runs on the calling goroutine.
