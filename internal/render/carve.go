@@ -12,6 +12,10 @@ import (
 // Erase cut coverage directly from a finished texture, including shadows and
 // surface decorations. Clip to the target image or dirty subimage before drawing.
 func EraseCutsAt(dst *ebiten.Image, bounds image.Rectangle, windowTop float64, cuts []terrain.RockCut, pixels int) {
+	EraseCutsWithAntialiasing(dst, bounds, windowTop, cuts, pixels, true)
+}
+
+func EraseCutsWithAntialiasing(dst *ebiten.Image, bounds image.Rectangle, windowTop float64, cuts []terrain.RockCut, pixels int, aa bool) {
 	if dst == nil || bounds.Empty() {
 		return
 	}
@@ -43,6 +47,6 @@ func EraseCutsAt(dst *ebiten.Image, bounds image.Rectangle, windowTop float64, c
 			}
 		}
 		path.Close()
-		vector.FillPath(dst, &path, nil, &vector.DrawPathOptions{AntiAlias: true, Blend: ebiten.BlendDestinationOut})
+		vector.FillPath(dst, &path, nil, &vector.DrawPathOptions{AntiAlias: aa, Blend: ebiten.BlendDestinationOut})
 	}
 }

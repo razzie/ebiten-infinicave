@@ -115,11 +115,15 @@ func (f *BatFlock) spawn(viewport Viewport, age float64) {
 }
 
 func (f *BatFlock) Draw(dst *ebiten.Image, viewport Viewport) {
+	f.DrawWithAntialiasing(dst, viewport, true)
+}
+
+func (f *BatFlock) DrawWithAntialiasing(dst *ebiten.Image, viewport Viewport, aa bool) {
 	view := TargetTransform(dst)
 	pixels := view.Pixels
 	scale := float64(pixels) / terrain.Width
 	cameraY := RenderAlignedY(viewport.Y, pixels)
-	options := &vector.DrawPathOptions{AntiAlias: true}
+	options := &vector.DrawPathOptions{AntiAlias: aa}
 	for _, b := range f.Bats {
 		t := b.Age / b.duration
 		position := b.Position(t)
@@ -146,7 +150,7 @@ func (f *BatFlock) Draw(dst *ebiten.Image, viewport Viewport) {
 		eyes := color.NRGBA{R: 255, G: 255, B: 255, A: alpha}
 		for _, eyeX := range []float64{-.065, .065} {
 			ex, ey := transform.GeoM.Apply(eyeX, -.15)
-			vector.FillCircle(dst, float32(ex), float32(ey), float32(size*.045), eyes, true)
+			vector.FillCircle(dst, float32(ex), float32(ey), float32(size*.045), eyes, aa)
 		}
 	}
 }

@@ -74,6 +74,20 @@ func TestWorldWorkerPreparesAllLayers(t *testing.T) {
 	case <-time.After(20 * time.Second):
 		t.Fatal("background collision preparation stalled")
 	}
+	var base render.SectionMesh
+	select {
+	case base = <-w.terrainMeshes:
+		if base.LayerMask() != render.ForegroundLayer || !base.ForegroundBaseOnly || len(base.Foreground.Faces.Indices) == 0 {
+			t.Fatal("worker did not publish the independent rock base first")
+		}
+		for _, attachment := range base.Foreground.Growth {
+			if attachment.Mesh.Texture != render.NoAtlas || attachment.Extra.Texture != render.NoAtlas {
+				t.Fatal("rock base waited for a growth atlas")
+			}
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("foreground preparation stalled")
+	}
 	select {
 	case mesh := <-w.results:
 		if mesh.Geometry == nil || len(mesh.Geometry.Collision.Polygons) == 0 {
@@ -88,6 +102,9 @@ func TestWorldWorkerPreparesAllLayers(t *testing.T) {
 		checkMesh(t, mesh.Background.Faces)
 		checkMesh(t, mesh.Foreground.Faces)
 		checkMesh(t, mesh.Mushrooms)
+		if mesh.ForegroundBaseOnly || !reflect.DeepEqual(base.Foreground.Faces, mesh.Foreground.Faces) {
+			t.Fatal("late growth changed the published rock faces or stayed incomplete")
+		}
 		density.Guides = mesh.Geometry.Guides
 		want := render.PrepareOwnedGridWithTopology(nil, ViewShaded, mesh.Geometry.Topology, density)
 		if !reflect.DeepEqual(mesh.Foreground, want) {

@@ -1,0 +1,44 @@
+//kage:unit pixels
+package main
+
+// Interpolate premultiplied samples without leaking pixels outside the source.
+func sample(p vec2) vec4 {
+	o := imageSrc0Origin()
+	p = clamp(p, o+vec2(.5), o+imageSrc0Size()-vec2(.5))
+	b := floor(p-vec2(.5))+vec2(.5)
+	f := p-b
+	a := imageSrc0At(b)
+	c := imageSrc0At(min(b+vec2(1, 0), o+imageSrc0Size()-vec2(.5)))
+	d := imageSrc0At(min(b+vec2(0, 1), o+imageSrc0Size()-vec2(.5)))
+	e := imageSrc0At(min(b+vec2(1), o+imageSrc0Size()-vec2(.5)))
+	return mix(mix(a, c, f.x), mix(d, e, f.x), f.y)
+}
+
+func luma(c vec4) float {
+	// Alpha participates in edge detection even for black translucent shapes.
+	return dot(c.rgb, vec3(.299, .587, .114)) + c.a*.25
+}
+
+func Fragment(dst vec4, src vec2, color vec4) vec4 {
+	c := sample(src)
+	nw := luma(sample(src+vec2(-1, -1)))
+	ne := luma(sample(src+vec2(1, -1)))
+	sw := luma(sample(src+vec2(-1, 1)))
+	se := luma(sample(src+vec2(1, 1)))
+	m := luma(c)
+	lo := min(m, min(min(nw, ne), min(sw, se)))
+	hi := max(m, max(max(nw, ne), max(sw, se)))
+	if hi-lo < max(.0312, hi*.125) {
+		return c
+	}
+	direction := vec2(-((nw+ne)-(sw+se)), (nw+sw)-(ne+se))
+	reduce := max((nw+ne+sw+se)*(.25*.125), .0078125)
+	direction = clamp(direction/(min(abs(direction.x), abs(direction.y))+reduce), vec2(-8), vec2(8))
+	a := .5*(sample(src+direction*(-1.0/6)) + sample(src+direction*(1.0/6)))
+	b := .5*a + .25*(sample(src+direction*(-.5)) + sample(src+direction*.5))
+	l := luma(b)
+	if l < lo || l > hi {
+		return a
+	}
+	return b
+}

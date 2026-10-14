@@ -131,7 +131,7 @@ func (g *Scene) editSectionImages(section *worldSection, id int64, cut terrain.R
 		g.replayGridRegions(section, id, append(edits.rock, dirty), false)
 	} else {
 		// The common isolated cut operates directly on the finished image.
-		render.EraseCutsAt(section.foreground, bounds, top, []terrain.RockCut{cut}, pixels)
+		g.eraseCuts(section.foreground, bounds, top, []terrain.RockCut{cut}, pixels)
 		rect := dirtyRaster(bounds, top, pixels, dirty, section.foreground)
 		if !rect.Empty() {
 			g.drawShapeRims(section.foreground.SubImage(rect).(*ebiten.Image), section.geometry, pixels, rect)
@@ -141,7 +141,7 @@ func (g *Scene) editSectionImages(section *worldSection, id int64, cut terrain.R
 		if len(edits.grass) > 0 || overlap {
 			g.replayGridRegions(section, id, append(edits.grass, dirty), true)
 		} else {
-			render.EraseCutsAt(section.grass, bounds, top, []terrain.RockCut{cut}, pixels)
+			g.eraseCuts(section.grass, bounds, top, []terrain.RockCut{cut}, pixels)
 		}
 	}
 	if section.vegetationPending {
@@ -150,7 +150,7 @@ func (g *Scene) editSectionImages(section *worldSection, id int64, cut terrain.R
 	if overlap {
 		g.replayForegroundVineRegion(section.foregroundVines, mesh.ForegroundVines, mesh.ForegroundVinesBounds, section.foregroundVinesBounds, id, section.vegetationWidth(), dirty, mesh.VisualCuts)
 	} else {
-		render.EraseCutsAt(section.foregroundVines, section.foregroundVinesBounds, top, []terrain.RockCut{cut}, section.vegetationWidth())
+		g.eraseCuts(section.foregroundVines, section.foregroundVinesBounds, top, []terrain.RockCut{cut}, section.vegetationWidth())
 	}
 	if len(edits.plants) > 0 {
 		g.replayAttachmentRegions(section.mushrooms, mesh.Plants, mesh.PlantIndex, mesh.MushroomsBounds, section.mushroomsBounds, id, section.vegetationWidth(), edits.mushrooms)
@@ -223,7 +223,7 @@ func (g *Scene) replayGridRegion(section *worldSection, id int64, dirty geom.Bou
 		g.drawGridFaces(target, faces, top)
 		for _, outline := range source.Outlines {
 			m := render.ScaleRegionMesh(render.RegionMesh(outline, reference), pixels, image.Pt(0, -pixels))
-			m.Draw(target, g.world.white)
+			m.DrawWithAntialiasing(target, g.world.white, g.antialiasing.GeometryAA())
 		}
 	} else if len(source.Grass.Indices) > 0 {
 		g.drawGridFaces(target, render.ScaleRegionMesh(render.RegionMesh(source.Grass, reference), pixels, image.Pt(0, -pixels)), top)
@@ -231,7 +231,7 @@ func (g *Scene) replayGridRegion(section *worldSection, id int64, dirty geom.Bou
 	for _, m := range render.AttachmentRegionBatches(source.Growth, candidates, reference, grass, false) {
 		g.drawAttachmentMesh(target, render.ScaleRegionMesh(m, pixels, image.Pt(0, -pixels)))
 	}
-	render.EraseCutsAt(target, bounds, top, section.mesh.VisualCuts, pixels)
+	g.eraseCuts(target, bounds, top, section.mesh.VisualCuts, pixels)
 	if !grass {
 		g.drawShapeRims(target, section.geometry, pixels, rect)
 	}
@@ -253,10 +253,10 @@ func (g *Scene) replayForegroundVineRegion(dst *ebiten.Image, source []render.Tr
 		m = render.RegionMesh(m, reference)
 		m = render.ScaleRegionMesh(m, pixels, image.Point{})
 		m = render.TranslateMesh(m, dx-float32(rect.Min.X), dy-float32(rect.Min.Y))
-		m.Draw(patch, g.world.white)
+		m.DrawWithAntialiasing(patch, g.world.white, g.antialiasing.GeometryAA())
 	}
 	patchBounds := rect.Add(nativeBounds.Min)
-	render.EraseCutsAt(patch, patchBounds, top, cuts, pixels)
+	g.eraseCuts(patch, patchBounds, top, cuts, pixels)
 	target := dst.SubImage(rect).(*ebiten.Image)
 	target.Clear()
 	op := &ebiten.DrawImageOptions{}
@@ -294,15 +294,15 @@ func (g *Scene) replayAttachmentRegion(dst *ebiten.Image, source []render.Attach
 func (g *Scene) maskUploadForeground(u *sectionUpload) {
 	bounds := image.Rect(0, u.pixels, u.pixels, 2*u.pixels)
 	top := terrain.SectionWindowTop(u.data.ID)
-	render.EraseCutsAt(u.foreground, bounds, top, u.data.VisualCuts, u.pixels)
-	render.EraseCutsAt(u.grass, bounds, top, u.data.VisualCuts, u.pixels)
+	g.eraseCuts(u.foreground, bounds, top, u.data.VisualCuts, u.pixels)
+	g.eraseCuts(u.grass, bounds, top, u.data.VisualCuts, u.pixels)
 	if u.foreground != nil {
 		g.drawShapeRims(u.foreground, u.data.Geometry, u.pixels, u.foreground.Bounds())
 	}
 }
 func (g *Scene) maskUploadPlants(section *worldSection, u *sectionUpload) {
 	top := terrain.SectionWindowTop(u.data.ID)
-	render.EraseCutsAt(section.foregroundVines, section.foregroundVinesBounds, top, u.data.VisualCuts, u.pixels)
+	g.eraseCuts(section.foregroundVines, section.foregroundVinesBounds, top, u.data.VisualCuts, u.pixels)
 }
 
 // Edits arriving during an upload filter only prepared instances. Rock and
@@ -349,7 +349,7 @@ func (g *Scene) carveSectionUpload(u *sectionUpload, cut terrain.RockCut) {
 			if u.stage > uploadRockUnderlay && len(edits.rock) > 0 {
 				g.replayGridRegions(temporary, u.data.ID, edits.rock, false)
 			} else {
-				render.EraseCutsAt(u.foreground, image.Rect(0, u.pixels, u.pixels, 2*u.pixels), terrain.SectionWindowTop(u.data.ID), []terrain.RockCut{cut}, u.pixels)
+				g.eraseCuts(u.foreground, image.Rect(0, u.pixels, u.pixels, 2*u.pixels), terrain.SectionWindowTop(u.data.ID), []terrain.RockCut{cut}, u.pixels)
 			}
 			if u.grass != nil && len(edits.grass) > 0 {
 				g.replayGridRegions(temporary, u.data.ID, edits.grass, true)
@@ -381,4 +381,8 @@ func (g *Scene) carveSectionUpload(u *sectionUpload, cut terrain.RockCut) {
 			g.replayAttachmentRegions(u.mushrooms, processed(u.data.Plants, uploadMushrooms), u.data.PlantIndex, u.data.MushroomsBounds, u.raster.MushroomsBounds, u.data.ID, u.pixels, edits.mushrooms)
 		}
 	}
+}
+
+func (g *Scene) eraseCuts(dst *ebiten.Image, bounds image.Rectangle, top float64, cuts []terrain.RockCut, pixels int) {
+	render.EraseCutsWithAntialiasing(dst, bounds, top, cuts, pixels, g.antialiasing.GeometryAA())
 }

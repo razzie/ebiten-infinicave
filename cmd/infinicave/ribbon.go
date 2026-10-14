@@ -118,7 +118,7 @@ func (r *ribbonTrail) draw(context infinicave.RenderContext) {
 			r.indices = append(r.indices, v-2, v-1, v+1, v-2, v+1, v)
 		}
 	}
-	context.Dst.DrawTriangles32(r.vertices, r.indices, r.white, &ebiten.DrawTrianglesOptions{AntiAlias: true})
+	context.Dst.DrawTriangles32(r.vertices, r.indices, r.white, &ebiten.DrawTrianglesOptions{AntiAlias: context.Antialiasing.GeometryAA()})
 }
 
 func (g *Game) updateRibbon() {

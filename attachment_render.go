@@ -10,7 +10,7 @@ func (w *world) prepareAtlas(kind render.AtlasKind, budget *uploadBudget) bool {
 		return true
 	}
 	if w.atlases == nil {
-		w.atlases = &render.AtlasCache{}
+		w.atlases = &render.AtlasCache{Antialiasing: w.antialiasing}
 	}
 	return w.atlases.Prepare(kind, func(indices int) bool { return budget.take(indices) })
 }
@@ -20,14 +20,14 @@ func (g *Scene) drawAttachmentMesh(dst *ebiten.Image, mesh render.TriangleMesh) 
 		return
 	}
 	if mesh.Texture == render.NoAtlas {
-		mesh.Draw(dst, g.world.white)
+		mesh.DrawWithAntialiasing(dst, g.world.white, g.antialiasing.GeometryAA())
 		return
 	}
 	if g.world.atlases == nil {
-		g.world.atlases = &render.AtlasCache{}
+		g.world.atlases = &render.AtlasCache{Antialiasing: g.antialiasing}
 	}
 	g.world.atlases.Prepare(mesh.Texture, func(int) bool { return true })
-	mesh.Draw(dst, g.world.atlases.Image(mesh.Texture))
+	mesh.DrawWithAntialiasing(dst, g.world.atlases.Image(mesh.Texture), g.antialiasing.GeometryAA())
 }
 
 func (w *world) uploadAttachments(g *Scene, dst *ebiten.Image, instances []render.Attachment, grass, underlay bool, budget *uploadBudget) bool {

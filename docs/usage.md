@@ -25,6 +25,13 @@ scene.Draw(screen, viewport)
 
 `Update` requests terrain for the viewport and reports whether it is ready. It also advances animated effects. Repeated draws do not advance animation. The library does not own your game loop, camera, input, window settings, or UI. `Close` is idempotent and releases scene rendering resources. `Reset(seed)` starts a new world while retaining the scene's settings and callbacks.
 
+`scene.Readiness(viewport)` reports `Collision`, `Foreground`, `Background`, and
+`Decorations` independently without requesting generation. Foreground rock faces,
+walls, and edge detail publish before background generation and growth atlas
+uploads. Growth and grass arrive later through a replacement foreground image;
+the published rock base stays drawable while that image uploads. Continue to
+call `Draw` during loading. Use `Update`'s full-readiness result for exports.
+
 ## Coordinates and Orientation
 
 All positions, distances, radii, velocities, and collision tolerances use scene units. A section is one unit square and `infinicave.Width` and `infinicave.SectionHeight` are each 1.
@@ -65,6 +72,7 @@ The order is background and fog, `BehindRocks`, foreground rocks, mushrooms and 
 | `Seed` | Reproducible world generation. |
 | `Orientation` | `Vertical` or `Horizontal`; fixed for the scene's lifetime. |
 | `RetainSections` | Keep published sections this far beyond each end of the viewport along the scrolling axis; default 3, nonnegative. |
+| `Antialiasing` | `AntialiasingFull` (default and zero value), `AntialiasingOff`, or `AntialiasingFXAA`. |
 | `LookaheadSections` | Prefetch this many extra sections beyond the immediate neighbor in the direction of travel; default 4, nonnegative. Zero disables lookahead. |
 | `BranchingStrategy` | `BranchingSimple`, `BranchingRecursive`, or `BranchingLoops`. |
 | `Texture` | Surface grain strength, from 0 to 16. |
@@ -77,6 +85,18 @@ The order is background and fog, `BehindRocks`, foreground rocks, mushrooms and 
 | `View` | `ViewShaded`, `ViewClay`, `ViewHeight`, `ViewNormals`, or `ViewShadows`. |
 
 Diagnostic views hide vegetation and disable texture, background effects, fog, and bats. See the `Config` documentation for validation ranges and complete defaults.
+
+Full antialiases geometry and atlas baking. Off disables geometry antialiasing
+and supersampling throughout uploads, bats, and carving replay. FXAA uses the
+same non-antialiased geometry and filters the complete scene once at native
+output resolution, after both render hooks, grass, bats, and horizontal rotation.
+It preserves transparent margins and works while layers are still loading.
+Background blur and shadow softness remain controlled by their own settings.
+Custom hooks can use `context.Antialiasing.GeometryAA()` for triangle/path draw
+options; the library cannot override options chosen inside callbacks. Content
+drawn into the destination before or after `Scene.Draw` is outside the FXAA pass.
+Choose a mode before `NewScene`; it survives Reset and resizing. The viewer flag
+is `-antialiasing full|off|fxaa` and also applies to PNG exports.
 
 Streaming uses the same two counts in both orientations: retention applies to up/down in vertical scenes and left/right in horizontal scenes, while lookahead follows `Viewport.Velocity`. Retention preserves published CPU geometry, meshes, and uploaded images without requesting new sections. Lookahead requests and retains extra sections only while moving; its count is independent of speed. Requests and unpublished results share a bounded queue, so long lookahead windows fill as capacity permits. Required viewport sections take priority over unpublished speculative results. Unpublished results and paused uploads outside the request window can be discarded to make room for the current viewport. Both settings survive `Reset`.
 

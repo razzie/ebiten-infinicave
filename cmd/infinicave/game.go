@@ -89,7 +89,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.drawHover(screen)
 	if g.loading {
 		message := "Growing upward..."
-		if g.mode == infinicave.Horizontal {
+		foregroundReady := g.scene.Readiness(g.viewport()).Foreground
+		if foregroundReady {
+			message = "Finishing cave details..."
+		}
+		if g.mode == infinicave.Horizontal && !foregroundReady {
 			message = "Growing rightward..."
 		}
 		ebitenutil.DebugPrintAt(screen, message, 8, 24)

@@ -171,9 +171,10 @@ func reversePoints(p []geom.V) {
 // AtlasCache owns GPU pages on the game goroutine. Fixed reference resolution
 // bounds storage to about 35 MiB; native scene resizing only changes quads.
 type AtlasCache struct {
-	pages [atlasKinds]*ebiten.Image
-	next  [atlasKinds]int
-	white *ebiten.Image
+	Antialiasing AntialiasingMode
+	pages        [atlasKinds]*ebiten.Image
+	next         [atlasKinds]int
+	white        *ebiten.Image
 }
 
 // Prepare uploads immutable page batches rather than issuing one draw per
@@ -195,7 +196,7 @@ func (c *AtlasCache) Prepare(kind AtlasKind, take func(int) bool) bool {
 		if !take(len(recipes[c.next[kind]].Indices)) {
 			return false
 		}
-		recipes[c.next[kind]].Draw(c.pages[kind], c.white)
+		recipes[c.next[kind]].DrawWithAntialiasing(c.pages[kind], c.white, c.Antialiasing.GeometryAA())
 		c.next[kind]++
 	}
 	return true

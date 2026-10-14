@@ -24,7 +24,7 @@ func (s *worldSection) renderWidth() int {
 }
 
 func (g *Scene) drawGridFaces(dst *ebiten.Image, mesh render.TriangleMesh, top float64) {
-	g.drawGridFacesWithAA(dst, mesh, top, true)
+	g.drawGridFacesWithAA(dst, mesh, top, g.antialiasing.GeometryAA())
 }
 
 func (g *Scene) drawGridFacesWithAA(dst *ebiten.Image, mesh render.TriangleMesh, top float64, aa bool) {

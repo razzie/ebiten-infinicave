@@ -19,6 +19,8 @@ const SectionHeight = terrain.SectionHeight
 // goroutine; generation and mesh preparation run in background workers.
 // The zero value is not usable.
 type Scene struct {
+	antialiasing         AntialiasingMode
+	fxaa                 *render.FXAARenderer
 	shape                terrain.ShapeOptions
 	orientation          Orientation
 	forceGuidesUp        bool
@@ -54,6 +56,7 @@ func NewScene(config Config) (*Scene, error) {
 		return nil, err
 	}
 	g := &Scene{orientation: config.Orientation, forceGuidesUp: config.ForceGuidesUp, texture: config.Texture, view: config.View, collisionTolerance: config.CollisionTolerance, spiderWebMaxSize: config.SpiderWebMaxSize, spiderWebDensity: config.SpiderWebDensity, mushroomDensity: config.MushroomDensity, rockGrowth: render.RockGrowthOptions{Moss: config.MossDensity, Hanging: config.HangingGrowthDensity, Grass: config.GrassDensity}, loadSection: config.LoadSection, onCollisionReady: config.OnCollisionReady}
+	g.antialiasing = config.Antialiasing
 	g.shape = config.shapeOptions()
 	g.retainSections, g.lookaheadSections = config.RetainSections, config.LookaheadSections
 	g.disableBackground = config.DisableBackground
@@ -61,8 +64,15 @@ func NewScene(config Config) (*Scene, error) {
 		g.texture = 0
 	}
 	var err error
+	if g.antialiasing == AntialiasingFXAA {
+		g.fxaa, err = render.NewFXAARenderer()
+		if err != nil {
+			return nil, fmt.Errorf("infinicave: compile FXAA shader: %w", err)
+		}
+	}
 	g.material, err = ebiten.NewShader(render.MaterialShaderSource)
 	if err != nil {
+		g.Close()
 		return nil, fmt.Errorf("infinicave: compile rock shader: %w", err)
 	}
 	if !g.disableBackground {
@@ -95,6 +105,7 @@ func NewScene(config Config) (*Scene, error) {
 	}
 	g.world = newWorld(config.Seed, g.view, g.collisionTolerance, g.spiderWebMaxSize, g.spiderWebDensity, g.mushroomDensity, g.forceGuidesUp, terrain.OrientedSectionLoader(g.orientation, g.loadSection), g.rockGrowth, g.shape, g.orientation)
 	g.world.disableBackground = g.disableBackground
+	g.world.antialiasing = g.antialiasing
 	g.world.retainSections, g.world.lookaheadSections = g.retainSections, g.lookaheadSections
 	if config.BatsPerMinute > 0 && g.view == ViewShaded {
 		g.bats = render.NewBatFlock(config.Seed, config.BatsPerMinute, g.orientation)
@@ -195,20 +206,25 @@ func (g *Scene) DrawWithPasses(dst *ebiten.Image, viewport Viewport, passes Rend
 	if g.closed || !valid {
 		return
 	}
-	g.warmMaterials(dst)
-	target := dst
+	composition := dst
+	if g.fxaa != nil {
+		composition = g.fxaa.Begin(dst)
+	}
+	g.warmMaterials(composition)
+	target := composition
 	if g.orientation == Horizontal {
 		// Reuse the section-frame compositor at native resolution. A quarter
 		// turn is an exact pixel mapping; transparent gaps preserve dst.
-		size := dst.Bounds().Size()
+		size := composition.Bounds().Size()
 		render.EnsureEffectImage(&g.orientedTarget, size.Y, size.X)
 		g.orientedTarget.Clear()
 		target = g.orientedTarget
 	}
 	context := newRenderContext(target, publicViewport, g.orientation, viewport.Y)
+	context.Antialiasing = g.antialiasing
 	g.world.draw(target, viewport.Y, viewport.Height, g.fog, g.background, passes, context)
 	if g.bats != nil {
-		g.bats.Draw(target, viewport)
+		g.bats.DrawWithAntialiasing(target, viewport, g.antialiasing.GeometryAA())
 	}
 	if g.orientation == Horizontal {
 		op := &ebiten.DrawImageOptions{}
@@ -216,8 +232,11 @@ func (g *Scene) DrawWithPasses(dst *ebiten.Image, viewport Viewport, passes Rend
 		op.GeoM.SetElement(0, 1, -1)
 		op.GeoM.SetElement(1, 0, 1)
 		op.GeoM.SetElement(1, 1, 0)
-		op.GeoM.Translate(float64(dst.Bounds().Dx()), 0)
-		dst.DrawImage(target, op)
+		op.GeoM.Translate(float64(composition.Bounds().Dx()), 0)
+		composition.DrawImage(target, op)
+	}
+	if g.fxaa != nil {
+		g.fxaa.Draw(dst)
 	}
 }
 
@@ -237,6 +256,7 @@ func (g *Scene) Reset(seed int64) {
 	g.world.close()
 	g.world = newWorld(seed, g.view, g.collisionTolerance, g.spiderWebMaxSize, g.spiderWebDensity, g.mushroomDensity, g.forceGuidesUp, terrain.OrientedSectionLoader(g.orientation, g.loadSection), g.rockGrowth, g.shape, g.orientation)
 	g.world.disableBackground = g.disableBackground
+	g.world.antialiasing = g.antialiasing
 	g.world.retainSections, g.world.lookaheadSections = g.retainSections, g.lookaheadSections
 	g.world.pixels = pixels
 	if g.bats != nil {
@@ -254,6 +274,10 @@ func (g *Scene) Close() {
 	g.geometryRevisionBase = g.GeometryRevision() + 1
 	g.closed = true
 	g.bats = nil
+	if g.fxaa != nil {
+		g.fxaa.Close()
+		g.fxaa = nil
+	}
 	if g.orientedTarget != nil {
 		g.orientedTarget.Deallocate()
 		g.orientedTarget = nil

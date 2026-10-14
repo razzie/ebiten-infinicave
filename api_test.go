@@ -8,6 +8,24 @@ import (
 	"github.com/razzie/ebiten-infinicave"
 )
 
+func TestPublicAntialiasingAndReadiness(t *testing.T) {
+	for _, mode := range []infinicave.AntialiasingMode{infinicave.AntialiasingFull, infinicave.AntialiasingOff, infinicave.AntialiasingFXAA} {
+		parsed, err := infinicave.ParseAntialiasingMode(mode.String())
+		if err != nil || parsed != mode {
+			t.Fatalf("public antialiasing mode %s: %v", mode, err)
+		}
+		scene, err := infinicave.NewScene(infinicave.Config{Antialiasing: mode, DisableBackground: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ready := scene.Readiness(infinicave.Viewport{Y: -1, Height: 1})
+		if !ready.Background || ready.Foreground || ready.Collision {
+			t.Fatalf("public readiness: %+v", ready)
+		}
+		scene.Close()
+	}
+}
+
 func TestPublicStreamingConfiguration(t *testing.T) {
 	defaults := infinicave.DefaultConfig()
 	if defaults.RetainSections != 3 || defaults.LookaheadSections != 4 {

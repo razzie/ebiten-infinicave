@@ -8,6 +8,25 @@ import (
 	infinicave "github.com/razzie/ebiten-infinicave"
 )
 
+func TestViewerAntialiasingFlag(t *testing.T) {
+	oldFlags, oldArgs := flag.CommandLine, os.Args
+	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })
+	for _, name := range []string{"full", "off", "fxaa", "invalid"} {
+		flag.CommandLine = flag.NewFlagSet("aa-options", flag.ContinueOnError)
+		os.Args = []string{"infinicave", "-antialiasing", name}
+		options, err := parseOptions()
+		if name == "invalid" {
+			if err == nil {
+				t.Fatal("invalid mode accepted")
+			}
+			continue
+		}
+		if err != nil || options.config.Antialiasing.String() != name {
+			t.Fatalf("mode %s: %v / %v", name, options.config.Antialiasing, err)
+		}
+	}
+}
+
 func TestViewerStreamingFlags(t *testing.T) {
 	oldFlags, oldArgs := flag.CommandLine, os.Args
 	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })

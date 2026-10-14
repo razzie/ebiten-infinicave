@@ -51,13 +51,22 @@ followed by the nearest offscreen sections, within the shared upload budget.
 ## Ownership and execution
 
 The section worker owns its builder, random streams, guide cache, retained branch paths, and generation timings. It publishes immutable foreground geometry before generating
-vegetation or preparing meshes. The game goroutine receives that early geometry
+vegetation or preparing meshes. Foreground-only appearance and a rock-base mesh
+then publish without background generation or growth atlas uploads. Background
+material retains the compatibility data used by decoration placement; completed
+growth later replaces the foreground image while the base remains drawable.
+`Scene.Readiness` exposes the independent layer states. The game goroutine receives that early geometry
 and invokes the collision callback. Final vegetation is attached to a separate
 geometry value so it cannot mutate already published data.
 
 Mesh preparation uses CPU data, even though vertices use Ebitengine types. GPU
 images and shaders are created, uploaded, drawn, resized, and released on the game
 goroutine. Upload budgets and cache publication live in `world_stream.go`.
+`Config.Antialiasing` is fixed for a scene: Full uses geometry antialiasing and
+supersampled face uploads; Off and FXAA use native non-antialiased layers and
+atlas pages, including carving replay. FXAA owns a reusable final-size target
+and filters the scene once after custom passes, grass, bats, and orientation
+mapping. CPU geometry and recipes are independent of that raster policy.
 Carving replaces connected outer/inner loops independently of material facets.
 Finished foreground rock/vine images receive cut masks; background rock and
 background vines remain intact. Removed attachments and overlapping

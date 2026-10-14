@@ -42,6 +42,8 @@ const (
 )
 
 type SectionMesh struct {
+	// ForegroundBaseOnly omits atlas growth until its later immutable recipe.
+	ForegroundBaseOnly                                  bool
 	PlantIndex, WebIndex                                *AttachmentSupportIndex
 	BakedInstances                                      bool
 	Webs                                                []Attachment
@@ -136,10 +138,14 @@ func PrepareVegetation(data terrain.SectionData, view View) SectionMesh {
 }
 
 func (m TriangleMesh) Draw(dst, white *ebiten.Image) {
+	m.DrawWithAntialiasing(dst, white, true)
+}
+
+func (m TriangleMesh) DrawWithAntialiasing(dst, white *ebiten.Image, aa bool) {
 	if len(m.Indices) == 0 {
 		return
 	}
-	op := &ebiten.DrawTrianglesOptions{AntiAlias: true, FillRule: m.fillRule}
+	op := &ebiten.DrawTrianglesOptions{AntiAlias: aa, FillRule: m.fillRule}
 	if m.premultiplied {
 		op.ColorScaleMode = ebiten.ColorScaleModePremultipliedAlpha
 	}
@@ -369,6 +375,7 @@ func MergeSectionMeshes(previous, next SectionMesh) SectionMesh {
 	mask := next.LayerMask()
 	if mask&ForegroundLayer != 0 {
 		previous.Foreground = next.Foreground
+		previous.ForegroundBaseOnly = next.ForegroundBaseOnly
 	}
 	if mask&BackgroundLayer != 0 {
 		previous.Background = next.Background
@@ -412,6 +419,17 @@ func MergeSectionMeshes(previous, next SectionMesh) SectionMesh {
 func PrepareForeground(data terrain.SectionData, view View, growth ...RockGrowthOptions) SectionMesh {
 	mesh := SectionMesh{ID: data.ID, TerrainOnly: true, Layers: ForegroundLayer, Foreground: PrepareOwnedGridWithTopology(data.Foreground, view, sectionBakeTopology(data), sectionRockGrowth(data, growth))}
 	applyAuthoredVisualCuts(&mesh, data)
+	return mesh
+}
+
+// PrepareRockBase retains structural walls and edge detail but never fits
+// atlas growth, allowing foreground publication before atlas uploads.
+func PrepareRockBase(data terrain.SectionData, view View, options ...RockGrowthOptions) SectionMesh {
+	growth := rockGrowthOptions(options)
+	pending := view == ViewShaded && (growth.Moss > 0 || growth.Hanging > 0 || growth.Grass > 0)
+	growth.Moss, growth.Hanging, growth.Grass = 0, 0, 0
+	mesh := PrepareForeground(data, view, growth)
+	mesh.ForegroundBaseOnly = pending
 	return mesh
 }
 

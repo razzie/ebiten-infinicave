@@ -58,6 +58,7 @@ type world struct {
 	largeCuts         []int
 	indexedCuts       int
 	pixels            int
+	antialiasing      AntialiasingMode
 	disableBackground bool // game goroutine only; CPU generation retains all layers
 	pending           map[int64]render.SectionMesh
 	viewport          Viewport
@@ -140,22 +141,30 @@ func newWorld(seed int64, view View, tolerance, webMaxSize, webDensity, mushroom
 					}
 				}
 			case sectionForeground:
-				ok = job.build.Materialize(ctx)
+				ok = job.build.MaterializeForeground(ctx)
 				if ok {
 					job.geometry = terrain.BindTerrainMaterial(job.geometry, job.build.Data())
-					job.mesh = render.PrepareForeground(job.build.Data(), view, growth)
+					job.mesh = render.PrepareRockBase(job.build.Data(), view, growth)
 					job.mesh.Geometry = job.geometry
 					ok = sendMesh(job.mesh, w.terrainMeshes)
 				}
 			case sectionBackground:
-				mesh := render.PrepareBackground(job.build.Data(), view)
-				mesh.Geometry = job.geometry
-				job.mesh = render.MergeSectionMeshes(job.mesh, mesh)
-				ok = sendMesh(mesh, w.terrainMeshes)
+				ok = job.build.Materialize(ctx)
+				if ok {
+					job.geometry = terrain.BindTerrainMaterial(job.geometry, job.build.Data())
+					mesh := render.PrepareBackground(job.build.Data(), view)
+					mesh.Geometry = job.geometry
+					job.mesh = render.MergeSectionMeshes(job.mesh, mesh)
+					ok = sendMesh(mesh, w.terrainMeshes)
+				}
 			case sectionVegetation:
 				ok = builder.Decorate(ctx, job.build)
 				if ok {
 					mesh := render.PrepareVegetation(job.build.Data(), view)
+					if job.mesh.ForegroundBaseOnly {
+						foreground := render.PrepareForeground(job.build.Data(), view, growth)
+						job.mesh = render.MergeSectionMeshes(job.mesh, foreground)
+					}
 					mesh.Geometry = terrain.BindTerrainVegetation(job.geometry, job.build.Data())
 					mesh = render.MergeSectionMeshes(job.mesh, mesh)
 					ok = sendMesh(mesh, w.results)

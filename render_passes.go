@@ -25,6 +25,9 @@ type RenderPasses struct {
 // Horizontal scenes draw into a temporary rotated target; always use
 // WorldToTarget rather than assuming Dst has the final screen orientation.
 type RenderContext struct {
+	// Antialiasing selects the scene's geometry policy. Custom triangle/path
+	// draws should use GeometryAA(); FXAA includes both passes in its output.
+	Antialiasing AntialiasingMode
 	// Dst is borrowed for this callback; do not retain or deallocate it.
 	Dst *ebiten.Image
 	// Viewport uses public world axes, adjusted to the renderer's pixel alignment.

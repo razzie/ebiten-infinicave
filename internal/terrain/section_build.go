@@ -27,6 +27,30 @@ type SectionBuild struct {
 
 func (s *SectionBuild) Data() SectionData { return s.data }
 
+// MaterializeForeground prepares the final visible appearance without building
+// background geometry or fitting vegetation. Previously published topology
+// remains immutable; full Materialize later binds the compatibility material
+// used by synchronous generation and decoration placement.
+func (s *SectionBuild) MaterializeForeground(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	if s.data.ForegroundBake != nil {
+		return true
+	}
+	bake := PrepareRockAppearance(s.uncut)
+	if ctx.Err() != nil {
+		return false
+	}
+	topology := s.data.ForegroundTopology
+	if len(topology.Cuts) == 0 {
+		topology = bake
+	}
+	s.data.ForegroundBake = bake
+	s.data.ForegroundTopology = topology
+	return true
+}
+
 // Materialize keeps the original shading inputs and operation order. The
 // source-face map carries material onto inset/cut fragments without rebuilding
 // boundaries or changing the already published collision snapshot.
@@ -85,6 +109,11 @@ func (s *SectionBuild) Materialize(ctx context.Context) bool {
 	s.vegetationGrid = apply(s.uncut.Grid, s.uncutParents)
 	base := *s.uncut
 	base.Grid = s.vegetationGrid
+	if s.data.ForegroundBake != nil {
+		// Visible appearance depends on foreground topology, not background
+		// material. Reuse the immutable early shading instead of repeating it.
+		base.Appearance = s.data.ForegroundBake.Appearance
+	}
 	s.data.ForegroundBake = PrepareRockAppearance(&base)
 	if len(topology.Cuts) == 0 {
 		topology = *s.data.ForegroundBake

@@ -17,6 +17,7 @@ type viewerOptions struct {
 
 func parseOptions() (viewerOptions, error) {
 	defaults := infinicave.DefaultConfig()
+	antialiasing := flag.String("antialiasing", defaults.Antialiasing.String(), "antialiasing: full (geometry), off, fxaa (final scene filter)")
 	mode := flag.String("mode", "portrait", "scrolling mode: portrait (vertical) or landscape (horizontal)")
 	retainSections := flag.Int("retain-sections", defaults.RetainSections, "loaded sections to retain beyond each end of the viewport (nonnegative; immediate neighbors always stay loaded)")
 	lookaheadSections := flag.Int("lookahead-sections", defaults.LookaheadSections, "extra sections to prefetch beyond the immediate neighbor in the direction of travel (0 disables lookahead)")
@@ -49,6 +50,11 @@ func parseOptions() (viewerOptions, error) {
 	tolerance := flag.Float64("collision-tolerance", 0, "collision polygon simplification tolerance in scene units (one section is 1 by 1)")
 	flag.Parse()
 	config := defaults
+	aa, err := infinicave.ParseAntialiasingMode(*antialiasing)
+	if err != nil {
+		return viewerOptions{}, err
+	}
+	config.Antialiasing = aa
 	orientation, err := parseMode(*mode)
 	if err != nil {
 		return viewerOptions{}, err

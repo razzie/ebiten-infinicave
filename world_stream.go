@@ -189,7 +189,7 @@ func (w *world) uploadMeshes(dst *ebiten.Image, meshes []render.TriangleMesh, bu
 		if !budget.take(len(meshes[u.next].Indices)) {
 			break
 		}
-		meshes[u.next].Draw(dst, w.white)
+		meshes[u.next].DrawWithAntialiasing(dst, w.white, w.antialiasing.GeometryAA())
 	}
 	return u.next == len(meshes)
 }
@@ -405,7 +405,8 @@ func (w *world) receive(g *Scene) {
 		u.needed = u.data.LayerMask() & w.viewportLayers(u.data.ID)
 		section := w.sections[u.data.ID]
 		if section != nil {
-			if section.foreground != nil && section.renderWidth() == u.pixels && terrain.SameTerrain(section.geometry, u.data.Geometry) {
+			if section.foreground != nil && section.renderWidth() == u.pixels && terrain.SameTerrain(section.geometry, u.data.Geometry) &&
+				!(section.mesh != nil && section.mesh.ForegroundBaseOnly && !u.data.ForegroundBaseOnly) {
 				u.needed &^= render.ForegroundLayer
 			}
 			if section.terrain != nil && section.backgroundWidth() == u.pixels && section.mesh != nil && sameGridMesh(section.mesh.Background, u.data.Background) {
@@ -697,6 +698,26 @@ func (w *world) uploadFaces(g *Scene, dst *ebiten.Image, mesh render.TriangleMes
 	}
 	if !budget.enter(u.stage) {
 		return false
+	}
+	if !w.antialiasing.GeometryAA() {
+		remaining := uploadIndicesPerTick - budget.indices
+		end := min(u.faceNext+(remaining/3)*3, len(mesh.Indices))
+		if end <= u.faceNext || !budget.take(end-u.faceNext) {
+			return false
+		}
+		chunk := mesh
+		chunk.Indices = mesh.Indices[u.faceNext:end]
+		if material {
+			g.drawGridFacesWithAA(dst, chunk, top, false)
+		} else {
+			chunk.DrawUnaliased(dst, w.white)
+		}
+		u.faceNext = end
+		if end < len(mesh.Indices) {
+			return false
+		}
+		u.faceNext = 0
+		return true
 	}
 	if u.surface == nil {
 		size := dst.Bounds().Size()

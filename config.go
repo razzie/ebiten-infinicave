@@ -13,6 +13,10 @@ import (
 // fog, bats, mushrooms, spider webs, moss, grass, hanging growth, and fine edge detail.
 type Config struct {
 	Seed int64
+	// Antialiasing selects full geometry antialiasing (the zero value), no
+	// antialiasing, or non-antialiased geometry with a final FXAA scene pass.
+	// It applies to cached layers, atlases, carving, and animated bats.
+	Antialiasing AntialiasingMode
 	// Orientation fixes the scrolling axis for the scene's lifetime. The zero
 	// value is Vertical. Horizontal grows rightward and keeps plants upright.
 	Orientation Orientation
@@ -157,6 +161,9 @@ func DefaultConfig() Config {
 }
 
 func (c Config) validate() error {
+	if c.Antialiasing > AntialiasingFXAA {
+		return fmt.Errorf("infinicave: invalid antialiasing mode %v", c.Antialiasing)
+	}
 	if c.RetainSections < 0 || c.LookaheadSections < 0 {
 		return fmt.Errorf("infinicave: retain sections and lookahead sections must be nonnegative")
 	}
