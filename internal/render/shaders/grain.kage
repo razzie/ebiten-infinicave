@@ -4,6 +4,7 @@ package main
 var Texture float
 var Offset vec2
 var Light vec3
+var Raster vec4
 
 func noise(p vec2) float {
 	q := fract(vec3(p.x, p.y, p.x) * .1031)
@@ -32,6 +33,10 @@ func Fragment(dst vec4, src vec2, color vec4, custom vec4) vec4 {
 	luminance := dot(rgb, vec3(.30, .59, .11))
 	visible := smoothstep(.008, .13, luminance)
 	p := src + Offset
+	if Raster.z > 0 {
+		pixel := floor(dst.xy - imageDstOrigin()) + vec2(.5)
+		p = ((pixel/Raster.w + Raster.xy)/Raster.z)*1000 + Offset
+	}
 
 	// One continuous plane per rock. The triangles filling a concave or
 	// merged face must not introduce their own wedge-shaped tonal seams.

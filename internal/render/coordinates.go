@@ -35,6 +35,11 @@ func scaleTriangleMesh(mesh TriangleMesh, scale float64, offset image.Point) Tri
 	mesh.Vertices = append([]ebiten.Vertex(nil), mesh.Vertices...)
 	mesh.Index = nil
 	transformVertices(mesh.Vertices, scale, offset)
+	if mesh.MaterialFrame.Pixels != 0 {
+		mesh.MaterialFrame.Pixels *= scale
+		mesh.MaterialFrame.OriginX = mesh.MaterialFrame.OriginX*scale - float64(offset.X)/mesh.MaterialFrame.Samples
+		mesh.MaterialFrame.OriginY = mesh.MaterialFrame.OriginY*scale - float64(offset.Y)/mesh.MaterialFrame.Samples
+	}
 	return mesh
 }
 
@@ -77,14 +82,24 @@ func ScaleSectionMesh(mesh SectionMesh, pixels int) SectionMesh {
 }
 
 func ScaleVegetationMesh(mesh SectionMesh, pixels int) SectionMesh {
-	mesh.Plants = scaleCroppedAttachments(mesh.Plants, mesh.MushroomsBounds, pixels)
-	mesh.Webs = scaleCroppedAttachments(mesh.Webs, mesh.SpiderWebsBounds, pixels)
-	mesh.Vines, mesh.VinesBounds = scaleVegetationMeshes(mesh.Vines, mesh.VinesBounds, pixels)
-	mesh.ForegroundVines, mesh.ForegroundVinesBounds = scaleVegetationMeshes(mesh.ForegroundVines, mesh.ForegroundVinesBounds, pixels)
-	mushrooms, bounds := scaleVegetationMeshes([]TriangleMesh{mesh.Mushrooms}, mesh.MushroomsBounds, pixels)
-	mesh.Mushrooms, mesh.MushroomsBounds = mushrooms[0], bounds
-	webs, bounds := scaleVegetationMeshes([]TriangleMesh{mesh.SpiderWebs}, mesh.SpiderWebsBounds, pixels)
-	mesh.SpiderWebs, mesh.SpiderWebsBounds = webs[0], bounds
+	mask := mesh.LayerMask()
+	if mask&MushroomsLayer != 0 {
+		mesh.Plants = scaleCroppedAttachments(mesh.Plants, mesh.MushroomsBounds, pixels)
+		mushrooms, bounds := scaleVegetationMeshes([]TriangleMesh{mesh.Mushrooms}, mesh.MushroomsBounds, pixels)
+		mesh.Mushrooms, mesh.MushroomsBounds = mushrooms[0], bounds
+	}
+	if mask&WebsLayer != 0 {
+		mesh.Webs = scaleCroppedAttachments(mesh.Webs, mesh.SpiderWebsBounds, pixels)
+		webs, bounds := scaleVegetationMeshes([]TriangleMesh{mesh.SpiderWebs}, mesh.SpiderWebsBounds, pixels)
+		mesh.SpiderWebs, mesh.SpiderWebsBounds = webs[0], bounds
+	}
+	if mask&BackgroundVinesLayer != 0 {
+		mesh.Vines, mesh.VinesBounds = scaleVegetationMeshes(mesh.Vines, mesh.VinesBounds, pixels)
+	}
+	if mask&ForegroundVinesLayer != 0 {
+		mesh.ForegroundVines, mesh.ForegroundVinesBounds = scaleVegetationMeshes(mesh.ForegroundVines, mesh.ForegroundVinesBounds, pixels)
+	}
+
 	return mesh
 }
 

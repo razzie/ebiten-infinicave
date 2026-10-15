@@ -135,8 +135,9 @@ func NewScene(config Config) (*Scene, error) {
 // sections, and advances enabled ambient animations. Call once per game tick.
 // It never waits for generation and returns true when all layers needed by
 // viewport are ready. Collision becomes available
-// before background generation, shading, and vegetation; foreground images
-// publish before background and vegetation. OnCollisionReady runs here as soon as generated polygons
+// before background generation, shading, and vegetation. Foreground recipes
+// arrive early; available vegetation images publish independently of terrain
+// uploads. OnCollisionReady runs here as soon as generated polygons
 // arrive. An invalid viewport or a closed Scene returns false without doing work.
 func (g *Scene) Update(viewport Viewport) bool {
 	viewport, valid := orientedViewport(g.orientation, viewport)
@@ -159,8 +160,13 @@ func (g *Scene) Update(viewport Viewport) bool {
 	}
 	for _, section := range w.sections {
 		section.foregroundReveal.Update()
+		for i := range section.growth {
+			section.growth[i].reveal.Update()
+		}
 		section.backgroundReveal.Update()
-		section.vegetationReveal.Update()
+		for i := range section.plants {
+			section.plants[i].reveal.Update()
+		}
 		section.grassReveal.Update()
 	}
 	g.world.viewport = viewport

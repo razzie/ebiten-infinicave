@@ -100,9 +100,10 @@ func checkAppearanceFadePixels(t *testing.T) {
 			full := render.PrepareSection(data, ViewShaded, growth)
 			full.Geometry = geometry
 			render.FinishSectionMesh(&full)
+			rock, trim, progress := s.foreground, s.trim, s.foregroundReveal.Progress()
 			publish(full)
-			if !bytes.Equal(middle, draw()) || s.foregroundReveal.Previous == nil {
-				t.Fatal("growth publication flashed or hid already visible rock")
+			if !bytes.Equal(middle, draw()) || s.foreground != rock || s.trim != trim || s.foregroundReveal.Progress() != progress || s.foregroundReveal.Previous != nil {
+				t.Fatal("growth publication changed structural pixels, ownership, or reveal progress")
 			}
 			point := V{X: .45, Y: -.35}
 			if _, err := scene.CarveCircle(terrain.WorldPoint(orientation, point), .075); err != nil {
@@ -111,11 +112,13 @@ func checkAppearanceFadePixels(t *testing.T) {
 			if s.geometry.Collision.Contains(point) {
 				t.Fatal("appearance delayed collision removal")
 			}
-			// Both the new layer and its retained base must respect a fresh cut.
-			if c := s.foregroundReveal.Previous.At(115, 166); c != nil {
-				_, _, _, alpha := c.RGBA()
-				if alpha != 0 {
-					t.Fatal("carving retained pixels in the reveal's previous rock base")
+			// Every published span respects the cut immediately.
+			for _, layer := range []*ebiten.Image{s.foreground, s.trim, s.growth[underGrowth].image, s.growth[surfaceGrowth].image} {
+				if layer != nil {
+					_, _, _, alpha := layer.At(115, 166).RGBA()
+					if alpha != 0 {
+						t.Fatal("a foreground span retained cut pixels")
+					}
 				}
 			}
 			advance(50)
@@ -127,7 +130,7 @@ func checkAppearanceFadePixels(t *testing.T) {
 			w.appearanceFade = scene.appearanceFade
 			scene.SetRenderWidth(384)
 			publish(*s.mesh)
-			if s.foregroundReveal.Progress() != 1 || s.grassReveal.Progress() != 1 || s.vegetationReveal.Progress() != 1 {
+			if s.foregroundReveal.Progress() != 1 || s.grassReveal.Progress() != 1 || s.plantReveal(foregroundVinesProduct).Progress() != 1 {
 				t.Fatal("resize restarted an appearance effect")
 			}
 			// Reloading an evicted section reveals its cut version, never the old rock.
@@ -167,11 +170,11 @@ func checkAppearanceFadeBands(t *testing.T) {
 		s.terrain.Fill(color.White)
 		s.foregroundReveal.Start(nil)
 		s.backgroundReveal.Start(nil)
-		s.vegetationReveal.Start(nil)
+		s.plantReveal(foregroundVinesProduct).Start(nil)
 		for i := 0; i < 21; i++ {
 			s.foregroundReveal.Update()
 			s.backgroundReveal.Update()
-			s.vegetationReveal.Update()
+			s.plantReveal(foregroundVinesProduct).Update()
 		}
 		w.sections[id] = s
 	}
@@ -204,10 +207,10 @@ func checkAppearanceFadeBands(t *testing.T) {
 	var transform ebiten.GeoM
 	transform.Translate(16, 0)
 	r.DrawReveal(want, vine, nil, .5, transform)
-	w.drawSupportedVegetation(got, vine, bounds, -2, -2, 2, 64, view, false, &w.sections[0].vegetationReveal)
+	w.drawSupportedVegetation(got, vine, bounds, -2, -2, 2, 64, view, false, w.sections[0].plantReveal(foregroundVinesProduct))
 	compare("cropped crossing plants changed the fade opacity")
 	w.sections[1].foregroundReveal.Start(nil)
-	w.drawSupportedVegetation(got, vine, bounds, -2, -2, 2, 64, view, false, &w.sections[0].vegetationReveal)
+	w.drawSupportedVegetation(got, vine, bounds, -2, -2, 2, 64, view, false, w.sections[0].plantReveal(foregroundVinesProduct))
 	pixels := make([]byte, 64*128*4)
 	got.ReadPixels(pixels)
 	for i := 3; i < 64*64*4; i += 4 {

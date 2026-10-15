@@ -80,7 +80,7 @@ func TestConcurrentRequestsAndCancellationStayBounded(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	w := &world{ctx: ctx, jobs: make(chan sectionJob, 2), inflight: make(map[int64]sectionFlight), maxJobs: 2,
-		results: make(chan render.SectionMesh, 2), terrainMeshes: make(chan render.SectionMesh, 2), canceled: make(chan int64, 2)}
+		results: make(chan sectionResult, 2), terrainMeshes: make(chan sectionResult, 2), canceled: make(chan sectionCancellation, 2)}
 	w.ensure(-.8, .8, 0)
 	if len(w.inflight) != 2 || len(w.jobs) != 2 {
 		t.Fatal("prefetch did not fill two bounded job slots")
@@ -92,7 +92,7 @@ func TestConcurrentRequestsAndCancellationStayBounded(t *testing.T) {
 	// Simulate the worker dequeuing both accepted jobs.
 	<-w.jobs
 	<-w.jobs
-	w.results <- render.SectionMesh{ID: 1}
+	w.results <- sectionResult{SectionMesh: render.SectionMesh{ID: 1}, request: w.inflight[1].request}
 	w.collect()
 	if _, exists := w.inflight[0]; !exists || len(w.inflight) != 1 || !w.working {
 		t.Fatal("out-of-order completion stopped another section")
@@ -101,8 +101,8 @@ func TestConcurrentRequestsAndCancellationStayBounded(t *testing.T) {
 	if w.inflight[0].ctx.Err() == nil {
 		t.Fatal("obsolete concurrent job was not canceled")
 	}
-	w.terrainMeshes <- render.SectionMesh{ID: 0, TerrainOnly: true}
-	w.canceled <- 0
+	w.terrainMeshes <- sectionResult{SectionMesh: render.SectionMesh{ID: 0, TerrainOnly: true}, request: w.inflight[0].request}
+	w.canceled <- sectionCancellation{id: 0, request: w.inflight[0].request}
 	w.collect()
 	if w.working || len(w.inflight) != 0 {
 		t.Fatal("canceled job stayed in flight")
@@ -147,7 +147,7 @@ func TestConcurrentWorldSectionsMatchSerialPreparation(t *testing.T) {
 		select {
 		case got := <-w.results:
 			expected, exists := want[got.ID]
-			if !exists || !reflect.DeepEqual(got, expected) {
+			if !exists || !reflect.DeepEqual(got.SectionMesh, expected) {
 				t.Fatalf("concurrent preparation changed section %d", got.ID)
 			}
 			delete(want, got.ID)
@@ -161,14 +161,14 @@ func TestLateCollisionDeliveryDistinguishesCompletionFromCancellation(t *testing
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	w := &world{ctx: ctx, jobs: make(chan sectionJob, 2), inflight: make(map[int64]sectionFlight), maxJobs: 2,
-		results: make(chan render.SectionMesh, 2), terrain: make(chan sectionTerrain, 2)}
+		results: make(chan sectionResult, 2), terrain: make(chan sectionTerrain, 2)}
 	calls := 0
 	g := &Scene{world: w, onCollisionReady: func(CollisionGeometry) { calls++ }}
 	w.request(0)
 	first := <-w.jobs
-	w.results <- render.SectionMesh{ID: 0}
+	w.results <- sectionResult{SectionMesh: render.SectionMesh{ID: 0}, request: first.request}
 	w.collect()
-	w.terrain <- sectionTerrain{id: 0, ctx: first.ctx, geometry: &terrain.Geometry{}}
+	w.terrain <- sectionTerrain{id: 0, ctx: first.ctx, request: first.request, geometry: &terrain.Geometry{}}
 	w.receiveCollision(g)
 	if calls != 1 {
 		t.Fatal("normal completion suppressed an unread collision callback")
@@ -176,7 +176,7 @@ func TestLateCollisionDeliveryDistinguishesCompletionFromCancellation(t *testing
 	w.request(1)
 	second := <-w.jobs
 	w.prune(-100.8, .8, 0)
-	w.terrain <- sectionTerrain{id: 1, ctx: second.ctx, geometry: &terrain.Geometry{}}
+	w.terrain <- sectionTerrain{id: 1, ctx: second.ctx, request: second.request, geometry: &terrain.Geometry{}}
 	w.receiveCollision(g)
 	if calls != 1 {
 		t.Fatal("canceled job delivered obsolete collision geometry")
@@ -369,5 +369,34 @@ func TestSpareWorkerDoesNotInterruptVisibleVegetation(t *testing.T) {
 				t.Fatal("spare worker did not start prefetch")
 			}
 		})
+	}
+}
+
+func TestGrowthPublishesBeforeBackgroundWithoutHelpers(t *testing.T) {
+	old := runtime.GOMAXPROCS(2)
+	defer runtime.GOMAXPROCS(old)
+	w := newWorld(42, ViewShaded, 0, 0, 0, 0, false, nil, render.RockGrowthOptions{Moss: .2}, terrain.ShapeOptions{})
+	defer w.close()
+	w.request(0)
+	var base render.SectionMesh
+	select {
+	case result := <-w.terrainMeshes:
+		base = result.SectionMesh
+		if !base.ForegroundBaseOnly {
+			t.Fatal("first recipe was not the structural base")
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("base preparation stalled")
+	}
+	select {
+	case growth := <-w.terrainMeshes:
+		if growth.LayerMask() != render.ForegroundLayer || growth.ForegroundBaseOnly || len(growth.Background.Faces.Indices) != 0 {
+			t.Fatal("growth waited for background preparation")
+		}
+		if &growth.Foreground.Faces.Vertices[0] != &base.Foreground.Faces.Vertices[0] {
+			t.Fatal("early growth rebuilt the structural recipe")
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("growth preparation stalled")
 	}
 }

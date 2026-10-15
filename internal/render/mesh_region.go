@@ -81,5 +81,9 @@ func TranslateMesh(source TriangleMesh, dx, dy float32) TriangleMesh {
 		source.Vertices[i].DstX += dx
 		source.Vertices[i].DstY += dy
 	}
+	if source.MaterialFrame.Pixels != 0 {
+		source.MaterialFrame.OriginX -= float64(dx) / source.MaterialFrame.Samples
+		source.MaterialFrame.OriginY -= float64(dy) / source.MaterialFrame.Samples
+	}
 	return source
 }

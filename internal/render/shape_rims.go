@@ -14,7 +14,7 @@ func PrepareShapeRims(geometry *terrain.Geometry, view View) TriangleMesh {
 }
 
 func PrepareShapeRimsInBounds(geometry *terrain.Geometry, view View, bounds geom.Bounds) TriangleMesh {
-	var m TriangleMesh
+	m := TriangleMesh{MaterialFrame: ReferenceMaterialFrame()}
 	if geometry == nil || (view != ViewShaded && view != ViewClay) {
 		return m
 	}

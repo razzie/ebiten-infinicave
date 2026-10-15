@@ -25,8 +25,8 @@ func (r *FadeRenderer) Close() {
 }
 
 // Reveal tracks an arriving cached layer. The zero value is fully revealed.
-// Previous, when present, is owned by the transition and preserves visible rock
-// while its completed growth layer replaces the early rock base.
+// Previous, when present, is owned by the transition. Independently published
+// foreground products use separate clocks without retaining previous rocks.
 type Reveal struct {
 	Previous *ebiten.Image
 	age      float64

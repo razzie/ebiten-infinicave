@@ -245,3 +245,56 @@ func sameTerrainCuts(a, b []RockCut) bool {
 	}
 	return true
 }
+
+// VegetationParts identifies independent decoration recipes, including empty ones.
+type VegetationParts uint8
+
+const (
+	BackgroundVinesPart VegetationParts = 1 << iota
+	WebsPart
+	MushroomsPart
+	ForegroundVinesPart
+	AllVegetationParts = BackgroundVinesPart | WebsPart | MushroomsPart | ForegroundVinesPart
+)
+
+// MergeTerrainVegetation preserves unrelated decorations when a partial recipe
+// arrives. Neither input nor its support index is modified.
+func MergeTerrainVegetation(previous, next *Geometry, parts VegetationParts) *Geometry {
+	if next == nil {
+		return previous
+	}
+	if previous == nil || previous == next || parts == AllVegetationParts {
+		return next
+	}
+	h := *next
+	h.Vegetation = previous.Vegetation
+	if parts&BackgroundVinesPart != 0 {
+		h.Vegetation.Vines = next.Vegetation.Vines
+	}
+	if parts&MushroomsPart != 0 {
+		h.Vegetation.Mushrooms = next.Vegetation.Mushrooms
+	}
+	if parts&ForegroundVinesPart != 0 {
+		h.Vegetation.ForegroundVines = next.Vegetation.ForegroundVines
+	}
+	if parts&WebsPart == 0 && previous.Topology != nil && h.Topology != nil {
+		topology := *h.Topology
+		old := previous.Topology
+		topology.SpiderWebs, topology.webCorners = old.SpiderWebs, old.webCorners
+		topology.websPrepared, topology.webMaxSize, topology.webDensity = old.websPrepared, old.webMaxSize, old.webDensity
+		h.Topology = &topology
+	}
+	var webs []SpiderWeb
+	if h.Topology != nil {
+		webs = h.Topology.SpiderWebs
+	}
+	switch {
+	case previous.decorations.matches(h.Vegetation.Mushrooms, webs):
+		h.decorations = previous.decorations
+	case next.decorations.matches(h.Vegetation.Mushrooms, webs):
+		h.decorations = next.decorations
+	default:
+		h.decorations = newDecorationState(h.Vegetation.Mushrooms, webs)
+	}
+	return &h
+}

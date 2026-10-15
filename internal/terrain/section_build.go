@@ -132,6 +132,13 @@ func (s *SectionBuild) Materialize(ctx context.Context) bool {
 // Decorate can be canceled at stage and vine-trial boundaries, then retried
 // deterministically on another builder. It never exposes incomplete decorations.
 func (b *Builder) Decorate(ctx context.Context, s *SectionBuild) bool {
+	return b.DecorateProducts(ctx, s, nil)
+}
+
+// DecorateProducts publishes immutable snapshots as each independent generator
+// completes. publish may run concurrently; it must finish before returning.
+// A canceled build can be retried and may publish a product again.
+func (b *Builder) DecorateProducts(ctx context.Context, s *SectionBuild, publish func(VegetationParts, SectionData)) bool {
 	start := time.Now()
 	defer func() { s.timings.Decoration = time.Since(start) }()
 	if ctx.Err() != nil || !s.materialized {
@@ -140,23 +147,48 @@ func (b *Builder) Decorate(ctx context.Context, s *SectionBuild) bool {
 	data := s.data
 	plants := Vegetation{}
 	var topology *RockTopology
+	emit := func(part VegetationParts, vegetation Vegetation, webs *RockTopology) {
+		if publish == nil || ctx.Err() != nil {
+			return
+		}
+		snapshot := data
+		bake := vegetation
+		snapshot.VegetationBake = &bake
+		for _, cut := range s.cuts {
+			vegetation, _ = cut.vegetation(vegetation, SectionTop(data.ID))
+		}
+		snapshot.Vines, snapshot.ForegroundVines, snapshot.Mushrooms = vegetation.Vines, vegetation.ForegroundVines, vegetation.Mushrooms
+		if webs != nil {
+			baked := *data.ForegroundBake
+			baked.SpiderWebs = webs.SpiderWebs
+			snapshot.ForegroundBake = &baked
+			snapshot.ForegroundTopology = webs
+		}
+		if ctx.Err() == nil {
+			publish(part, snapshot)
+		}
+	}
 	parallel.Run(
 		func() {
 			if ctx.Err() == nil {
 				plants.Vines = data.Vines
+				emit(BackgroundVinesPart, Vegetation{Vines: plants.Vines}, nil)
 			}
 		},
 		func() {
 			topology, _ = prepareSpiderWebsContext(ctx, data.ForegroundTopology, b.SpiderWebMaxSize, b.SpiderWebDensity)
+			emit(WebsPart, Vegetation{}, topology)
 		},
 		func() {
 			if ctx.Err() == nil {
 				plants.Mushrooms = MushroomsForGuides(data.Guides, s.vegetationGrid, b.MushroomDensity, data.Orientation)
+				emit(MushroomsPart, Vegetation{Mushrooms: plants.Mushrooms}, nil)
 			}
 		},
 		func() {
 			if ctx.Err() == nil {
 				plants.ForegroundVines = foregroundPathVines(ctx, s.branches, data.ForegroundBake, data.Guides, s.seed, data.ID)
+				emit(ForegroundVinesPart, Vegetation{ForegroundVines: plants.ForegroundVines}, nil)
 			}
 		},
 	)

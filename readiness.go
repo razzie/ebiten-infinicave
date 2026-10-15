@@ -7,8 +7,9 @@ type SceneReadiness struct {
 }
 
 // Readiness reports current layer availability. Call on the game goroutine.
-// Foreground becomes ready before background and decorations. Update continues
-// to return whether all layers needed by the viewport have finished.
+// Foreground recipes arrive before background and decoration recipes. Uploads
+// can finish independently; Update returns whether all layers needed by the
+// viewport have finished.
 func (g *Scene) Readiness(viewport Viewport) SceneReadiness {
 	viewport, valid := orientedViewport(g.orientation, viewport)
 	if g.closed || !valid || g.world == nil {
@@ -24,6 +25,9 @@ func (g *Scene) Readiness(viewport Viewport) SceneReadiness {
 		}
 		if s == nil || s.foreground == nil || s.renderWidth() != w.renderWidth() {
 			ready.Foreground = false
+		}
+		if s == nil || s.grassPending || s.grassWidth() != w.renderWidth() || (s.mesh != nil && !s.growthReady(w.renderWidth())) {
+			ready.Decorations = false
 		}
 		if !g.disableBackground && (s == nil || s.terrain == nil || s.backgroundWidth() != w.renderWidth()) {
 			ready.Background = false

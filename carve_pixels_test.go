@@ -55,6 +55,9 @@ func (g *carvePixelGame) Draw(*ebiten.Image) {
 	g.done = true
 	checkAppearanceFadePixels(g.t)
 	checkDecorationBurnPixels(g.t)
+	checkPartialVegetationCarvePixels(g.t)
+	checkIndependentGrassPixels(g.t)
+	checkGrowthCompositionPixels(g.t)
 	scene, err := NewScene(Config{View: ViewShaded})
 	if err != nil {
 		g.t.Fatal(err)

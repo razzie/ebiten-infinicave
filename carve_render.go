@@ -104,17 +104,64 @@ func (g *Scene) editSectionImages(section *worldSection, id int64, cut terrain.R
 	mesh := *section.mesh
 	oldCuts := mesh.VisualCuts
 	edits := editMeshImages(&mesh, cut, removals)
+	grassEdits := edits
 	mesh.Geometry = section.geometry
 	mesh.AppliedCuts = uint64(len(g.world.cuts))
 	section.mesh = &mesh
-	if section.foreground == nil {
-		return
+	// A completed plant recipe may arrive while the old rock base is still
+	// displayed. Replay and burn only the rock recipe that supplied its pixels.
+	displayed := *section
+	if section.rockSource != nil {
+		rock, rockEdits := g.editLayerSource(*section.rockSource, render.ForegroundLayer, cut, removals)
+		section.rockSource = &rock
+		displayedMesh := mesh
+		displayedMesh.Foreground = rock.Foreground
+		displayed.mesh = &displayedMesh
+		displayed.geometry = rock.Geometry
+		edits.growth, edits.rock = rockEdits.growth, rockEdits.rock
 	}
+	// Grass may have published from a newer recipe or at a different width.
+	grassDisplayed := *section
+	if section.grassSource != nil {
+		var grass render.SectionMesh
+		grass, grassEdits = g.editLayerSource(*section.grassSource, grassUploadLayer, cut, removals)
+		section.grassSource = &grass
+		grassDisplayed.mesh = &grass
+	}
+	// CPU query snapshots can advance while old plant images remain displayed.
+	// Replay each fallback against its own placements and support snapshot.
+	plantMesh := *displayed.mesh
+	vineCuts := mesh.VisualCuts
+	for kind := vegetationProduct(0); kind < vegetationProducts; kind++ {
+		published := &section.plants[kind]
+		if published.source == nil {
+			continue
+		}
+		source, changes := g.editLayerSource(*published.source, kind.layer(), cut, removals)
+		published.source = &source
+		switch kind {
+		case mushroomsProduct:
+			plantMesh.Plants, plantMesh.PlantIndex, plantMesh.MushroomsBounds = source.Plants, source.PlantIndex, source.MushroomsBounds
+			edits.plants, edits.mushrooms = changes.plants, changes.mushrooms
+		case websProduct:
+			plantMesh.Webs, plantMesh.WebIndex, plantMesh.SpiderWebsBounds = source.Webs, source.WebIndex, source.SpiderWebsBounds
+			edits.webs, edits.spiderWebs = changes.webs, changes.spiderWebs
+		case foregroundVinesProduct:
+			plantMesh.ForegroundVines, plantMesh.ForegroundVinesBounds = source.ForegroundVines, source.ForegroundVinesBounds
+			vineCuts = source.VisualCuts
+		}
+	}
+	displayed.mesh = &plantMesh
+	grassDisplayed.pixels = section.grassWidth()
+	grassDisplayed.foreground, grassDisplayed.foregroundVines = nil, nil
+	grassDisplayed.mushrooms, grassDisplayed.spiderWebs = nil, nil
+	displayed.grass = nil
 	if g.world.white == nil {
 		g.world.white = ebiten.NewImage(1, 1)
 		g.world.white.Fill(color.White)
 	}
-	g.captureDecorationBurns(section, id, cut, oldCuts, edits)
+	g.captureDecorationBurns(&displayed, id, cut, oldCuts, edits)
+	g.captureDecorationBurns(&grassDisplayed, id, cut, oldCuts, grassEdits)
 	// Includes bevels, new rims, and filter reach. Snap native regions to small
 	// tiles so attachment overlap and raster antialiasing have stable origins.
 	dirty := geom.Bounds{Min: cut.Min.Sub(V{X: .012, Y: .012}), Max: cut.Max.Add(V{X: .012, Y: .012})}
@@ -131,47 +178,54 @@ func (g *Scene) editSectionImages(section *worldSection, id int64, cut terrain.R
 	if previous := section.foregroundReveal.Previous; previous != nil {
 		g.eraseCuts(previous, bounds, top, []terrain.RockCut{cut}, pixels)
 	}
+	g.editGrowthImages(section, id, cut, removals, dirty, overlap)
 	if overlap || len(edits.rock) > 0 {
-		g.replayGridRegions(section, id, append(edits.rock, dirty), false)
+		g.replayGridRegions(&displayed, id, append(edits.rock, dirty), false)
 	} else {
 		// The common isolated cut operates directly on the finished image.
 		g.eraseCuts(section.foreground, bounds, top, []terrain.RockCut{cut}, pixels)
 		rect := dirtyRaster(bounds, top, pixels, dirty, section.foreground)
-		if !rect.Empty() {
-			g.drawShapeRims(section.foreground.SubImage(rect).(*ebiten.Image), section.geometry, pixels, rect)
+		if !rect.Empty() && !section.foregroundSplit {
+			g.drawShapeRims(section.foreground.SubImage(rect).(*ebiten.Image), displayed.geometry, pixels, rect)
 		}
+	}
+	if section.foregroundSplit && section.foreground != nil {
+		if section.trim == nil {
+			section.trim = render.NewSectionImageAt(terrain.SectionHeight, pixels)
+		}
+		displayed.trim = section.trim
+		trim := render.MaskForeground(displayed.mesh.Foreground, render.StructuralTopSpan)
+		g.replayForegroundAttachments(section.trim, trim, id, pixels, append(edits.rock, dirty), false, displayed.mesh.VisualCuts, displayed.geometry)
 	}
 	if section.grass != nil {
-		if len(edits.grass) > 0 || overlap {
-			g.replayGridRegions(section, id, append(edits.grass, dirty), true)
+		grassPixels := section.grassWidth()
+		if len(grassEdits.grass) > 0 || overlap {
+			g.replayGridRegions(&grassDisplayed, id, append(grassEdits.grass, dirty), true)
 		} else {
-			g.eraseCuts(section.grass, bounds, top, []terrain.RockCut{cut}, pixels)
+			g.eraseCuts(section.grass, image.Rect(0, grassPixels, grassPixels, 2*grassPixels), top, []terrain.RockCut{cut}, grassPixels)
 		}
 	}
-	if section.vegetationPending {
-		return
-	}
 	if overlap {
-		g.replayForegroundVineRegion(section.foregroundVines, mesh.ForegroundVines, mesh.ForegroundVinesBounds, section.foregroundVinesBounds, id, section.vegetationWidth(), dirty, mesh.VisualCuts)
+		g.replayForegroundVineRegion(section.foregroundVines, plantMesh.ForegroundVines, plantMesh.ForegroundVinesBounds, section.foregroundVinesBounds, id, section.plantWidth(foregroundVinesProduct), dirty, vineCuts)
 	} else {
-		g.eraseCuts(section.foregroundVines, section.foregroundVinesBounds, top, []terrain.RockCut{cut}, section.vegetationWidth())
+		g.eraseCuts(section.foregroundVines, section.foregroundVinesBounds, top, []terrain.RockCut{cut}, section.plantWidth(foregroundVinesProduct))
 	}
 	if len(edits.plants) > 0 {
-		g.replayAttachmentRegions(section.mushrooms, mesh.Plants, mesh.PlantIndex, mesh.MushroomsBounds, section.mushroomsBounds, id, section.vegetationWidth(), edits.mushrooms)
+		g.replayAttachmentRegions(section.mushrooms, plantMesh.Plants, plantMesh.PlantIndex, plantMesh.MushroomsBounds, section.mushroomsBounds, id, section.plantWidth(mushroomsProduct), edits.mushrooms)
 	}
 	if len(edits.webs) > 0 {
-		g.replayAttachmentRegions(section.spiderWebs, mesh.Webs, mesh.WebIndex, mesh.SpiderWebsBounds, section.spiderWebsBounds, id, section.vegetationWidth(), edits.spiderWebs)
+		g.replayAttachmentRegions(section.spiderWebs, plantMesh.Webs, plantMesh.WebIndex, plantMesh.SpiderWebsBounds, section.spiderWebsBounds, id, section.plantWidth(websProduct), edits.spiderWebs)
 	}
-	if len(edits.grass) > 0 && len(mesh.Foreground.Grass.Indices) == 0 && !render.HasLiveAttachments(mesh.Foreground.Growth, true) && section.grass != nil {
+	if len(grassEdits.grass) > 0 && len(grassDisplayed.mesh.Foreground.Grass.Indices) == 0 && !render.HasLiveAttachments(grassDisplayed.mesh.Foreground.Growth, true) && section.grass != nil {
 		section.grass.Deallocate()
 		section.grass = nil
 	}
 	if mesh.BakedInstances {
-		if len(edits.plants) > 0 && !render.HasLiveAttachments(mesh.Plants, false) && section.mushrooms != nil {
+		if len(edits.plants) > 0 && !render.HasLiveAttachments(plantMesh.Plants, false) && section.mushrooms != nil {
 			section.mushrooms.Deallocate()
 			section.mushrooms = nil
 		}
-		if len(edits.webs) > 0 && !render.HasLiveAttachments(mesh.Webs, false) && section.spiderWebs != nil {
+		if len(edits.webs) > 0 && !render.HasLiveAttachments(plantMesh.Webs, false) && section.spiderWebs != nil {
 			section.spiderWebs.Deallocate()
 			section.spiderWebs = nil
 		}
@@ -232,11 +286,13 @@ func (g *Scene) replayGridRegion(section *worldSection, id int64, dirty geom.Bou
 	} else if len(source.Grass.Indices) > 0 {
 		g.drawGridFaces(target, render.ScaleRegionMesh(render.RegionMesh(source.Grass, reference), pixels, image.Pt(0, -pixels)), top)
 	}
-	for _, m := range render.AttachmentRegionBatches(source.Growth, candidates, reference, grass, false) {
-		g.drawAttachmentMesh(target, render.ScaleRegionMesh(m, pixels, image.Pt(0, -pixels)))
+	if grass || !section.foregroundSplit {
+		for _, m := range render.AttachmentRegionBatches(source.Growth, candidates, reference, grass, false) {
+			g.drawAttachmentMesh(target, render.ScaleRegionMesh(m, pixels, image.Pt(0, -pixels)))
+		}
 	}
 	g.eraseCuts(target, bounds, top, section.mesh.VisualCuts, pixels)
-	if !grass {
+	if !grass && !section.foregroundSplit {
 		g.drawShapeRims(target, section.geometry, pixels, rect)
 	}
 }
@@ -299,14 +355,13 @@ func (g *Scene) maskUploadForeground(u *sectionUpload) {
 	bounds := image.Rect(0, u.pixels, u.pixels, 2*u.pixels)
 	top := terrain.SectionWindowTop(u.data.ID)
 	g.eraseCuts(u.foreground, bounds, top, u.data.VisualCuts, u.pixels)
-	g.eraseCuts(u.grass, bounds, top, u.data.VisualCuts, u.pixels)
-	if u.foreground != nil {
-		g.drawShapeRims(u.foreground, u.data.Geometry, u.pixels, u.foreground.Bounds())
+	g.eraseCuts(u.trim, bounds, top, u.data.VisualCuts, u.pixels)
+	if u.foreground != nil && len(u.data.VisualCuts) > 0 {
+		if u.trim == nil {
+			u.trim = render.NewSectionImageAt(terrain.SectionHeight, u.pixels)
+		}
+		g.drawShapeRims(u.trim, u.data.Geometry, u.pixels, u.trim.Bounds())
 	}
-}
-func (g *Scene) maskUploadPlants(section *worldSection, u *sectionUpload) {
-	top := terrain.SectionWindowTop(u.data.ID)
-	g.eraseCuts(section.foregroundVines, section.foregroundVinesBounds, top, u.data.VisualCuts, u.pixels)
 }
 
 // Edits arriving during an upload filter only prepared instances. Rock and
@@ -330,13 +385,36 @@ func (g *Scene) carveSectionUpload(u *sectionUpload, cut terrain.RockCut) {
 	u.data.Geometry = geometry
 	edits := editMeshImages(&u.data, cut, removals)
 	u.data.AppliedCuts = uint64(len(g.world.cuts))
+	grassEdits := edits
+	if u.grassData != nil {
+		grass := u.grassData
+		geometry, _, _ := cut.Geometry(grass.ID, grass.Geometry, g.collisionTolerance)
+		geometry, _, changes := cut.PlantsWithChanges(geometry)
+		grass.Geometry = geometry
+		grassEdits = editMeshImages(grass, cut, changes)
+		grass.AppliedCuts = u.data.AppliedCuts
+	}
 	if !u.initialized {
 		return
+	}
+	u.reconcileGrowthUploads(grassEdits)
+	if len(grassEdits.grass) > 0 && u.needed&grassUploadLayer != 0 {
+		// Restart only this private product after attachment removal. Its
+		// sibling foreground/background cursors retain their progress.
+		if u.grass != nil {
+			u.grass.Deallocate()
+			u.grass = nil
+		}
+		if u.grassCursor.surface != nil {
+			u.grassCursor.surface.Deallocate()
+		}
+		u.grassCursor = uploadCursor{}
+		u.grassInitialized, u.grassFacesDone = false, false
 	}
 	if len(edits.growth) > 0 {
 		u.raster.Foreground.Growth = markRasterDeaths(u.raster.Foreground.Growth, edits.growth)
 		if u.foreground != nil && u.stage >= uploadRockUnderlay {
-			recipe := u.data
+			recipe := render.StructuralSection(u.data)
 			if u.stage == uploadRockUnderlay || u.stage == uploadRockGrowth || u.stage == uploadGrass {
 				processed := append([]render.Attachment(nil), recipe.Foreground.Growth...)
 				for i := range processed {
@@ -349,44 +427,72 @@ func (g *Scene) carveSectionUpload(u *sectionUpload, cut terrain.RockCut) {
 				}
 				recipe.Foreground.Growth = processed
 			}
-			temporary := &worldSection{foreground: u.foreground, grass: u.grass, geometry: geometry, mesh: &recipe, pixels: u.pixels}
+			temporary := &worldSection{foreground: u.foreground, trim: u.trim, foregroundSplit: true, geometry: geometry, mesh: &recipe, pixels: u.pixels}
 			if u.stage > uploadRockUnderlay && len(edits.rock) > 0 {
 				g.replayGridRegions(temporary, u.data.ID, edits.rock, false)
+				if u.trim != nil && u.stage >= uploadRockGrowth {
+					trim := render.MaskForeground(recipe.Foreground, render.StructuralTopSpan)
+					g.replayForegroundAttachments(u.trim, trim, u.data.ID, u.pixels, edits.rock, false, recipe.VisualCuts, nil)
+				}
 			} else {
 				g.eraseCuts(u.foreground, image.Rect(0, u.pixels, u.pixels, 2*u.pixels), terrain.SectionWindowTop(u.data.ID), []terrain.RockCut{cut}, u.pixels)
-			}
-			if u.grass != nil && len(edits.grass) > 0 {
-				g.replayGridRegions(temporary, u.data.ID, edits.grass, true)
 			}
 		}
 	}
 	if len(edits.plants)+len(edits.webs) > 0 {
 		u.raster.Plants = markRasterDeaths(u.raster.Plants, edits.plants)
 		u.raster.Webs = markRasterDeaths(u.raster.Webs, edits.webs)
-		processed := func(list []render.Attachment, stage int) []render.Attachment {
-			if u.stage < stage {
+		processed := func(list []render.Attachment, kind vegetationProduct) []render.Attachment {
+			cursor := &u.plants[kind].cursor
+			stage := uploadMushrooms
+			if kind == websProduct {
+				stage = uploadSpiderWebs
+			}
+			if !u.plantsInitialized {
 				return nil
 			}
-			if u.stage > stage {
+			if cursor.stage < stage {
+				return nil
+			}
+			if cursor.stage > stage {
 				return list
 			}
-			end := min(u.next, len(list))
+			end := min(cursor.next, len(list))
 			out := list[:end]
-			if u.instancePart == 1 && end < len(list) {
+			if cursor.instancePart == 1 && end < len(list) {
 				out = append(append([]render.Attachment(nil), out...), list[end])
 				out[end].Extra = render.TriangleMesh{}
 			}
 			return out
 		}
 		if u.spiderWebs != nil && len(edits.webs) > 0 {
-			g.replayAttachmentRegions(u.spiderWebs, processed(u.data.Webs, uploadSpiderWebs), u.data.WebIndex, u.data.SpiderWebsBounds, u.raster.SpiderWebsBounds, u.data.ID, u.pixels, edits.spiderWebs)
+			g.replayAttachmentRegions(u.spiderWebs, processed(u.data.Webs, websProduct), u.data.WebIndex, u.data.SpiderWebsBounds, u.raster.SpiderWebsBounds, u.data.ID, u.pixels, edits.spiderWebs)
 		}
 		if u.mushrooms != nil && len(edits.plants) > 0 {
-			g.replayAttachmentRegions(u.mushrooms, processed(u.data.Plants, uploadMushrooms), u.data.PlantIndex, u.data.MushroomsBounds, u.raster.MushroomsBounds, u.data.ID, u.pixels, edits.mushrooms)
+			g.replayAttachmentRegions(u.mushrooms, processed(u.data.Plants, mushroomsProduct), u.data.PlantIndex, u.data.MushroomsBounds, u.raster.MushroomsBounds, u.data.ID, u.pixels, edits.mushrooms)
 		}
 	}
 }
 
 func (g *Scene) eraseCuts(dst *ebiten.Image, bounds image.Rectangle, top float64, cuts []terrain.RockCut, pixels int) {
 	render.EraseCutsWithAntialiasing(dst, bounds, top, cuts, pixels, g.antialiasing.GeometryAA())
+}
+
+// A fallback can outlive the query snapshot that generated it. Its attachment
+// IDs and structural loops must be edited against its own physical snapshot,
+// rather than the latest query's unrelated placement IDs or cut boundaries.
+func (g *Scene) editLayerSource(source render.SectionMesh, kind render.MeshLayers, cut terrain.RockCut, current terrain.DecorationChanges) (render.SectionMesh, meshImageEdits) {
+	geometry := source.Geometry
+	if kind == render.ForegroundLayer {
+		geometry, _, _ = cut.Geometry(source.ID, geometry, g.collisionTolerance)
+	}
+	if kind == render.MushroomsLayer || kind == render.WebsLayer {
+		var own terrain.DecorationChanges
+		geometry, _, own = cut.PlantsWithChanges(geometry)
+		current.Mushrooms = append(append([][2]int64(nil), current.Mushrooms...), own.Mushrooms...)
+		current.Webs = append(append([][2]int64(nil), current.Webs...), own.Webs...)
+	}
+	edits := editMeshImages(&source, cut, current)
+	source.Geometry, source.AppliedCuts = geometry, uint64(len(g.world.cuts))
+	return source, edits
 }

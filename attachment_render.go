@@ -30,8 +30,10 @@ func (g *Scene) drawAttachmentMesh(dst *ebiten.Image, mesh render.TriangleMesh) 
 	mesh.DrawWithAntialiasing(dst, g.world.atlases.Image(mesh.Texture), g.antialiasing.GeometryAA())
 }
 
-func (w *world) uploadAttachments(g *Scene, dst *ebiten.Image, instances []render.Attachment, grass, underlay bool, budget *uploadBudget) bool {
-	u := w.upload
+func (w *world) uploadAttachments(g *Scene, u *uploadCursor, dst *ebiten.Image, instances []render.Attachment, grass, underlay bool, budget *uploadBudget) bool {
+	if len(instances) == 0 {
+		return true
+	}
 	if !budget.enter(u.stage) {
 		return false
 	}
@@ -52,8 +54,7 @@ func (w *world) uploadAttachments(g *Scene, dst *ebiten.Image, instances []rende
 	return true
 }
 
-func (w *world) uploadPlantInstances(g *Scene, dst *ebiten.Image, instances []render.Attachment, budget *uploadBudget) bool {
-	u := w.upload
+func (w *world) uploadPlantInstances(g *Scene, u *uploadCursor, dst *ebiten.Image, instances []render.Attachment, budget *uploadBudget) bool {
 	if !budget.enter(u.stage) {
 		return false
 	}

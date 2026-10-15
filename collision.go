@@ -41,7 +41,8 @@ func (w *world) receiveCollision(g *Scene) {
 	for {
 		select {
 		case ready := <-w.terrain:
-			if ready.ctx != nil && ready.ctx.Err() != nil && context.Cause(ready.ctx) != errSectionComplete {
+			if !w.matchesCollision(ready.id, ready.request) ||
+				ready.ctx != nil && ready.ctx.Err() != nil && context.Cause(ready.ctx) != errSectionComplete {
 				continue
 			}
 			geometry := ready.geometry

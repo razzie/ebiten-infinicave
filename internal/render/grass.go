@@ -131,7 +131,7 @@ func grassForCell(cell terrain.RockCell, guides []terrain.Guide, density float64
 // Draw complete ground patches and blades together above custom content.
 // Cull using the blade footprint so a tuft can cross the owning image's seam.
 func prepareRockGrass(grid terrain.RockGrid, guides []terrain.Guide, owned bool, density float64) TriangleMesh {
-	var mesh TriangleMesh
+	mesh := TriangleMesh{MaterialFrame: ReferenceMaterialFrame()}
 	if density <= 0 || len(guides) == 0 {
 		return mesh
 	}

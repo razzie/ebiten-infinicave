@@ -31,10 +31,33 @@ func (g *Scene) drawGridFacesWithAA(dst *ebiten.Image, mesh render.TriangleMesh,
 	if len(mesh.Indices) == 0 {
 		return
 	}
+	if aa {
+		// Ebitengine's legacy AntiAlias option rescales destination positions
+		// internally without rescaling custom shader uniforms. Use an explicit
+		// accumulator so canonical material samples also survive cropped rims.
+		size, origin := dst.Bounds().Size(), dst.Bounds().Min
+		surface := ebiten.NewImage(size.X*2, size.Y*2)
+		local := render.TranslateMesh(mesh, -float32(origin.X), -float32(origin.Y))
+		local = render.SupersampledBatch(local, 0, len(local.Indices))
+		g.drawGridFacesWithAA(surface, local, top, false)
+		op := &ebiten.DrawImageOptions{Filter: ebiten.FilterLinear}
+		op.GeoM.Scale(.5, .5)
+		op.GeoM.Translate(float64(origin.X), float64(origin.Y))
+		dst.DrawImage(surface, op)
+		surface.Deallocate()
+		return
+	}
 	light := terrain.RockLightDirection(g.orientation)
+	frame := mesh.MaterialFrame
+	var raster [4]float32
+	if frame.Pixels != 0 {
+		origin := dst.Bounds().Min
+		raster = [4]float32{float32(frame.OriginX + float64(origin.X)/frame.Samples), float32(frame.OriginY + float64(origin.Y)/frame.Samples), float32(frame.Pixels), float32(frame.Samples)}
+	}
 	dst.DrawTrianglesShader32(mesh.Vertices, mesh.Indices, g.material, &ebiten.DrawTrianglesShaderOptions{
 		AntiAlias: aa,
 		Uniforms: map[string]any{
+			"Raster":  raster[:],
 			"Texture": float32(g.texture),
 			"Offset":  []float32{317, float32(top*render.RasterPixelsPerUnit) + 791},
 			"Light":   []float32{float32(light.X), float32(light.Y), float32(light.Z)},
@@ -62,18 +85,18 @@ func (w *world) draw(dst *ebiten.Image, y, height float64, fog *render.FogRender
 	w.DrawForegroundRocks(dst, y, height, 0, view)
 	for id := max(0, low-1); id <= high+1; id++ {
 		if section := w.sections[id]; section != nil {
-			w.drawSupportedVegetation(dst, section.mushrooms, section.mushroomsBounds, terrain.SectionWindowTop(id), y, height, section.vegetationWidth(), view, false, &section.vegetationReveal)
+			w.drawSupportedVegetation(dst, section.mushrooms, section.mushroomsBounds, terrain.SectionWindowTop(id), y, height, section.plantWidth(mushroomsProduct), view, false, section.plantReveal(mushroomsProduct))
 		}
 	}
 	for id := low; id <= high; id++ {
 		if section := w.sections[id]; section != nil {
-			w.drawSupportedVegetation(dst, section.spiderWebs, section.spiderWebsBounds, terrain.SectionWindowTop(id), y, height, section.vegetationWidth(), view, false, &section.vegetationReveal)
+			w.drawSupportedVegetation(dst, section.spiderWebs, section.spiderWebsBounds, terrain.SectionWindowTop(id), y, height, section.plantWidth(websProduct), view, false, section.plantReveal(websProduct))
 		}
 	}
 	// Keep complete foreground stems in their owner's padded window.
 	for id := max(0, low-1); id <= high+1; id++ {
 		if section := w.sections[id]; section != nil {
-			w.drawSupportedVegetation(dst, section.foregroundVines, section.foregroundVinesBounds, terrain.SectionWindowTop(id), y, height, section.vegetationWidth(), view, false, &section.vegetationReveal)
+			w.drawSupportedVegetation(dst, section.foregroundVines, section.foregroundVinesBounds, terrain.SectionWindowTop(id), y, height, section.plantWidth(foregroundVinesProduct), view, false, section.plantReveal(foregroundVinesProduct))
 		}
 	}
 	if burns != nil {
@@ -108,12 +131,12 @@ func (w *world) DrawBackground(dst *ebiten.Image, y, height float64, view render
 	// A vine is drawn once in world coordinates, even while crossing a seam.
 	for id := max(0, low-1); id <= high+1; id++ {
 		if section := w.sections[id]; section != nil {
-			w.drawSupportedVegetation(dst, section.vines, section.vinesBounds, terrain.SectionWindowTop(id), y, height, section.vegetationWidth(), view, true, &section.vegetationReveal)
+			w.drawSupportedVegetation(dst, section.vines, section.vinesBounds, terrain.SectionWindowTop(id), y, height, section.plantWidth(backgroundVinesProduct), view, true, section.plantReveal(backgroundVinesProduct))
 		}
 	}
 }
 
-// Cached rocks include moss and hanging growth; grass draws separately.
+// Compose structural rocks and independent growth in their stable draw order.
 // Runtime cuts mask images and replay dirty tiles before the next draw.
 func (w *world) DrawForegroundRocks(dst *ebiten.Image, y, height, offsetX float64, view render.RenderTransform) {
 	low, high := visibleSections(y, height)
@@ -125,7 +148,7 @@ func (w *world) DrawForegroundRocks(dst *ebiten.Image, y, height, offsetX float6
 			op.GeoM.Translate(offsetX*float64(pixels), (terrain.SectionTop(id)-y)*float64(pixels))
 			op.GeoM.Scale(scale, scale)
 			op.GeoM.Translate(view.OffsetX, 0)
-			w.appearanceFade.DrawReveal(dst, section.foreground, section.foregroundReveal.Previous, section.foregroundReveal.Progress(), op.GeoM)
+			w.drawRockSpan(dst, section, op.GeoM)
 		}
 	}
 }
@@ -144,7 +167,7 @@ func (w *world) drawGrass(dst *ebiten.Image, y, height, offsetX float64, view re
 			continue
 		}
 		op := &ebiten.DrawImageOptions{}
-		scale := float64(view.Pixels) / float64(section.renderWidth())
+		scale := float64(view.Pixels) / float64(section.grassWidth())
 		op.GeoM.Scale(scale, scale)
 		op.GeoM.Translate(view.OffsetX+offsetX*float64(view.Pixels), (terrain.SectionTop(id)-y)*float64(view.Pixels))
 		w.appearanceFade.DrawReveal(dst, section.grass, nil, min(section.grassReveal.Progress(), section.foregroundReveal.Progress()), op.GeoM)
@@ -165,15 +188,29 @@ func (s *worldSection) vegetationWidth() int {
 }
 func (s *worldSection) needsRefresh(pixels int, layers render.MeshLayers) bool {
 	if s.mesh != nil {
+		// Partial recipes cannot refresh retained siblings whose inputs are absent.
+		layers &= s.mesh.LayerMask()
 		mask := s.mesh.LayerMask() & layers
 		if mask&render.ForegroundLayer != 0 && s.foreground == nil {
 			return true
 		}
+		if mask&render.ForegroundLayer != 0 && !s.mesh.ForegroundBaseOnly && s.needsGrass(*s.mesh, pixels) {
+			return true
+		}
+		if mask&render.ForegroundLayer != 0 {
+			for kind := growthProduct(0); kind < growthProducts; kind++ {
+				if s.needsGrowth(*s.mesh, kind, pixels) {
+					return true
+				}
+			}
+		}
 		if mask&render.BackgroundLayer != 0 && s.terrain == nil {
 			return true
 		}
-		if mask&render.VegetationLayer != 0 && s.vegetationPending {
-			return true
+		for kind := vegetationProduct(0); kind < vegetationProducts; kind++ {
+			if mask&kind.layer() != 0 && s.needsPlant(*s.mesh, kind, pixels) {
+				return true
+			}
 		}
 	}
 	return (layers&render.ForegroundLayer != 0 && s.foreground != nil && s.renderWidth() != pixels) ||

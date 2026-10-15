@@ -26,16 +26,24 @@ scene.Draw(screen, viewport)
 `Update` requests terrain for the viewport and reports whether it is ready. It also advances animated effects. Repeated draws do not advance animation. The library does not own your game loop, camera, input, window settings, or UI. `Close` is idempotent and releases scene rendering resources. `Reset(seed)` starts a new world while retaining the scene's settings and callbacks.
 
 `scene.Readiness(viewport)` reports `Collision`, `Foreground`, `Background`, and
-`Decorations` independently without requesting generation. Foreground rock faces,
-walls, and edge detail publish before background generation and growth atlas
-uploads. Growth and grass arrive later through a replacement foreground image;
-the published rock base stays drawable while that image uploads. Continue to
-call `Draw` during loading. Use `Update`'s full-readiness result for exports.
+`Decorations` independently without requesting generation. Foreground rock
+recipes arrive before background generation or growth atlas uploads.
+Background rocks can upload and publish while foreground rocks are unfinished. Hanging growth and moss publish on independent textures as their
+uploads finish, preserving the rock base and its structural trim. Growth and
+grass keep their own widths during resizing. `Decorations` includes growth and
+grass readiness. Mushrooms, webs, and each vine layer enter upload as their own
+CPU recipe finishes, without
+waiting for sibling generators. They upload and publish independently, including
+while terrain images are uploading. Their draw order is fixed regardless of
+completion order. Crossing plants remain clipped to
+available supporting rock bands. Continue to call `Draw` during loading. Use
+`Update`'s full-readiness result for exports.
 
 With `config.AppearanceFade = true`, arriving rocks and vegetation fade in
 uniformly over about 0.7 seconds. `DefaultConfig()` enables
 it; a zero `Config` and diagnostic views disable it. Each layer starts when its
-upload publishes, including prefetched layers offscreen. Existing rock stays
+upload publishes, including prefetched layers offscreen; a later vegetation
+layer does not restart an earlier layer's fade. Existing rock stays
 visible as growth arrives, and resizing does not restart the effect. Collision,
 queries, and readiness are immediate; the animation advances only in `Update`.
 For a fully revealed still image, disable it before `NewScene`. The viewer does
@@ -53,7 +61,9 @@ Set `Config.Orientation = infinicave.Horizontal` before `NewScene` to grow right
 
 Viewport dimensions must be finite and positive. Vertical `Y` must be finite and no greater than `-Height`; horizontal `X` must be finite and nonnegative. `Viewport.Velocity` is movement per tick along the scrolling axis and is used for directional prefetching.
 
-Rendering uses the smaller target dimension as pixels per scene unit. Portrait and landscape targets center the cave on the bounded axis. Set `scene.SetRenderWidth(min(nativeWidth, nativeHeight))` before `Update` to match cached raster resolution to the target; the default is 1000 pixels per scene unit. Resizing reuses prepared geometry and preserves runtime cuts. Visible uploads take priority; when lookahead is enabled, neighbors and directional lookahead sections refresh afterward before entering the viewport.
+Rendering uses the smaller target dimension as pixels per scene unit. Portrait and landscape targets center the cave on the bounded axis. Set `scene.SetRenderWidth(min(nativeWidth, nativeHeight))` before `Update` to match cached raster resolution to the target; the default is 1000 pixels per scene unit. Resizing reuses prepared geometry and preserves runtime cuts. Material grain
+stays aligned through resizing and cropped carving replay. Displayed plant
+fallbacks retain their own source recipes until replacements publish. Visible uploads take priority; when lookahead is enabled, neighbors and directional lookahead sections refresh afterward before entering the viewport.
 
 ## Rendering Hooks
 
@@ -112,6 +122,10 @@ Choose a mode before `NewScene`; it survives Reset and resizing. The viewer flag
 is `-antialiasing full|off|fxaa` and also applies to PNG exports.
 
 Streaming uses the same two counts in both orientations: retention applies to up/down in vertical scenes and left/right in horizontal scenes, while lookahead follows `Viewport.Velocity`. Retention preserves published CPU geometry, meshes, and uploaded images without requesting new sections. Lookahead requests and retains extra sections only while moving; its count is independent of speed. Requests and unpublished results share a bounded queue, so long lookahead windows fill as capacity permits. Required viewport sections take priority over unpublished speculative results. Unpublished results and paused uploads outside the request window can be discarded to make room for the current viewport. Both settings survive `Reset`.
+
+Canceling generation retains published layers until eviction; revisiting an
+incomplete section fills its missing products while existing images stay visible.
+Late replies from canceled requests or reset worlds cannot replace current content.
 
 Immediate neighbors remain requested and retained because their vegetation can reach into the viewport. `Update` waits for missing required sections and uploads that contribute to the viewport; purely offscreen uploads and extra lookahead do not delay readiness. Lookahead and an active GPU upload may extend beyond the retention range. A zero `Config` keeps only visible sections and required neighbors, with no extra retention or lookahead. Defaults now use symmetric retention and fixed lookahead, replacing the previous asymmetric retention and speed-dependent lookahead.
 

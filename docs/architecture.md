@@ -53,8 +53,10 @@ followed by the nearest offscreen sections, within the shared upload budget.
 The section worker owns its builder, random streams, guide cache, retained branch paths, and generation timings. It publishes immutable foreground geometry before generating
 vegetation or preparing meshes. Foreground-only appearance and a rock-base mesh
 then publish without background generation or growth atlas uploads. Background
-material retains the compatibility data used by decoration placement; completed
-growth later replaces the foreground image while the base remains drawable.
+material retains the compatibility data used by decoration placement. Growth
+preparation reuses the base's structural triangles and attachments, fitting only
+the later vegetation. It publishes hanging underlay and surface growth images
+independently, without replacing the displayed rock base or structural trim.
 `Scene.Readiness` exposes the independent layer states. The game goroutine receives that early geometry
 and invokes the collision callback. Final vegetation is attached to a separate
 geometry value so it cannot mutate already published data.
@@ -62,6 +64,48 @@ geometry value so it cannot mutate already published data.
 Mesh preparation uses CPU data, even though vertices use Ebitengine types. GPU
 images and shaders are created, uploaded, drawn, resized, and released on the game
 goroutine. Upload budgets and cache publication live in `world_stream.go`.
+Runnable sections rotate after bounded upload quanta and share draw, index,
+pixel-work, and submission-time budgets. Foreground rocks, background rocks,
+grass, vegetation, hanging underlay, and surface growth rotate independently
+within each section. Background and
+grass each retain their own cursor and AA surface, so neither waits for the
+foreground image to finish. `terrain_upload.go` and `grass_upload.go` own those
+publication paths. Starting or publishing an upload does
+not require an extra update. `vegetation_upload.go` owns independent cursors,
+images, widths, and reveal clocks for background vines, foreground vines,
+mushrooms, and webs. These products can advance alongside terrain uploads and
+publish individually as soon as their raster work completes.
+
+`Builder.DecorateProducts` emits immutable per-kind snapshots, including empty
+results, without waiting for sibling generators. Each callback prepares and
+sends its own mesh. Foreground growth fits from the early appearance alongside
+background material/mesh preparation; it does not wait for compatibility
+material or decoration generation. The final combined envelope closes the
+section job; it is not a publication barrier. Product masks preserve unrelated geometry and meshes, and
+recipe identities prevent the final envelope from uploading the same images
+again. Newly available products can join an active or parked section upload
+without resetting its other cursors. Vegetation readiness waits for all four
+plant products at the requested width; `Readiness.Decorations` also includes
+growth and grass.
+
+Worker envelopes carry a world epoch and request incarnation. The coordinator
+checks both before merging meshes, acknowledging cancellation, or publishing
+collision geometry. A late reply cannot finish a newer request for the same
+section. Completed request identities remain through retention so unread
+collision events can still publish, then expire with eviction; reset creates a
+new epoch. Cancellation releases private raster work while retaining published
+siblings, their recipes, collision coverage, and reveal clocks. Revisiting an
+incomplete section retries its missing products with those images still visible.
+Request identities belong to the root coordinator; render recipes remain
+independent of request lifetime and raster width. Close drains buffered CPU
+replies immediately, and the dispatcher drains again after canceled producers
+exit, releasing late replies without blocking the game goroutine on a loader.
+Cached refreshes are attempted at most once per section per update; incomplete
+recipes cannot request replacement images for missing sibling inputs.
+
+The section phase scheduler and shared helper budget remain. The larger
+dependency-graph and progressive-tile changes remain planned in
+[render-product-scheduling-design.md](render-product-scheduling-design.md).
 `Config.Antialiasing` is fixed for a scene: Full uses geometry antialiasing and
 supersampled face uploads; Off and FXAA use native non-antialiased layers and
 atlas pages, including carving replay. FXAA owns a reusable final-size target
@@ -112,9 +156,22 @@ excluded from offscreen background and shadow composition.
 
 Grass has its own image, with clipped vector ground patches aligned to cell
 normals and atlas blades rooted along the surface but angled toward world-up.
-It shares the foreground layer's upload, publication, resizing, and carving lifecycle, and
-supplies the shadow silhouette alongside rocks. Mushrooms and webs use cropped
-images published together with vegetation. The viewer's optional `ribbon.go`
+It shares the immutable foreground CPU recipe and supplies the shadow silhouette
+alongside rocks, while retaining an independent upload, publication, resize
+width, displayed recipe, and reveal clock. A late full foreground recipe can
+supply grass while the early rock base is still uploading. Rock publication
+preserves already-published grass. Grass edits replay from its own displayed
+recipe and width; removing a staged grass attachment restarts only that private
+grass upload. `Readiness.Decorations` includes visible grass. Mushrooms and webs use cropped
+images published independently from other vegetation. During resize each image
+keeps its own displayed width until its replacement finishes; aggregate readiness
+waits for all required replacements. Displayed rock and plant recipes retain their
+own physical snapshots separately from newer CPU recipes. Carving replays each displayed image from the recipe
+that supplied its pixels, including old-width plants during replacement uploads.
+Early decoration publication cannot change rock replay or growth transitions.
+Carving updates already-published products
+even while sibling images or supporting rock images are still uploading.
+The viewer's optional `ribbon.go`
 trail demonstrates both hooks with mouse input and world coordinates,
 advancing its samples during `Game.Update`.
 
@@ -125,15 +182,28 @@ remnants on the original side of `AboveRocks`. Cached images and geometry change
 immediately. Snapshots expire during `Update` and are released on reset or close;
 stored cuts, loading, and upload replay never start animations.
 
+Material shaders reconstruct canonical artwork coordinates from raster sample
+centers. Scaling, cropping, and supersampling preserve that frame, including
+carved rims, so replay keeps grain aligned at crop boundaries.
+
+Foreground composition preserves hanging growth → structural underlay and
+faces/outlines → surface growth → structural top trim and cut rims. Structural
+trim publishes with rocks; growth products keep their own images, recipes,
+widths, and reveal clocks. Each product accepts edits at its displayed width,
+and overlapping cuts replay only its affected tiles. Support removal restarts
+only the affected private growth upload. Burns capture the product's published
+pixels and reveal progress. Grass remains above `AboveRocks`.
+
 Optional appearance fades blend in each cached rock or vegetation layer as it
-publishes. The root keeps independent reveal
-clocks on each section and advances them in `Update`; drawing and background
-shadow composition share those clocks. Crossing plants also respect their
-supporting band's reveal. Replacing an early rock base with completed growth
-retains its displayed image temporarily, so existing rock stays visible. Runtime
-cuts mask this retained base too. Expiry, eviction, reset, and close release it;
-resizing existing layers does not restart a reveal. Readiness describes published
-resources independently of their animation progress.
+publishes. The root advances independent clocks in `Update`; ordinary drawing
+and shadow composition share them. Growth never replaces rocks or restarts their
+reveal. During a structural reveal, one reusable scratch image composes the
+ordered foreground span before applying structural opacity, preserving uniform
+fading where structural layers overlap. Fully revealed rocks draw the cached
+spans directly. Crossing plants respect their supporting band's reveal. Resize
+retains old-width products until replacements publish and does not restart
+reveals. Eviction, reset, and close release the span images and scratch image.
+Readiness describes published resources independently of animation progress.
 
 Synchronous generation uses `terrain.GenerationOptions`, populated by the public
 `GenerateSectionWithConfig` entry point after validating the full configuration.

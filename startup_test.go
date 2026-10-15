@@ -50,6 +50,7 @@ type startupGame struct {
 	start                   time.Time
 	ready, foreground, done bool
 	frames                  int
+	products                [vegetationProducts]bool
 }
 
 func (g *startupGame) Layout(int, int) (int, int) { return 640, 640 }
@@ -79,6 +80,19 @@ func (g *startupGame) Draw(screen *ebiten.Image) {
 		screen.At(0, 0) // include GPU completion through this frame
 		g.foreground = true
 		g.t.Logf("first foreground: %s, frame %d", time.Since(g.start), g.frames)
+	}
+	if s != nil {
+		flushed := false
+		for kind, name := range []string{"background vines", "webs", "mushrooms", "foreground vines"} {
+			if !g.products[kind] && s.plants[kind].pixels > 0 {
+				if !flushed {
+					screen.At(0, 0)
+					flushed = true
+				}
+				g.products[kind] = true
+				g.t.Logf("%s published: %s, frame %d", name, time.Since(g.start), g.frames)
+			}
+		}
 	}
 	if g.ready {
 		screen.At(0, 0)

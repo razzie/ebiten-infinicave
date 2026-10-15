@@ -82,6 +82,8 @@ func (w *world) runSectionPhases(newBuilder func() *terrain.Builder, advance fun
 				workers[i].join()
 			}
 		}
+		// Release replies that won a buffered send after cancellation.
+		w.drainCPUResults()
 	}()
 	rank := func(job sectionJob) int { return sectionPriority(job, viewport) }
 	yieldVegetation := func() {

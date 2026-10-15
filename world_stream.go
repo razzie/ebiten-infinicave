@@ -59,8 +59,12 @@ func (w *world) savePending(data render.SectionMesh) {
 		w.pending = make(map[int64]render.SectionMesh)
 	}
 	if previous, ok := w.pending[data.ID]; ok {
-		if !previous.TerrainOnly && data.TerrainOnly {
-			return
+		if previous.LayerMask()&render.ForegroundLayer != 0 && !previous.ForegroundBaseOnly && data.ForegroundBaseOnly {
+			// A late/retried base recipe cannot downgrade completed growth.
+			data.Layers = data.LayerMask() &^ render.ForegroundLayer
+			if data.Layers == 0 {
+				return
+			}
 		}
 		data = render.MergeSectionMeshes(previous, data)
 	}
@@ -68,6 +72,27 @@ func (w *world) savePending(data render.SectionMesh) {
 }
 
 func (u *sectionUpload) deallocate() {
+	if u.trim != nil {
+		u.trim.Deallocate()
+		u.trim = nil
+	}
+	for i := range u.growth {
+		u.growth[i].deallocate()
+	}
+	for i := range u.plants {
+		if u.plants[i].cursor.surface != nil {
+			u.plants[i].cursor.surface.Deallocate()
+			u.plants[i].cursor.surface = nil
+		}
+	}
+	if u.grassCursor.surface != nil {
+		u.grassCursor.surface.Deallocate()
+		u.grassCursor.surface = nil
+	}
+	if u.backgroundCursor.surface != nil {
+		u.backgroundCursor.surface.Deallocate()
+		u.backgroundCursor.surface = nil
+	}
 	for _, img := range []*ebiten.Image{u.img, u.foreground, u.vines, u.foregroundVines, u.mushrooms, u.spiderWebs, u.grass, u.surface} {
 		if img != nil {
 			img.Deallocate()
@@ -122,20 +147,38 @@ const (
 	uploadForegroundVines
 	uploadPlantsPublish
 	uploadDone
+	uploadGrowthProduct
 )
 
 type sectionUpload struct {
+	trim                                               *ebiten.Image
+	growth                                             [growthProducts]growthUpload
 	data, raster                                       render.SectionMesh
 	pixels                                             int
 	img, foreground, vines, foregroundVines, mushrooms *ebiten.Image
 	spiderWebs                                         *ebiten.Image
 	grass                                              *ebiten.Image
-	stage, next                                        int
-	initialized                                        bool
-	needed                                             render.MeshLayers
-	surface                                            *ebiten.Image
-	faceNext                                           int
-	instancePart                                       int
+	uploadCursor
+	plants             [vegetationProducts]plantUpload
+	plantsInitialized  bool
+	grassCursor        uploadCursor
+	grassRaster        render.GridMesh
+	grassData          *render.SectionMesh
+	grassInitialized   bool
+	backgroundCursor   uploadCursor
+	laneNext           int
+	grassFacesDone     bool
+	plantNext          int
+	lastTurn, progress uint64
+	initialized        bool
+	needed             render.MeshLayers
+}
+
+// A cursor owns one raster product's progress, including its AA accumulator.
+// Helpers receive it explicitly so unrelated products can advance independently.
+type uploadCursor struct {
+	stage, next, faceNext, instancePart int
+	surface                             *ebiten.Image
 }
 
 // Limit draw submissions per tick as well as separating the large layer
@@ -146,33 +189,43 @@ const uploadTimePerTick = 2 * time.Millisecond
 
 const uploadIndicesPerTick = 128 * 1024
 
-// One budget covers every stage advanced in a tick. Large shader passes stay
-// on separate ticks; small attachment and outline stages can share the same
-// draw/time/index budget. A single oversized mesh can still make progress.
+// One budget covers all sections and products advanced in a tick. Draw, index,
+// pixel, and submission-time limits bound work without fixed stage barriers.
 type uploadBudget struct {
 	start          time.Time
 	draws, indices int
+	pixels         int
 	stage          int
+	quantumEnd     int
 }
 
 func (b *uploadBudget) enter(stage int) bool {
-	heavy := func(s int) bool {
-		return s == uploadForegroundFaces || s == uploadBackgroundFaces || s == uploadBackgroundFade || s == uploadVineFinish
-	}
-	if b.draws > 0 && b.stage != stage && (heavy(stage) || heavy(b.stage) || b.indices > 32*1024) {
-		return false
-	}
 	b.stage = stage
 	return b.available()
 }
 
+// Pixel work bounds shader passes and AA resolves independently of indices.
+// One oversized first submission is permitted so large targets still progress.
+const uploadPixelsPerTick = 4 * 1024 * 1024
+
+func (b *uploadBudget) takeRaster(indices, pixels int) bool {
+	if b.draws > 0 && b.pixels+pixels > uploadPixelsPerTick {
+		return false
+	}
+	if !b.take(indices) {
+		return false
+	}
+	b.pixels += pixels
+	return true
+}
+
 func (b *uploadBudget) available() bool {
 	return b.draws < uploadDrawsPerTick && (b.draws == 0 ||
-		(b.indices < uploadIndicesPerTick && time.Since(b.start) < uploadTimePerTick))
+		(b.indices < uploadIndicesPerTick && b.pixels < uploadPixelsPerTick && time.Since(b.start) < uploadTimePerTick))
 }
 
 func (b *uploadBudget) take(indices int) bool {
-	if !b.available() || (b.draws > 0 && b.indices+indices > uploadIndicesPerTick) {
+	if !b.available() || (b.quantumEnd > 0 && b.draws >= b.quantumEnd) || (b.draws > 0 && b.indices+indices > uploadIndicesPerTick) {
 		return false
 	}
 	b.draws++
@@ -180,8 +233,7 @@ func (b *uploadBudget) take(indices int) bool {
 	return true
 }
 
-func (w *world) uploadMeshes(dst *ebiten.Image, meshes []render.TriangleMesh, budget *uploadBudget) bool {
-	u := w.upload
+func (w *world) uploadMeshes(u *uploadCursor, dst *ebiten.Image, meshes []render.TriangleMesh, budget *uploadBudget) bool {
 	if u.next < len(meshes) && !budget.enter(u.stage) {
 		return false
 	}
@@ -197,13 +249,16 @@ func (w *world) uploadMeshes(dst *ebiten.Image, meshes []render.TriangleMesh, bu
 // Collect CPU results even while another section uploads. Requests, pending
 // results, and paused uploads share a bounded queue.
 func (w *world) collect() {
-	// Each job sends its early mesh before its final result. Drain the early
-	// channel first so completed/canceled jobs cannot resurrect old terrain.
+	// Drain early products first. Every envelope is checked against its flight;
+	// old finals and cancellation acknowledgements cannot finish a newer job.
 	for {
 		select {
-		case mesh := <-w.terrainMeshes:
-			if flight, active := w.inflight[mesh.ID]; w.inflight == nil || (active && flight.ctx.Err() == nil) {
-				w.savePending(mesh)
+		case result := <-w.terrainMeshes:
+			if !w.matchesFlight(result.ID, result.request) {
+				continue
+			}
+			if flight, active := w.inflight[result.ID]; !active || flight.ctx.Err() == nil {
+				w.savePending(result.SectionMesh)
 			}
 		default:
 			goto results
@@ -212,14 +267,18 @@ func (w *world) collect() {
 results:
 	for {
 		select {
-		case mesh := <-w.results:
-			flight, active := w.inflight[mesh.ID]
-			if w.inflight == nil || (active && flight.ctx.Err() == nil) {
-				w.savePending(mesh)
-			} else {
-				w.discardIncomplete(mesh.ID)
+		case result := <-w.results:
+			if !w.matchesFlight(result.ID, result.request) {
+				continue
 			}
-			w.finishJob(mesh.ID, active && flight.ctx.Err() == nil)
+			flight, active := w.inflight[result.ID]
+			completed := !active || flight.ctx.Err() == nil
+			if completed {
+				w.savePending(result.SectionMesh)
+			} else {
+				w.discardUnpublished(result.ID)
+			}
+			w.finishJob(result.ID, completed)
 		default:
 			goto canceled
 		}
@@ -227,10 +286,10 @@ results:
 canceled:
 	for {
 		select {
-		case id := <-w.canceled:
-			if _, active := w.inflight[id]; active || (w.inflight == nil && w.working && w.activeID == id) {
-				w.finishJob(id, false)
-				w.discardIncomplete(id)
+		case cancellation := <-w.canceled:
+			if w.matchesFlight(cancellation.id, cancellation.request) {
+				w.finishJob(cancellation.id, false)
+				w.discardUnpublished(cancellation.id)
 			}
 		default:
 			return
@@ -239,6 +298,9 @@ canceled:
 }
 
 func (w *world) finishJob(id int64, completed bool) {
+	if !completed {
+		delete(w.requests, id)
+	}
 	if w.inflight != nil {
 		if flight, active := w.inflight[id]; active {
 			if completed {
@@ -258,24 +320,27 @@ func (w *world) finishJob(id int64, completed bool) {
 	}
 }
 
-// Cancellation may leave an early terrain result without a vegetation result.
-// Remove that provisional cache so revisiting the section schedules a rebuild.
-func (w *world) discardIncomplete(id int64) {
+// A stream can contain every plant but still lack terrain or growth.
+func incompleteRecipe(mesh render.SectionMesh) bool {
+	return mesh.LayerMask() != render.AllLayers || mesh.ForegroundBaseOnly
+}
+
+// Cancellation releases private work, while published siblings retain their
+// recipes, images, reveal clocks, and collision coverage until normal eviction.
+func (w *world) discardUnpublished(id int64) {
 	if u := w.parked[id]; u != nil {
 		u.deallocate()
 		delete(w.parked, id)
 	}
-	if mesh, ok := w.pending[id]; ok && mesh.TerrainOnly {
+	if mesh, ok := w.pending[id]; ok && incompleteRecipe(mesh) {
 		delete(w.pending, id)
 	}
-	if w.upload != nil && w.upload.data.ID == id && w.upload.data.TerrainOnly {
+	if w.upload != nil && w.upload.data.ID == id && incompleteRecipe(w.upload.data) {
 		w.deferUpload()
 		delete(w.pending, id)
 	}
-	if section := w.sections[id]; section != nil && section.mesh != nil && section.mesh.TerrainOnly {
-		section.deallocate()
-		delete(w.sections, id)
-		w.revision++
+	if section := w.sections[id]; section != nil && section.geometry != nil {
+		return
 	}
 	if _, ok := w.collision[id]; ok {
 		delete(w.collision, id)
@@ -311,7 +376,7 @@ func (w *world) needsVisibleRefresh(id int64, s *worldSection) bool {
 	if w.viewportLayers(id)&render.ForegroundLayer != 0 {
 		return s.needsRefresh(w.renderWidth(), w.viewportLayers(id))
 	}
-	return s.mesh != nil && s.mesh.LayerMask()&render.VegetationLayer != 0 && (s.vegetationPending || s.vegetationWidth() != w.renderWidth())
+	return s.needsRefresh(w.renderWidth(), render.VegetationLayer)
 }
 
 func (w *world) uploadPriority(mesh render.SectionMesh) int {
@@ -338,52 +403,98 @@ func (w *world) uploadPriority(mesh render.SectionMesh) int {
 	return priority
 }
 
-// Selection and preemption occur between draw batches. Parked GPU surfaces
-// retain progress, including the supersampled antialiasing accumulator.
+// Advance runnable sections within one shared budget. Equal-priority sections
+// rotate after each quantum, retaining private raster cursors and surfaces.
 func (w *world) receive(g *Scene) {
 	budget := uploadBudget{start: time.Now()}
+	w.receiveBudget(g, &budget)
+}
+
+func (w *world) receiveBudget(g *Scene, budget *uploadBudget) {
 	w.collect()
-	var selected render.SectionMesh
-	found := false
-	choose := func(mesh render.SectionMesh) {
-		if !w.meshUploadEligible(mesh, w.viewport) {
+	w.absorbPending(g)
+	blocked := make(map[*sectionUpload]bool)
+	idle := make(map[*sectionUpload]int)
+	refreshed := make(map[int64]bool)
+	for w.selectUpload(blocked, refreshed) {
+		u := w.upload
+		// A metadata-only completion can leave aggregate readiness pending.
+		// Do not recreate its cached envelope repeatedly without spending budget.
+		refreshed[u.data.ID] = true
+		before, progress := budget.draws, u.progress
+		w.uploadTurn++
+		u.lastTurn = w.uploadTurn
+		budget.quantumEnd = budget.draws + 4
+		w.advanceUpload(g, u, budget)
+		if w.upload == u && budget.draws == before && u.progress == progress {
+			// Try every independent lane before declaring this section
+			// blocked by dependencies or the remaining frame budget.
+			idle[u]++
+			lanes := 0
+			for _, mask := range []render.MeshLayers{render.ForegroundLayer, render.BackgroundLayer, render.VegetationLayer, grassUploadLayer, underGrowthUploadLayer, surfaceGrowthUploadLayer} {
+				if u.needed&mask != 0 {
+					lanes++
+				}
+			}
+			if idle[u] >= lanes {
+				blocked[u] = true
+			}
+		} else {
+			idle[u] = 0
+		}
+		if !budget.available() {
 			return
 		}
-		if !found || w.uploadPriority(mesh) < w.uploadPriority(selected) ||
-			(w.uploadPriority(mesh) == w.uploadPriority(selected) && mesh.ID < selected.ID) {
-			selected, found = mesh, true
+	}
+}
+
+func (w *world) selectUpload(blocked map[*sectionUpload]bool, refreshed map[int64]bool) bool {
+	var selected render.SectionMesh
+	var selectedUpload *sectionUpload
+	found := false
+	choose := func(mesh render.SectionMesh, u *sectionUpload) {
+		if blocked[u] || !w.meshUploadEligible(mesh, w.viewport) {
+			return
+		}
+		turn, selectedTurn := uint64(0), uint64(0)
+		if u != nil {
+			turn = u.lastTurn
+		}
+		if selectedUpload != nil {
+			selectedTurn = selectedUpload.lastTurn
+		}
+		priority := w.uploadPriority(mesh)
+		if !found || priority < w.uploadPriority(selected) ||
+			(priority == w.uploadPriority(selected) && (turn < selectedTurn || turn == selectedTurn && mesh.ID < selected.ID)) {
+			selected, selectedUpload, found = mesh, u, true
 		}
 	}
-	for _, mesh := range w.pending {
-		choose(mesh)
+	if w.upload != nil {
+		choose(w.upload.data, w.upload)
 	}
 	for _, u := range w.parked {
-		choose(u.data)
+		choose(u.data, u)
 	}
-	// Cached layers may need a resize or a newly exposed rock upload. Include
-	// these sources so visible refreshes can preempt speculative uploads too.
+	for id, mesh := range w.pending {
+		if w.parked[id] == nil && (w.upload == nil || w.upload.data.ID != id) {
+			choose(mesh, nil)
+		}
+	}
 	if render.ValidViewport(w.viewport) {
 		for id, section := range w.sections {
-			if section.mesh == nil || !w.needsVisibleRefresh(id, section) {
+			if refreshed[id] || section.mesh == nil || !w.needsVisibleRefresh(id, section) {
 				continue
 			}
 			if _, pending := w.pending[id]; pending || w.parked[id] != nil || w.upload != nil && w.upload.data.ID == id {
 				continue
 			}
-			choose(*section.mesh)
+			choose(*section.mesh, nil)
 		}
 	}
-	// Viewport bands precede contributing neighboring windows within a phase.
-	if render.ValidViewport(w.viewport) {
-		ids, _ := prefetch(w.viewport.Y, w.viewport.Height, w.viewport.Velocity, w.lookaheadSections)
-		for _, id := range ids {
-			if mesh, ok := w.pending[id]; ok && w.meshUploadEligible(mesh, w.viewport) && (!found || w.uploadPriority(mesh) == w.uploadPriority(selected)) {
-				selected, found = mesh, true
-				break
-			}
-		}
+	if !found {
+		return false
 	}
-	if w.upload != nil && found && selected.ID != w.upload.data.ID && w.uploadPriority(selected) < w.uploadPriority(w.upload.data) {
+	if w.upload != nil && selected.ID != w.upload.data.ID {
 		if w.parked == nil {
 			w.parked = make(map[int64]*sectionUpload)
 		}
@@ -391,12 +502,12 @@ func (w *world) receive(g *Scene) {
 		w.upload = nil
 	}
 	if w.upload == nil {
-		if found {
-			w.startUpload(selected)
-		}
-		return
+		w.startUpload(selected)
 	}
-	u := w.upload
+	return true
+}
+
+func (w *world) advanceUpload(g *Scene, u *sectionUpload, budget *uploadBudget) {
 	if u.pixels == 0 {
 		u.pixels = w.renderWidth()
 	}
@@ -405,15 +516,28 @@ func (w *world) receive(g *Scene) {
 		u.needed = u.data.LayerMask() & w.viewportLayers(u.data.ID)
 		section := w.sections[u.data.ID]
 		if section != nil {
-			if section.foreground != nil && section.renderWidth() == u.pixels && terrain.SameTerrain(section.geometry, u.data.Geometry) &&
-				!(section.mesh != nil && section.mesh.ForegroundBaseOnly && !u.data.ForegroundBaseOnly) {
+			if section.foreground != nil && section.renderWidth() == u.pixels && terrain.SameTerrain(section.geometry, u.data.Geometry) {
 				u.needed &^= render.ForegroundLayer
 			}
 			if section.terrain != nil && section.backgroundWidth() == u.pixels && section.mesh != nil && sameGridMesh(section.mesh.Background, u.data.Background) {
 				u.needed &^= render.BackgroundLayer
 			}
-			if !section.vegetationPending && section.vegetationWidth() == u.pixels && section.mesh != nil && section.mesh.Geometry == u.data.Geometry {
-				u.needed &^= render.VegetationLayer
+			for kind := vegetationProduct(0); kind < vegetationProducts; kind++ {
+				if !section.needsPlant(u.data, kind, u.pixels) {
+					u.needed &^= kind.layer()
+				}
+			}
+
+		}
+		if u.data.LayerMask()&render.ForegroundLayer != 0 && !u.data.ForegroundBaseOnly &&
+			(section == nil || section.needsGrass(u.data, u.pixels)) {
+			u.needed |= grassUploadLayer
+		}
+		if !u.data.ForegroundBaseOnly && u.data.LayerMask()&render.ForegroundLayer != 0 {
+			for kind := growthProduct(0); kind < growthProducts; kind++ {
+				if section == nil || section.needsGrowth(u.data, kind, u.pixels) {
+					u.needed |= kind.layer()
+				}
 			}
 		}
 		u.initialized = true
@@ -433,6 +557,34 @@ func (w *world) receive(g *Scene) {
 		w.white = ebiten.NewImage(1, 1)
 		w.white.Fill(color.White)
 	}
+	// Each terrain layer has its own cursor and supersampled surface.
+	// Rotate with vegetation even when a sibling has not published yet.
+	for range 6 {
+		lane := u.laneNext
+		u.laneNext = (u.laneNext + 1) % 6
+		if lane == 0 && u.needed&render.ForegroundLayer != 0 {
+			break
+		}
+		if lane == 1 && u.needed&render.BackgroundLayer != 0 {
+			w.advanceBackground(g, u, budget)
+			return
+		}
+		if lane == 2 && u.needed&render.VegetationLayer != 0 {
+			w.advancePlants(g, u, budget)
+			return
+		}
+		if lane == 3 && u.needed&grassUploadLayer != 0 {
+			w.advanceGrass(g, u, budget)
+			return
+		}
+		if lane >= 4 {
+			kind := growthProduct(lane - 4)
+			if u.needed&kind.layer() != 0 {
+				w.advanceGrowth(g, u, kind, budget)
+				return
+			}
+		}
+	}
 	top := terrain.SectionWindowTop(u.data.ID)
 	for {
 		switch u.stage {
@@ -441,10 +593,10 @@ func (w *world) receive(g *Scene) {
 				return
 			}
 			if u.foreground == nil {
-				u.raster.Foreground = render.ScaleGridMesh(u.data.Foreground, u.pixels, 0)
+				u.raster.Foreground = render.ScaleGridMesh(render.MaskForeground(u.data.Foreground, render.StructuralSpan), u.pixels, 0)
 				u.foreground = render.NewSectionImageAt(terrain.SectionHeight, u.pixels)
 			}
-			if !w.uploadAttachments(g, u.foreground, u.raster.Foreground.Growth, false, true, &budget) {
+			if !w.uploadAttachments(g, &u.uploadCursor, u.foreground, u.raster.Foreground.Growth, false, true, budget) {
 				return
 			}
 		case uploadForegroundFaces:
@@ -452,42 +604,28 @@ func (w *world) receive(g *Scene) {
 				return
 			}
 			if u.foreground == nil {
-				u.raster.Foreground = render.ScaleGridMesh(u.data.Foreground, u.pixels, 0)
+				u.raster.Foreground = render.ScaleGridMesh(render.MaskForeground(u.data.Foreground, render.StructuralSpan), u.pixels, 0)
 				u.foreground = render.NewSectionImageAt(terrain.SectionHeight, u.pixels)
 			}
-			if !w.uploadFaces(g, u.foreground, u.raster.Foreground.Faces, top, true, &budget) {
+			if !w.uploadFaces(g, &u.uploadCursor, u.foreground, u.raster.Foreground.Faces, top, true, budget) {
 				return
 			}
 		case uploadForegroundOutlines:
-			if !w.uploadMeshes(u.foreground, u.raster.Foreground.Outlines, &budget) {
+			if !w.uploadMeshes(&u.uploadCursor, u.foreground, u.raster.Foreground.Outlines, budget) {
 				return
 			}
 		case uploadRockGrowth:
-			if !w.uploadAttachments(g, u.foreground, u.raster.Foreground.Growth, false, false, &budget) {
-				return
-			}
-		case uploadGrass:
-			mesh := u.raster.Foreground.Grass
-			if len(mesh.Indices) > 0 {
+			if u.trim == nil && render.HasForegroundSpan(u.raster.Foreground, render.StructuralTopSpan) {
 				if !budget.available() {
 					return
 				}
-				if u.grass == nil {
-					u.grass = render.NewSectionImageAt(terrain.SectionHeight, u.pixels)
-				}
-				if !w.uploadFaces(g, u.grass, mesh, top, true, &budget) {
-					return
-				}
+				u.trim = render.NewSectionImageAt(terrain.SectionHeight, u.pixels)
 			}
-			if render.HasLiveAttachments(u.raster.Foreground.Growth, true) {
-				if u.grass == nil {
-					u.grass = render.NewSectionImageAt(terrain.SectionHeight, u.pixels)
-				}
-				if !w.uploadAttachments(g, u.grass, u.raster.Foreground.Growth, true, false, &budget) {
-					return
-				}
+			if !w.uploadAttachments(g, &u.uploadCursor, u.trim, u.raster.Foreground.Growth, false, false, budget) {
+				return
 			}
 		case uploadForegroundPublish:
+			u.progress++
 			g.maskUploadForeground(u)
 			section := w.sectionForUpload(u)
 			changed := section.foreground == nil || !terrain.SameTerrain(section.geometry, u.data.Geometry)
@@ -495,11 +633,14 @@ func (w *world) receive(g *Scene) {
 			if section.foreground != nil {
 				section.foreground.Deallocate()
 			}
-			if section.grass != nil {
-				section.grass.Deallocate()
+			if section.trim != nil {
+				section.trim.Deallocate()
 			}
-			section.grass, u.grass = u.grass, nil
+			section.trim, u.trim = u.trim, nil
+			section.foregroundSplit = true
 			section.foreground, u.foreground = u.foreground, nil
+			source := render.StructuralSection(u.data)
+			section.rockSource = &source
 			section.pixels = u.pixels
 			section.geometry = u.data.Geometry
 			w.updateSectionSource(u)
@@ -511,146 +652,12 @@ func (w *world) receive(g *Scene) {
 			u.stage = u.firstStage()
 			u.next = 0
 			return
-		case uploadBackgroundFaces:
-			if !budget.available() {
-				return
-			}
-			if u.img == nil {
-				u.raster.Background = render.ScaleGridMesh(u.data.Background, u.pixels, -render.BackgroundRasterBounds(u.pixels).Min.X)
-				u.img = render.NewBackgroundImageAt(u.pixels)
-				u.img.Fill(color.Black)
-			}
-			if !w.uploadFaces(g, u.img, u.raster.Background.Faces, top, true, &budget) {
-				return
-			}
-		case uploadBackgroundOutlines:
-			if !w.uploadMeshes(u.img, u.raster.Background.Outlines, &budget) {
-				return
-			}
-		case uploadBackgroundFade:
-			if !budget.enter(u.stage) || !budget.take(0) {
-				return
-			}
-			faded := render.NewBackgroundImageAt(u.pixels)
-			faded.DrawRectShader(u.img.Bounds().Dx(), u.img.Bounds().Dy(), g.backgroundFade, &ebiten.DrawRectShaderOptions{
-				Images: [4]*ebiten.Image{u.img}, Uniforms: map[string]any{"Pixels": float32(u.pixels), "MinX": float32(float64(render.BackgroundRasterBounds(u.pixels).Min.X) / float64(u.pixels))},
-			})
-			u.img.Deallocate()
-			u.img = faded
-		case uploadBackgroundPublish:
-			section := w.sectionForUpload(u)
-			if w.appearanceFade != nil && section.terrain == nil {
-				section.backgroundReveal.Start(nil)
-			}
-			if section.terrain != nil {
-				section.terrain.Deallocate()
-			}
-			section.terrain, u.img = u.img, nil
-			section.backgroundPixels = u.pixels
-			w.updateSectionSource(u)
-			u.needed &^= render.BackgroundLayer
-			u.stage = u.firstStage()
-			u.next = 0
-			return
-		case uploadVines:
-			if !budget.available() {
-				return
-			}
-			// Scale vegetation only once it is ready to upload.
-			if u.next == 0 && u.vines == nil {
-				data := u.data
-				if w.disableBackground {
-					data.Vines, data.VinesBounds = nil, image.Rectangle{}
-				}
-				plants := render.ScaleVegetationMesh(data, u.pixels)
-				u.raster.Vines, u.raster.VinesBounds = plants.Vines, plants.VinesBounds
-				u.raster.ForegroundVines, u.raster.ForegroundVinesBounds = plants.ForegroundVines, plants.ForegroundVinesBounds
-				u.raster.Mushrooms, u.raster.MushroomsBounds = plants.Mushrooms, plants.MushroomsBounds
-				u.raster.SpiderWebs, u.raster.SpiderWebsBounds = plants.SpiderWebs, plants.SpiderWebsBounds
-				u.raster.Plants, u.raster.Webs = plants.Plants, plants.Webs
-				if !plants.VinesBounds.Empty() {
-					u.vines = render.NewVegetationImage(plants.VinesBounds)
-				}
-			}
-			if u.vines != nil && !w.uploadMeshes(u.vines, u.raster.Vines, &budget) {
-				return
-			}
-		case uploadVineFinish:
-			if u.vines != nil && (!budget.enter(u.stage) || !budget.take(0)) {
-				return
-			}
-			u.vines = g.finishVinesAt(u.vines, u.raster.VinesBounds, top, u.pixels)
-		case uploadSpiderWebs:
-			if !u.raster.SpiderWebsBounds.Empty() && (!u.data.BakedInstances || render.HasLiveAttachments(u.raster.Webs, false)) {
-				if !budget.available() {
-					return
-				}
-				if u.spiderWebs == nil {
-					u.spiderWebs = render.NewVegetationImage(u.raster.SpiderWebsBounds)
-				}
-				if u.data.BakedInstances {
-					if !w.uploadPlantInstances(g, u.spiderWebs, u.raster.Webs, &budget) {
-						return
-					}
-				} else if !w.uploadFaces(g, u.spiderWebs, u.raster.SpiderWebs, top, false, &budget) {
-					return
-				}
-			}
-		case uploadMushrooms:
-			if !u.raster.MushroomsBounds.Empty() && (!u.data.BakedInstances || render.HasLiveAttachments(u.raster.Plants, false)) {
-				if !budget.available() {
-					return
-				}
-				if u.mushrooms == nil {
-					u.mushrooms = render.NewVegetationImage(u.raster.MushroomsBounds)
-				}
-				if u.data.BakedInstances {
-					if !w.uploadPlantInstances(g, u.mushrooms, u.raster.Plants, &budget) {
-						return
-					}
-				} else if !w.uploadFaces(g, u.mushrooms, u.raster.Mushrooms, top, false, &budget) {
-					return
-				}
-			}
-		case uploadForegroundVines:
-			if !u.raster.ForegroundVinesBounds.Empty() {
-				if !budget.available() {
-					return
-				}
-				if u.foregroundVines == nil {
-					u.foregroundVines = render.NewVegetationImage(u.raster.ForegroundVinesBounds)
-				}
-				if !w.uploadMeshes(u.foregroundVines, u.raster.ForegroundVines, &budget) {
-					return
-				}
-			}
-		case uploadPlantsPublish:
-			section := w.sectionForUpload(u)
-			if w.appearanceFade != nil && section.vegetationPending {
-				section.vegetationReveal.Start(nil)
-			}
-			newGeometry := section.geometry == nil && u.data.Geometry != nil
-			for _, img := range []*ebiten.Image{section.vines, section.foregroundVines, section.mushrooms, section.spiderWebs} {
-				if img != nil {
-					img.Deallocate()
-				}
-			}
-			section.vines, section.foregroundVines, section.mushrooms = u.vines, u.foregroundVines, u.mushrooms
-			u.vines, u.foregroundVines, u.mushrooms = nil, nil, nil
-			section.spiderWebs, u.spiderWebs = u.spiderWebs, nil
-			section.spiderWebsBounds = u.raster.SpiderWebsBounds
-			section.vinesBounds, section.foregroundVinesBounds, section.mushroomsBounds = u.raster.VinesBounds, u.raster.ForegroundVinesBounds, u.raster.MushroomsBounds
-			section.vegetationPixels = u.pixels
-			section.vegetationPending = false
-			g.maskUploadPlants(section, u)
-			w.updateSectionSource(u)
-			if newGeometry {
-				w.revision++
-			}
-			w.upload = nil
-			return
+
 		}
 		u.stage++
+		if u.stage == uploadGrass {
+			u.stage++
+		}
 		u.next = 0
 	}
 }
@@ -665,15 +672,21 @@ func (u *sectionUpload) firstStage() int {
 	if u.needed&render.BackgroundLayer != 0 {
 		return uploadBackgroundFaces
 	}
+	if u.needed&grassUploadLayer != 0 {
+		return uploadGrass
+	}
 	if u.needed&render.VegetationLayer != 0 {
 		return uploadVines
+	}
+	if u.needed&(underGrowthUploadLayer|surfaceGrowthUploadLayer) != 0 {
+		return uploadGrowthProduct
 	}
 	return uploadDone
 }
 func (w *world) sectionForUpload(u *sectionUpload) *worldSection {
 	s := w.sections[u.data.ID]
 	if s == nil {
-		s = &worldSection{vegetationPending: true}
+		s = &worldSection{vegetationPending: true, grassPending: true}
 		w.sections[u.data.ID] = s
 	}
 	if s.backgroundPixels == 0 {
@@ -698,8 +711,7 @@ func (w *world) updateSectionSource(u *sectionUpload) {
 
 // Draw chunks into one persistent 2x surface, then resolve exactly once. Splitting
 // native antialiased draws would blend triangle edges repeatedly at batch seams.
-func (w *world) uploadFaces(g *Scene, dst *ebiten.Image, mesh render.TriangleMesh, top float64, material bool, budget *uploadBudget) bool {
-	u := w.upload
+func (w *world) uploadFaces(g *Scene, u *uploadCursor, dst *ebiten.Image, mesh render.TriangleMesh, top float64, material bool, budget *uploadBudget) bool {
 	if len(mesh.Indices) == 0 {
 		return true
 	}
@@ -709,7 +721,7 @@ func (w *world) uploadFaces(g *Scene, dst *ebiten.Image, mesh render.TriangleMes
 	if !w.antialiasing.GeometryAA() {
 		remaining := uploadIndicesPerTick - budget.indices
 		end := min(u.faceNext+(remaining/3)*3, len(mesh.Indices))
-		if end <= u.faceNext || !budget.take(end-u.faceNext) {
+		if end <= u.faceNext || !budget.takeRaster(end-u.faceNext, dst.Bounds().Dx()*dst.Bounds().Dy()) {
 			return false
 		}
 		chunk := mesh
@@ -734,7 +746,7 @@ func (w *world) uploadFaces(g *Scene, dst *ebiten.Image, mesh render.TriangleMes
 	if u.faceNext < len(mesh.Indices) {
 		remaining := uploadIndicesPerTick - budget.indices
 		end := min(u.faceNext+(remaining/3)*3, len(mesh.Indices))
-		if end <= u.faceNext || !budget.take(end-u.faceNext) {
+		if end <= u.faceNext || !budget.takeRaster(end-u.faceNext, 4*dst.Bounds().Dx()*dst.Bounds().Dy()) {
 			return false
 		}
 		chunk := render.SupersampledBatch(mesh, u.faceNext, end)
@@ -748,7 +760,7 @@ func (w *world) uploadFaces(g *Scene, dst *ebiten.Image, mesh render.TriangleMes
 			return false
 		}
 	}
-	if !budget.take(0) {
+	if !budget.takeRaster(0, dst.Bounds().Dx()*dst.Bounds().Dy()) {
 		return false
 	}
 	op := &ebiten.DrawImageOptions{Filter: ebiten.FilterLinear}
@@ -766,4 +778,63 @@ func (u *sectionUpload) clearSurface() {
 		u.surface = nil
 	}
 	u.faceNext = 0
+}
+
+// New products join private work for their section immediately. Overlapping
+// replacements retain their pending envelope until the current recipe finishes.
+func (w *world) absorbPending(g *Scene) {
+	absorb := func(u *sectionUpload) {
+		if u == nil {
+			return
+		}
+		next, ok := w.pending[u.data.ID]
+		if !ok {
+			return
+		}
+		// A full foreground recipe may arrive while the base is private.
+		// Admit its details without replacing the foreground cursor's recipe.
+		if u.initialized && u.data.ForegroundBaseOnly && next.LayerMask()&render.ForegroundLayer != 0 && !next.ForegroundBaseOnly && u.grassData == nil {
+			grass := next
+			g.applyStoredCuts(&grass)
+			u.grassData = &grass
+			if w.viewportLayers(next.ID)&render.ForegroundLayer != 0 {
+				u.needed |= grassUploadLayer | underGrowthUploadLayer | surfaceGrowthUploadLayer
+				if u.stage == uploadDone || u.stage == uploadVines {
+					u.stage = u.firstStage()
+				}
+			}
+		}
+		fresh := next.LayerMask() &^ u.data.LayerMask()
+		if fresh == 0 {
+			return
+		}
+		remaining := next.LayerMask() &^ fresh
+		part := next
+		part.Layers = fresh
+		g.applyStoredCuts(&part)
+		u.data = render.MergeSectionMeshes(u.data, part)
+		if u.initialized {
+			added := fresh & w.viewportLayers(u.data.ID)
+			u.needed |= added
+			if added&render.ForegroundLayer != 0 && !u.data.ForegroundBaseOnly {
+				u.needed |= grassUploadLayer | underGrowthUploadLayer | surfaceGrowthUploadLayer
+			}
+			if u.plantsInitialized && added&render.VegetationLayer != 0 {
+				w.addPlantUploads(u, added&render.VegetationLayer)
+			}
+			if u.stage == uploadDone || u.stage == uploadVines || added&render.ForegroundLayer != 0 {
+				u.stage = u.firstStage()
+			}
+		}
+		if remaining == 0 {
+			delete(w.pending, u.data.ID)
+		} else {
+			next.Layers = remaining
+			w.pending[u.data.ID] = next
+		}
+	}
+	absorb(w.upload)
+	for _, u := range w.parked {
+		absorb(u)
+	}
 }

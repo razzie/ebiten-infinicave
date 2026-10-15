@@ -83,7 +83,9 @@ func TestCollisionReadyCallbackSurvivesResetAndCanCloseScene(t *testing.T) {
 	defer g.Close()
 	g.Reset(7)
 	geometry := terrain.PrepareTerrainGeometry(terrain.SectionData{}, 0)
-	g.world.terrain <- sectionTerrain{geometry: geometry}
+	request := g.world.nextSectionRequest()
+	g.world.rememberRequest(0, request)
+	g.world.terrain <- sectionTerrain{geometry: geometry, request: request, ctx: g.world.ctx}
 	if g.Update(Viewport{Y: -.8, Height: .8}) || called != 1 || !g.closed {
 		t.Fatal("reset lost callback or Update continued after callback closed scene")
 	}

@@ -457,6 +457,11 @@ func ScaleAttachments(source []Attachment, pixels int, origin image.Point) []Att
 	out := append([]Attachment(nil), source...)
 	scale := float64(pixels) / RasterPixelsPerUnit
 	for i := range out {
+		// Masked spans retain indices for edits; dead recipes never draw and
+		// need no destination-coordinate copy of their vertex buffers.
+		if out[i].Dead {
+			continue
+		}
 		out[i].Mesh = scaleTriangleMesh(out[i].Mesh, scale, origin)
 		out[i].Extra = scaleTriangleMesh(out[i].Extra, scale, origin)
 	}

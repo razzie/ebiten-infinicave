@@ -15,6 +15,7 @@ import (
 // Prepared meshes contain only CPU data. A worker owns them until it sends
 // the section through results; the game loop then owns all GPU resources.
 type TriangleMesh struct {
+	MaterialFrame MaterialFrame
 	Index         *geom.BoundsIndex
 	Texture       AtlasKind
 	Vertices      []ebiten.Vertex
@@ -32,16 +33,22 @@ type GridMesh struct {
 	Grass TriangleMesh
 }
 
-type MeshLayers uint8
+type MeshLayers uint16
 
 const (
 	ForegroundLayer MeshLayers = 1 << iota
 	BackgroundLayer
-	VegetationLayer
-	AllLayers = ForegroundLayer | BackgroundLayer | VegetationLayer
+	BackgroundVinesLayer
+	WebsLayer
+	MushroomsLayer
+	ForegroundVinesLayer
+	VegetationLayer = BackgroundVinesLayer | WebsLayer | MushroomsLayer | ForegroundVinesLayer
+	AllLayers       = ForegroundLayer | BackgroundLayer | VegetationLayer
 )
 
 type SectionMesh struct {
+	// Recipe identities survive cumulative publication and prevent duplicate uploads.
+	PlantRecipes [4]*uint8
 	// ForegroundBaseOnly omits atlas growth until its later immutable recipe.
 	ForegroundBaseOnly                                  bool
 	PlantIndex, WebIndex                                *AttachmentSupportIndex
@@ -114,18 +121,39 @@ func PrepareTerrain(data terrain.SectionData, view View, growth ...RockGrowthOpt
 }
 
 func PrepareVegetation(data terrain.SectionData, view View) SectionMesh {
-	mesh := SectionMesh{ID: data.ID, Layers: VegetationLayer, BakedInstances: view == ViewShaded}
+	return PrepareVegetationParts(data, view, terrain.AllVegetationParts)
+}
+
+// PrepareVegetationParts prepares only ready products; absent products remain unknown.
+func PrepareVegetationParts(data terrain.SectionData, view View, parts terrain.VegetationParts) SectionMesh {
+	mesh := SectionMesh{ID: data.ID, Layers: MeshLayers(parts) << 2, TerrainOnly: parts != terrain.AllVegetationParts, BakedInstances: view == ViewShaded}
+	for i := range mesh.PlantRecipes {
+		if parts&(1<<i) != 0 {
+			mesh.PlantRecipes[i] = new(uint8)
+		}
+	}
 	data = sectionBakeVegetation(data)
 	if view == ViewShaded {
 		parallel.Run(
-			func() { mesh.Vines = PrepareVines(data.Vines) },
-			func() { mesh.ForegroundVines = PrepareForegroundVines(data.ForegroundVines, data.Orientation) },
 			func() {
+				if parts&terrain.BackgroundVinesPart != 0 {
+					mesh.Vines = PrepareVines(data.Vines)
+				}
+			},
+			func() {
+				if parts&terrain.ForegroundVinesPart != 0 {
+					mesh.ForegroundVines = PrepareForegroundVines(data.ForegroundVines, data.Orientation)
+				}
+			},
+			func() {
+				if parts&terrain.MushroomsPart == 0 {
+					return
+				}
 				mesh.Mushrooms = prepareUnsampledMushrooms(data.Mushrooms, mushroomBakeTopology(data), true)
 				mesh.Plants = prepareMushroomAttachments(data.Mushrooms, mushroomBakeTopology(data), data.Orientation)
 			},
 			func() {
-				if data.ForegroundTopology != nil {
+				if parts&terrain.WebsPart != 0 && data.ForegroundTopology != nil {
 					mesh.SpiderWebs = PrepareOwnedSpiderWebs(sectionBakeTopology(data).SpiderWebs)
 					mesh.Webs = prepareWebAttachments(sectionBakeTopology(data).SpiderWebs, true)
 				}
@@ -256,7 +284,7 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 	if view == ViewShaded || view == ViewClay {
 		vertices, indices = appendRockBevels(vertices, indices, grid, boundary, view, owned)
 	}
-	mesh := GridMesh{Faces: TriangleMesh{Vertices: vertices, Indices: indices}}
+	mesh := GridMesh{Faces: TriangleMesh{MaterialFrame: ReferenceMaterialFrame(), Vertices: vertices, Indices: indices}}
 	mesh.Growth = append(walls, trim...)
 	if raised && view == ViewShaded {
 		growth := prepareGrowthAttachments(grid, boundary, density, owned)
@@ -275,15 +303,7 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 		}
 		mesh.Growth = ordered
 	}
-	if len(grid) > 0 {
-		for i := range mesh.Growth {
-			p := geom.LerpVector(mesh.Growth[i].Min, mesh.Growth[i].Max, .5)
-			if len(mesh.Growth[i].Anchors) > 0 {
-				p = mesh.Growth[i].Anchors[0]
-			}
-			mesh.Growth[i].ID = terrain.CollisionVertexKey(terrain.RockMaterialPoint(grid[0], p))
-		}
-	}
+	stampGrowthIDs(mesh.Growth, grid)
 	mesh.GrowthIndex = AttachmentIndex(mesh.Growth)
 	if len(indices) == 0 {
 		return mesh
@@ -382,18 +402,30 @@ func MergeSectionMeshes(previous, next SectionMesh) SectionMesh {
 	}
 	if mask&VegetationLayer != 0 {
 		previous.BakedInstances = next.BakedInstances
-		previous.Plants, previous.Webs = next.Plants, next.Webs
-		previous.PlantIndex, previous.WebIndex = next.PlantIndex, next.WebIndex
-		previous.Vines, previous.ForegroundVines, previous.Mushrooms = next.Vines, next.ForegroundVines, next.Mushrooms
-		previous.VinesBounds, previous.ForegroundVinesBounds, previous.MushroomsBounds = next.VinesBounds, next.ForegroundVinesBounds, next.MushroomsBounds
+	}
+	if mask&BackgroundVinesLayer != 0 {
+		previous.Vines, previous.VinesBounds = next.Vines, next.VinesBounds
+	}
+	if mask&ForegroundVinesLayer != 0 {
+		previous.ForegroundVines, previous.ForegroundVinesBounds = next.ForegroundVines, next.ForegroundVinesBounds
+	}
+	if mask&MushroomsLayer != 0 {
+		previous.Plants, previous.PlantIndex = next.Plants, next.PlantIndex
+		previous.Mushrooms, previous.MushroomsBounds = next.Mushrooms, next.MushroomsBounds
+	}
+	if mask&WebsLayer != 0 {
+		previous.Webs, previous.WebIndex = next.Webs, next.WebIndex
 		previous.SpiderWebs, previous.SpiderWebsBounds = next.SpiderWebs, next.SpiderWebsBounds
+	}
+	for i := range previous.PlantRecipes {
+		if mask&(BackgroundVinesLayer<<i) != 0 {
+			previous.PlantRecipes[i] = next.PlantRecipes[i]
+		}
 	}
 	previous.ID = next.ID
 	previous.Layers = previous.LayerMask() | mask
-	previous.TerrainOnly = previous.Layers&VegetationLayer == 0
-	if next.Geometry != nil {
-		previous.Geometry = next.Geometry
-	}
+	previous.TerrainOnly = previous.Layers&VegetationLayer != VegetationLayer
+	previous.Geometry = terrain.MergeTerrainVegetation(previous.Geometry, next.Geometry, terrain.VegetationParts((mask&VegetationLayer)>>2))
 	previous.AppliedCuts = min(previous.AppliedCuts, next.AppliedCuts)
 	cuts := append([]terrain.RockCut(nil), previous.VisualCuts...)
 	for _, cut := range next.VisualCuts {
@@ -486,6 +518,9 @@ func SupersampledBatch(mesh TriangleMesh, start, end int) TriangleMesh {
 		mesh.Indices[i] = mapped
 	}
 	transformVertices(mesh.Vertices, 2, image.Point{})
+	if mesh.MaterialFrame.Pixels != 0 {
+		mesh.MaterialFrame.Samples *= 2
+	}
 	return mesh
 }
 

@@ -28,6 +28,9 @@ func (g *Scene) captureDecorationBurns(s *worldSection, id int64, cut terrain.Ro
 		if grass {
 			dst = s.grass
 		}
+		if dst == nil {
+			continue
+		}
 		var whole, partial []render.Attachment
 		for _, i := range edits.growth {
 			a := mesh.Foreground.Growth[i]
@@ -48,9 +51,6 @@ func (g *Scene) captureDecorationBurns(s *worldSection, id int64, cut terrain.Ro
 		g.burnAttachments(dst, whole, image.Rectangle{}, bounds, id, pixels, grass, progress, oldCuts, nil)
 		g.burnAttachments(dst, partial, image.Rectangle{}, bounds, id, pixels, grass, progress, oldCuts, &cut)
 	}
-	if s.vegetationPending {
-		return
-	}
 	selected := func(source []render.Attachment, indices []int) []render.Attachment {
 		out := make([]render.Attachment, 0, len(indices))
 		for _, i := range indices {
@@ -58,17 +58,17 @@ func (g *Scene) captureDecorationBurns(s *worldSection, id int64, cut terrain.Ro
 		}
 		return out
 	}
-	g.burnAttachments(s.mushrooms, selected(mesh.Plants, edits.plants), mesh.MushroomsBounds, s.mushroomsBounds, id, s.vegetationWidth(), false, s.vegetationReveal.Progress(), nil, nil)
-	g.burnAttachments(s.spiderWebs, selected(mesh.Webs, edits.webs), mesh.SpiderWebsBounds, s.spiderWebsBounds, id, s.vegetationWidth(), false, s.vegetationReveal.Progress(), nil, nil)
+	g.burnAttachments(s.mushrooms, selected(mesh.Plants, edits.plants), mesh.MushroomsBounds, s.mushroomsBounds, id, s.plantWidth(mushroomsProduct), false, s.plantReveal(mushroomsProduct).Progress(), nil, nil)
+	g.burnAttachments(s.spiderWebs, selected(mesh.Webs, edits.webs), mesh.SpiderWebsBounds, s.spiderWebsBounds, id, s.plantWidth(websProduct), false, s.plantReveal(websProduct).Progress(), nil, nil)
 	if s.foregroundVines != nil {
-		pixels := s.vegetationWidth()
+		pixels := s.plantWidth(foregroundVinesProduct)
 		bounds := s.foregroundVinesBounds
 		rect := burnRaster(geom.Bounds{Min: cut.Min, Max: cut.Max}, bounds, terrain.SectionWindowTop(id), pixels).Intersect(s.foregroundVines.Bounds())
 		if !rect.Empty() {
 			patch := ebiten.NewImage(rect.Dx(), rect.Dy())
 			patch.DrawImage(s.foregroundVines.SubImage(rect).(*ebiten.Image), nil)
 			g.keepBurnCut(patch, rect.Add(bounds.Min), id, pixels, cut)
-			g.addBurnPatch(patch, rect.Add(bounds.Min), id, pixels, false, s.vegetationReveal.Progress())
+			g.addBurnPatch(patch, rect.Add(bounds.Min), id, pixels, false, s.plantReveal(foregroundVinesProduct).Progress())
 		}
 	}
 }

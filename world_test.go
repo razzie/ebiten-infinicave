@@ -34,7 +34,7 @@ func TestWorldCancelsObsoleteGenerationAndResumes(t *testing.T) {
 	close(release)
 	select {
 	case id := <-w.canceled:
-		if id != 0 {
+		if id.id != 0 {
 			t.Fatal("wrong section was canceled")
 		}
 		w.canceled <- id
@@ -76,7 +76,8 @@ func TestWorldWorkerPreparesAllLayers(t *testing.T) {
 	}
 	var base render.SectionMesh
 	select {
-	case base = <-w.terrainMeshes:
+	case result := <-w.terrainMeshes:
+		base = result.SectionMesh
 		if base.LayerMask() != render.ForegroundLayer || !base.ForegroundBaseOnly || len(base.Foreground.Faces.Indices) == 0 {
 			t.Fatal("worker did not publish the independent rock base first")
 		}

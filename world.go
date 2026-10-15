@@ -10,44 +10,56 @@ import (
 	"sync"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/razzie/ebiten-infinicave/internal/parallel"
 	"github.com/razzie/ebiten-infinicave/internal/render"
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
 type worldSection struct {
+	trim                                                *ebiten.Image
+	foregroundSplit                                     bool
+	growth                                              [growthProducts]growthPublication
 	terrain, vines, mushrooms, foreground               *ebiten.Image
 	foregroundVines, spiderWebs                         *ebiten.Image
 	grass                                               *ebiten.Image
 	geometry                                            *terrain.Geometry
 	vinesBounds, foregroundVinesBounds, mushroomsBounds image.Rectangle
 	spiderWebsBounds                                    image.Rectangle
-	vegetationPending                                   bool
+	vegetationPending, grassPending                     bool
 	mesh                                                *render.SectionMesh
+	rockSource                                          *render.SectionMesh // Recipe for the displayed rock image, which can precede mesh.
+	grassSource                                         *render.SectionMesh
 	pixels                                              int
-	backgroundPixels, vegetationPixels                  int
+	backgroundPixels, vegetationPixels, grassPixels     int
 	foregroundReveal, backgroundReveal                  render.Reveal
-	vegetationReveal, grassReveal                       render.Reveal
+	grassReveal                                         render.Reveal
+	plants                                              [vegetationProducts]plantPublication
 }
 
 type world struct {
-	sections      map[int64]*worldSection
-	jobs          chan sectionJob
-	results       chan render.SectionMesh
-	terrain       chan sectionTerrain
-	terrainMeshes chan render.SectionMesh
-	canceled      chan int64
-	ctx           context.Context
-	cancel        context.CancelFunc
-	activeCancel  context.CancelFunc
-	activeID      int64
-	inflight      map[int64]sectionFlight
-	maxJobs       int
+	sections           map[int64]*worldSection
+	jobs               chan sectionJob
+	results            chan sectionResult
+	terrain            chan sectionTerrain
+	terrainMeshes      chan sectionResult
+	canceled           chan sectionCancellation
+	ctx                context.Context
+	cancel             context.CancelFunc
+	activeCancel       context.CancelFunc
+	activeID           int64
+	activeRequest      sectionRequest
+	epoch, incarnation uint64
+	requests           map[int64]sectionRequest
+	inflight           map[int64]sectionFlight
+	maxJobs            int
 	// Early collision topology is retained until terrain images publish.
 	collision         map[int64]*terrain.Geometry
 	done              chan struct{}
 	closing           sync.Once
 	working           bool
+	uploadTurn        uint64
 	upload            *sectionUpload
+	rockScratch       *ebiten.Image
 	white             *ebiten.Image
 	atlases           *render.AtlasCache
 	revision          uint64 // queryable terrain version for the lazy query index
@@ -72,6 +84,7 @@ type world struct {
 }
 
 type sectionJob struct {
+	request       sectionRequest
 	retiredGuides map[[32]byte]bool
 	id            int64
 	ctx           context.Context
@@ -84,11 +97,13 @@ type sectionJob struct {
 var errSectionComplete = errors.New("section generation completed")
 
 type sectionFlight struct {
-	ctx    context.Context
-	cancel context.CancelCauseFunc
+	request sectionRequest
+	ctx     context.Context
+	cancel  context.CancelCauseFunc
 }
 
 type sectionTerrain struct {
+	request  sectionRequest
 	id       int64
 	geometry *terrain.Geometry
 	ctx      context.Context
@@ -97,9 +112,11 @@ type sectionTerrain struct {
 func newWorld(seed int64, view View, tolerance, webMaxSize, webDensity, mushroomDensity float64, forceGuidesUp bool, loadSection SectionLoader, growth render.RockGrowthOptions, shape terrain.ShapeOptions, orientation ...Orientation) *world {
 	limit := min(2, max(1, runtime.GOMAXPROCS(0)-1))
 	w := &world{sections: make(map[int64]*worldSection), jobs: make(chan sectionJob, sectionQueueLimit),
-		results: make(chan render.SectionMesh, sectionQueueLimit*2), terrain: make(chan sectionTerrain, sectionQueueLimit),
-		terrainMeshes: make(chan render.SectionMesh, sectionQueueLimit*2), canceled: make(chan int64, sectionQueueLimit),
+		results: make(chan sectionResult, sectionQueueLimit*2), terrain: make(chan sectionTerrain, sectionQueueLimit),
+		// Up to seven recipes per queued section: base, background, four plants, growth.
+		terrainMeshes: make(chan sectionResult, sectionQueueLimit*8), canceled: make(chan sectionCancellation, sectionQueueLimit),
 		done: make(chan struct{}), inflight: make(map[int64]sectionFlight), maxJobs: limit, priorities: make(chan Viewport, 1), parked: make(map[int64]*sectionUpload)}
+	w.epoch = worldEpoch.Add(1)
 	w.ctx, w.cancel = context.WithCancel(context.Background())
 	// Keep application loader calls serialized within this world, even though
 	// separate builders can generate their sections concurrently.
@@ -121,11 +138,11 @@ func newWorld(seed int64, view View, tolerance, webMaxSize, webDensity, mushroom
 
 	advance := func(builder *terrain.Builder, job sectionJob, ctx context.Context) *sectionJob {
 		id := job.id
-		sendMesh := func(mesh render.SectionMesh, channel chan render.SectionMesh) bool {
+		sendMesh := func(mesh render.SectionMesh, channel chan sectionResult) bool {
 			select {
 			case <-ctx.Done():
 				return false
-			case channel <- mesh:
+			case channel <- sectionResult{SectionMesh: mesh, request: job.request}:
 				return true
 			}
 		}
@@ -140,7 +157,7 @@ func newWorld(seed int64, view View, tolerance, webMaxSize, webDensity, mushroom
 					select {
 					case <-ctx.Done():
 						ok = false
-					case w.terrain <- sectionTerrain{id: id, geometry: job.geometry, ctx: job.ctx}:
+					case w.terrain <- sectionTerrain{id: id, geometry: job.geometry, ctx: job.ctx, request: job.request}:
 					}
 				}
 			case sectionForeground:
@@ -152,27 +169,54 @@ func newWorld(seed int64, view View, tolerance, webMaxSize, webDensity, mushroom
 					ok = sendMesh(job.mesh, w.terrainMeshes)
 				}
 			case sectionBackground:
-				ok = job.build.Materialize(ctx)
-				if ok {
-					job.geometry = terrain.BindTerrainMaterial(job.geometry, job.build.Data())
-					mesh := render.PrepareBackground(job.build.Data(), view)
-					mesh.Geometry = job.geometry
+				// Growth only needs the immutable early appearance. It can
+				// publish while background material/mesh preparation continues.
+				data, base, earlyGeometry := job.build.Data(), job.mesh, job.geometry
+				var mergeMu sync.Mutex
+				publish := func(mesh render.SectionMesh) {
+					mergeMu.Lock()
+					defer mergeMu.Unlock()
 					job.mesh = render.MergeSectionMeshes(job.mesh, mesh)
-					ok = sendMesh(mesh, w.terrainMeshes)
+					sendMesh(mesh, w.terrainMeshes)
 				}
+				parallel.Run(
+					func() {
+						if base.ForegroundBaseOnly && ctx.Err() == nil {
+							mesh := render.PrepareForegroundGrowth(data, view, base, growth)
+							mesh.Geometry = earlyGeometry
+							publish(mesh)
+						}
+					},
+					func() {
+						ok = job.build.Materialize(ctx)
+						if ok {
+							job.geometry = terrain.BindTerrainMaterial(earlyGeometry, job.build.Data())
+							mesh := render.PrepareBackground(job.build.Data(), view)
+							mesh.Geometry = job.geometry
+							publish(mesh)
+						}
+					},
+				)
+				ok = ok && ctx.Err() == nil
 			case sectionVegetation:
-				ok = builder.Decorate(ctx, job.build)
+				geometry := job.geometry
+				var mergeMu sync.Mutex
+				ok = builder.DecorateProducts(ctx, job.build, func(parts terrain.VegetationParts, snapshot terrain.SectionData) {
+					mesh := render.PrepareVegetationParts(snapshot, view, parts)
+					mesh.Geometry = terrain.BindTerrainVegetation(geometry, snapshot)
+					mergeMu.Lock()
+					defer mergeMu.Unlock()
+					job.mesh = render.MergeSectionMeshes(job.mesh, mesh)
+					sendMesh(mesh, w.terrainMeshes)
+				})
+				ok = ok && ctx.Err() == nil
 				if ok {
-					mesh := render.PrepareVegetation(job.build.Data(), view)
-					if job.mesh.ForegroundBaseOnly {
-						foreground := render.PrepareForeground(job.build.Data(), view, growth)
-						job.mesh = render.MergeSectionMeshes(job.mesh, foreground)
-					}
-					mesh.Geometry = terrain.BindTerrainVegetation(job.geometry, job.build.Data())
-					mesh = render.MergeSectionMeshes(job.mesh, mesh)
-					ok = sendMesh(mesh, w.results)
+					// The final envelope closes the job and retains the exact
+					// synchronous geometry; individual recipes already escaped.
+					job.mesh.Geometry = terrain.BindTerrainVegetation(geometry, job.build.Data())
+					ok = sendMesh(job.mesh, w.results)
 					if ok {
-						job.phase = sectionComplete // completion must not retry if a yield races the send
+						job.phase = sectionComplete
 						return &job
 					}
 				}
@@ -184,7 +228,7 @@ func newWorld(seed int64, view View, tolerance, webMaxSize, webDensity, mushroom
 			}
 			select {
 			case <-w.done:
-			case w.canceled <- id:
+			case w.canceled <- sectionCancellation{id: id, request: job.request}:
 			}
 			return nil
 		}
@@ -217,10 +261,16 @@ func (w *world) close() {
 	for _, u := range w.parked {
 		u.deallocate()
 	}
+	w.drainCPUResults()
 	w.parked = nil
 	w.upload = nil
 	w.pending = nil
 	w.collision = nil
+	w.requests = nil
+	if w.rockScratch != nil {
+		w.rockScratch.Deallocate()
+		w.rockScratch = nil
+	}
 	if w.white != nil {
 		w.white.Deallocate()
 		w.white = nil
@@ -270,13 +320,15 @@ func (w *world) request(id int64) {
 		if w.upload != nil {
 			outstanding[w.upload.data.ID] = true
 		}
-		if len(outstanding) >= sectionQueueLimit && !w.reclaimSpeculativeResult(id) {
+		if len(outstanding) >= sectionQueueLimit && !outstanding[id] && !w.reclaimSpeculativeResult(id) {
 			return
 		}
 		ctx, cancel := context.WithCancelCause(w.ctx)
+		request := w.nextSectionRequest()
 		select {
-		case w.jobs <- sectionJob{id: id, ctx: ctx, retiredGuides: w.retiredGuides}:
-			w.inflight[id] = sectionFlight{ctx: ctx, cancel: cancel}
+		case w.jobs <- sectionJob{id: id, ctx: ctx, retiredGuides: w.retiredGuides, request: request}:
+			w.inflight[id] = sectionFlight{ctx: ctx, cancel: cancel, request: request}
+			w.rememberRequest(id, request)
 			w.working = true
 		default:
 			cancel(context.Canceled)
@@ -286,13 +338,15 @@ func (w *world) request(id int64) {
 	if !w.working && len(w.pending) < 2 {
 		w.working = true
 		w.activeID = id
+		w.activeRequest = w.nextSectionRequest()
+		w.rememberRequest(id, w.activeRequest)
 		ctx := context.Background()
 		if w.ctx != nil {
 			var cancel context.CancelFunc
 			ctx, cancel = context.WithCancel(w.ctx)
 			w.activeCancel = cancel
 		}
-		w.jobs <- sectionJob{id: id, ctx: ctx, retiredGuides: w.retiredGuides}
+		w.jobs <- sectionJob{id: id, ctx: ctx, retiredGuides: w.retiredGuides, request: w.activeRequest}
 	}
 }
 
@@ -324,7 +378,8 @@ func (w *world) reclaimSpeculativeResult(requiredID int64) bool {
 		return false
 	}
 	delete(w.pending, selected)
-	w.discardIncomplete(selected)
+	delete(w.requests, selected)
+	w.discardUnpublished(selected)
 	return true
 }
 
@@ -372,6 +427,13 @@ func (w *world) ensure(y float64, height float64, velocity float64) bool {
 		if id < 0 {
 			continue
 		}
+		if section := w.sections[id]; w.inflight != nil && section != nil && section.mesh != nil && incompleteRecipe(*section.mesh) {
+			if _, current := w.requests[id]; !current {
+				// A canceled producer can leave useful published siblings. Fill
+				// its missing products without removing those visible fallbacks.
+				w.request(id)
+			}
+		}
 		viewport := Viewport{Y: y, Height: height, Velocity: velocity}
 		if data, ok := w.pending[id]; ok {
 			if !w.meshUploadEligible(data, viewport) {
@@ -386,6 +448,9 @@ func (w *world) ensure(y float64, height float64, velocity float64) bool {
 			continue
 		}
 		if section := w.sections[id]; section != nil {
+			if i < required && section.mesh != nil && section.mesh.ForegroundBaseOnly && w.viewportLayers(id)&render.ForegroundLayer != 0 {
+				ready = false
+			}
 			if section.mesh != nil && w.needsVisibleRefresh(id, section) && w.meshUploadEligible(*section.mesh, viewport) {
 				if w.upload == nil {
 					w.startUpload(*section.mesh)
@@ -466,6 +531,11 @@ func (w *world) prune(y float64, height float64, velocity float64) {
 			delete(w.pending, id)
 		}
 	}
+	for id := range w.requests {
+		if !retained(id) {
+			delete(w.requests, id)
+		}
+	}
 	for id := range w.collision {
 		if !retained(id) {
 			delete(w.collision, id)
@@ -475,9 +545,21 @@ func (w *world) prune(y float64, height float64, velocity float64) {
 }
 
 func (s *worldSection) deallocate() {
+	if s.trim != nil {
+		s.trim.Deallocate()
+	}
+	for i := range s.growth {
+		p := &s.growth[i]
+		p.reveal.Clear()
+		if p.image != nil {
+			p.image.Deallocate()
+		}
+	}
 	s.foregroundReveal.Clear()
 	s.backgroundReveal.Clear()
-	s.vegetationReveal.Clear()
+	for i := range s.plants {
+		s.plants[i].reveal.Clear()
+	}
 	s.grassReveal.Clear()
 	for _, img := range []*ebiten.Image{s.terrain, s.foreground, s.vines, s.foregroundVines, s.mushrooms, s.spiderWebs, s.grass} {
 		if img != nil {

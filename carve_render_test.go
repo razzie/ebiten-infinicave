@@ -147,3 +147,35 @@ func TestAuthoredAndRuntimeHolesProduceTheSamePlants(t *testing.T) {
 		t.Fatalf("public authored section lost vegetation edits: %v", err)
 	}
 }
+
+func TestCarveDisplayedPlantUsesItsOwnRecipeDuringReplacement(t *testing.T) {
+	g := resolutionTestScene(t)
+	w := g.world
+	prepare := func(x float64) render.SectionMesh {
+		data := terrain.SectionData{Foreground: RockGrid{terrainRect(.1, .4, .8, .3)},
+			Mushrooms: []MushroomGroup{{Mushrooms: []Mushroom{testGroundedMushroom(x, .4)}}}}
+		mesh := render.PrepareVegetationParts(data, ViewShaded, terrain.MushroomsPart)
+		mesh.Geometry = terrain.PrepareTerrainGeometry(data, 0)
+		return mesh
+	}
+	old, latest := prepare(.4), prepare(.7)
+	if len(old.Plants) == 0 {
+		t.Fatal("fixture has no displayed mushroom")
+	}
+	w.sections[0].deallocate()
+	w.sections[0] = &worldSection{}
+	u := &sectionUpload{data: old, raster: render.ScaleVegetationMesh(old, 32), pixels: 32, mushrooms: ebiten.NewImage(1, 1)}
+	w.publishPlant(g, u, mushroomsProduct)
+	s := w.sections[0]
+	// A newer query recipe arrives while the old-width image is still shown.
+	s.mesh, s.geometry = &latest, latest.Geometry
+	if _, err := g.CarveCircle(V{X: .4, Y: -.6}, .02); err != nil {
+		t.Fatal(err)
+	}
+	if s.mushrooms != nil || render.HasLiveAttachments(s.plants[mushroomsProduct].source.Plants, false) {
+		t.Fatal("cut ignored the displayed fallback's own mushroom support")
+	}
+	if len(s.geometry.Vegetation.Mushrooms) != 1 || old.Plants[0].Dead {
+		t.Fatal("fallback carving changed the newer placement or immutable source")
+	}
+}
