@@ -1,11 +1,58 @@
 package terrain
 
 import (
+	"math"
 	"math/rand"
+	"reflect"
 	"testing"
 
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
+
+func TestBackgroundVinesIncludeHorizontalRunners(t *testing.T) {
+	for _, mode := range []Orientation{Vertical, Horizontal} {
+		for _, seed := range []int64{7, 42, 123} {
+			for _, id := range []int64{0, 1, 2} {
+				vines := backgroundPathVines(seed, id, mode)
+				if !reflect.DeepEqual(vines, backgroundPathVines(seed, id, mode)) {
+					t.Fatalf("mode %v seed %d section %d: background vines changed on reload", mode, seed, id)
+				}
+				roots, horizontal := 0, 0
+				for i, v := range vines {
+					if v.Foreground {
+						t.Fatal("background vine became foreground growth")
+					}
+					lo, hi := v.Points[0].P, v.Points[0].P
+					for _, p := range v.Points {
+						if p.P.X < .02 || p.P.X > .98 || p.P.Y < GenerationMinY+.02 || p.P.Y > generationMaxY-.02 {
+							t.Fatal("background vine escaped the padded section window")
+						}
+						lo.X, lo.Y = min(lo.X, p.P.X), min(lo.Y, p.P.Y)
+						hi.X, hi.Y = max(hi.X, p.P.X), max(hi.Y, p.P.Y)
+					}
+					if v.Parent >= 0 {
+						if v.Parent >= i || v.Points[0].P != vines[v.Parent].Points[v.Joint].P {
+							t.Fatal("background fork lost its parent attachment")
+						}
+						continue
+					}
+					roots++
+					span := WorldPoint(mode, hi.Sub(lo))
+					if math.Abs(span.X) > math.Abs(span.Y) {
+						horizontal++
+						if math.Abs(span.X) < .35 {
+							t.Fatal("horizontal background runner is too short")
+						}
+					}
+				}
+				wantRoots, wantHorizontal := 7, 2
+				if roots != wantRoots || horizontal != wantHorizontal {
+					t.Fatalf("mode %v seed %d section %d: got %d roots (%d horizontal), want %d (%d horizontal)", mode, seed, id, roots, horizontal, wantRoots, wantHorizontal)
+				}
+			}
+		}
+	}
+}
 
 func TestForegroundVineLengths(t *testing.T) {
 	for _, mode := range []Orientation{Vertical, Horizontal} {

@@ -273,11 +273,24 @@ func foregroundPathVines(ctx context.Context, paths []BranchPath, topology *Rock
 func backgroundPathVines(seed, id int64, mode Orientation) []Vine {
 	rng := rand.New(rand.NewSource(SectionSeed(seed^0x76696e6573, id)))
 	var vines []Vine
-	for family := 0; family < 5; family++ {
+	for family := 0; family < 7; family++ {
 		root := geom.V{X: .08 + float64(family)*.17 + (.5-rng.Float64())*.05, Y: .08 + rng.Float64()*.84}
 		heading := InternalPoint(mode, geom.V{Y: -1})
+		radius := .0042
+		if family >= 5 {
+			// Sparse runners cross the upright vines at different heights.
+			// Roots still own complete paths through the neighboring sections.
+			height := .30 + float64(family-5)*.38 + (.5-rng.Float64())*.06
+			if mode == Horizontal {
+				root.X = height
+			} else {
+				root = geom.V{X: .08 + .12*rng.Float64(), Y: height}
+			}
+			heading = InternalPoint(mode, geom.V{X: 1})
+			radius = .0034
+		}
 		phase := rng.Float64() * 2 * math.Pi
-		v := freePath(root, heading, .62+rng.Float64()*.34, .0042, phase, -1, 0)
+		v := freePath(root, heading, .62+rng.Float64()*.34, radius, phase, -1, 0)
 		parent := len(vines)
 		vines = append(vines, v)
 		for fork := 0; fork < 2; fork++ {
