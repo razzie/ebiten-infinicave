@@ -9,6 +9,7 @@
 ## Working Agreements
 
 - Follow nearby code and test conventions. Keep tests beside their owning implementation; public import-path coverage belongs in `api_test.go`.
+- Add helpers and regressions to the existing owner file by default. Create a new file for a distinct algorithm, resource lifecycle, or build constraint; a shared filename prefix alone is not a reason to split. Review production files around 800 lines and test files around 1,000 lines for readability without treating those sizes as automatic split thresholds.
 - Preserve deterministic output for a fixed seed and inputs. When changing generated geometry or render behavior, consider section boundaries, reload/eviction, both orientations, carving, and resizing.
 - Treat exported names, fields, methods, constants, and signatures as public compatibility surface. Update public documentation when behavior or configuration changes.
 - Scene methods, Ebitengine images/shaders, uploads, and drawing belong on the Ebitengine game goroutine. Background generation must publish immutable results for the game goroutine.

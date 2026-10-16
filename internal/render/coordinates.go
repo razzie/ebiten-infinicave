@@ -127,3 +127,37 @@ func transformVerticesScalar(vertices []ebiten.Vertex, scale float64, offset ima
 		v.DstY = float32(float64(v.DstY)*scale) + float32(offset.Y)
 	}
 }
+
+// MaterialFrame reconstructs reference artwork coordinates from the actual
+// destination sample center. Interpolated UVs can round to opposite sides of a
+// grain-cell boundary when a target is cropped or supersampled.
+type MaterialFrame struct {
+	OriginX, OriginY float64
+	Pixels, Samples  float64
+}
+
+func ReferenceMaterialFrame() MaterialFrame {
+	return MaterialFrame{Pixels: RasterPixelsPerUnit, Samples: 1}
+}
+
+// Keep cached render targets out of the atlas: reallocation must not change
+// their raster origin and introduce subpixel differences on revisiting.
+func NewSectionImageAt(height, pixels int) *ebiten.Image {
+	return ebiten.NewImageWithOptions(image.Rect(0, 0, pixels, height*pixels), &ebiten.NewImageOptions{Unmanaged: true})
+}
+
+func DrawVegetation(dst, layer *ebiten.Image, bounds image.Rectangle, top, y float64, pixels int, view RenderTransform) {
+	if layer == nil {
+		return
+	}
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Translate(float64(bounds.Min.X), (top-y)*float64(pixels)+float64(bounds.Min.Y))
+	scale := float64(view.Pixels) / float64(pixels)
+	op.GeoM.Scale(scale, scale)
+	op.GeoM.Translate(view.OffsetX, 0)
+	dst.DrawImage(layer, op)
+}
+
+func NewVegetationImage(bounds image.Rectangle) *ebiten.Image {
+	return ebiten.NewImageWithOptions(image.Rect(0, 0, bounds.Dx(), bounds.Dy()), &ebiten.NewImageOptions{Unmanaged: true})
+}

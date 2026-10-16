@@ -1,6 +1,10 @@
 package infinicave
 
 import (
+	"context"
+	"math"
+	"os"
+	"os/exec"
 	"reflect"
 	"testing"
 	"time"
@@ -403,4 +407,208 @@ func TestSceneUsesSectionLoaderAfterReset(t *testing.T) {
 	checkWorker()
 	scene.Reset(7)
 	checkWorker()
+}
+
+func TestReadinessSeparatesForegroundFromDetails(t *testing.T) {
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		scene, err := NewScene(Config{Orientation: orientation})
+		if err != nil {
+			t.Fatal(err)
+		}
+		viewport := Viewport{Y: -1, Height: 1}
+		if orientation == Horizontal {
+			viewport = Viewport{X: 0, Width: 1}
+		}
+		if got := scene.Readiness(viewport); got != (SceneReadiness{}) {
+			t.Fatalf("empty scene ready: %+v", got)
+		}
+		scene.world.collision = map[int64]*terrain.Geometry{0: {}}
+		if got := scene.Readiness(viewport); !got.Collision || got.Foreground {
+			t.Fatalf("early collision readiness: %+v", got)
+		}
+		scene.world.sections[0] = &worldSection{geometry: &terrain.Geometry{}, foreground: ebiten.NewImage(8, 8), pixels: 8, vegetationPending: true}
+		scene.world.pixels = 8
+		got := scene.Readiness(viewport)
+		if !got.Collision || !got.Foreground || got.Background || got.Decorations {
+			t.Fatalf("rock-base readiness: %+v", got)
+		}
+		if len(scene.world.jobs) != 0 {
+			t.Fatal("readiness requested generation")
+		}
+		scene.world.sections[0].terrain = ebiten.NewImage(8, 8)
+		scene.world.sections[0].vegetationPending = false
+		scene.world.sections[1] = &worldSection{mesh: &render.SectionMesh{ID: 1, Layers: render.AllLayers}}
+		if got := scene.Readiness(viewport); !got.Background || !got.Decorations {
+			t.Fatalf("finished layers: %+v", got)
+		}
+		scene.SetRenderWidth(9)
+		if got := scene.Readiness(viewport); !got.Collision || got.Foreground || got.Background {
+			t.Fatalf("resized readiness: %+v", got)
+		}
+		scene.Close()
+		if got := scene.Readiness(viewport); got != (SceneReadiness{}) {
+			t.Fatal("closed scene ready")
+		}
+	}
+}
+
+func TestRenderPassCoordinatesAndLifecycle(t *testing.T) {
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		scene, err := NewScene(Config{Orientation: orientation})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(scene.Close)
+		for _, size := range [][2]int{{100, 180}, {180, 100}, {501, 800}} {
+			dst := ebiten.NewImage(size[0], size[1])
+			pixels := float64(min(size[0], size[1]))
+			viewport := Viewport{Y: -2.003, Height: float64(size[1]) / pixels}
+			if orientation == Horizontal {
+				viewport = Viewport{X: 2.003, Width: float64(size[0]) / pixels}
+			}
+			var calls []string
+			check := func(name string) RenderPass {
+				return func(c RenderContext) {
+					calls = append(calls, name)
+					if c.Orientation != orientation {
+						t.Fatal("pass lost orientation")
+					}
+					var point V
+					var expectedX, expectedY float64
+					if orientation == Horizontal {
+						point = V{X: c.Viewport.X + .4, Y: .3}
+						expectedX, expectedY = .4*pixels, float64(size[1]-int(pixels))/2+.3*pixels
+					} else {
+						point = V{X: .3, Y: c.Viewport.Y + .4}
+						expectedX, expectedY = float64(size[0]-int(pixels))/2+.3*pixels, .4*pixels
+					}
+					x, y := c.WorldToTarget.Apply(point.X, point.Y)
+					if orientation == Horizontal {
+						x, y = float64(size[0])-y, x
+					}
+					if math.Abs(x-expectedX) > 1e-8 || math.Abs(y-expectedY) > 1e-8 {
+						t.Fatalf("%s %v: transformed point %g,%g, want %g,%g", orientation, size, x, y, expectedX, expectedY)
+					}
+					if point.X < c.Min.X || point.X > c.Max.X || point.Y < c.Min.Y || point.Y > c.Max.Y {
+						t.Fatal("visible world point excluded from context bounds")
+					}
+					if orientation == Vertical && c.Dst != dst {
+						t.Fatal("vertical pass lost target")
+					}
+					if orientation == Horizontal && c.Dst == dst {
+						t.Fatal("horizontal pass bypassed compositor")
+					}
+				}
+			}
+			passes := RenderPasses{BehindRocks: check("back"), AboveRocks: check("front")}
+			scene.DrawWithPasses(dst, viewport, passes)
+			scene.DrawWithPasses(dst, viewport, passes)
+			if !reflect.DeepEqual(calls, []string{"back", "front", "back", "front"}) {
+				t.Fatalf("passes must run once in order even while unloaded: %v", calls)
+			}
+			scene.DrawWithPasses(dst, Viewport{}, passes)
+			if len(calls) != 4 {
+				t.Fatal("invalid viewport invoked passes")
+			}
+			dst.Deallocate()
+		}
+		scene.Close()
+		dst := ebiten.NewImage(10, 10)
+		scene.DrawWithPasses(dst, Viewport{Y: -1, Height: 1, X: 0, Width: 1}, RenderPasses{
+			BehindRocks: func(RenderContext) { t.Fatal("closed scene invoked pass") },
+			AboveRocks:  func(RenderContext) { t.Fatal("closed scene invoked pass") },
+		})
+		dst.Deallocate()
+	}
+}
+
+// Run in a fresh process so atlas construction and shader compilation are cold.
+// Timing is diagnostic: machine speed must not make this test flaky.
+func TestColdSceneStartup(t *testing.T) {
+	if os.Getenv("INFINICAVE_STARTUP") != "1" {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestColdSceneStartup$", "-test.v")
+		cmd.Env = append(os.Environ(), "INFINICAVE_STARTUP=1")
+		out, err := cmd.CombinedOutput()
+		t.Logf("%s", out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	g := &startupGame{t: t, start: time.Now()}
+	config := DefaultConfig()
+	config.Seed = 42
+	config.OnCollisionReady = func(CollisionGeometry) { g.t.Logf("collision: %s", time.Since(g.start)) }
+	var err error
+	g.scene, err = NewScene(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.scene.Close()
+	ebiten.SetWindowSize(640, 640)
+	ebiten.SetRunnableOnUnfocused(true)
+	g.scene.SetRenderWidth(640)
+	g.scene.Update(Viewport{Y: -1, Height: 1})
+	if err := ebiten.RunGame(g); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type startupGame struct {
+	t                       *testing.T
+	scene                   *Scene
+	start                   time.Time
+	ready, foreground, done bool
+	frames                  int
+	products                [vegetationProducts]bool
+}
+
+func (g *startupGame) Layout(int, int) (int, int) { return 640, 640 }
+func (g *startupGame) Update() error {
+	if g.done {
+		return ebiten.Termination
+	}
+	if time.Since(g.start) > 30*time.Second {
+		g.t.Fatalf("startup stalled: frames=%d, sections=%d pending=%d inflight=%d upload=%+v", g.frames, len(g.scene.world.sections), len(g.scene.world.pending), len(g.scene.world.inflight), g.scene.world.upload != nil)
+	}
+	g.scene.SetRenderWidth(640)
+	g.ready = g.scene.Update(Viewport{Y: -1, Height: 1})
+	return nil
+}
+func (g *startupGame) Draw(screen *ebiten.Image) {
+	if g.done {
+		return
+	}
+	g.frames++
+	g.scene.Draw(screen, Viewport{Y: -1, Height: 1})
+	if g.frames == 1 {
+		screen.At(0, 0)
+		g.t.Logf("first completed frame: %s", time.Since(g.start))
+	}
+	s := g.scene.world.sections[0]
+	if !g.foreground && s != nil && s.foreground != nil {
+		screen.At(0, 0) // include GPU completion through this frame
+		g.foreground = true
+		g.t.Logf("first foreground: %s, frame %d", time.Since(g.start), g.frames)
+	}
+	if s != nil {
+		flushed := false
+		for kind, name := range []string{"background vines", "webs", "mushrooms", "foreground vines"} {
+			if !g.products[kind] && s.plants[kind].pixels > 0 {
+				if !flushed {
+					screen.At(0, 0)
+					flushed = true
+				}
+				g.products[kind] = true
+				g.t.Logf("%s published: %s, frame %d", name, time.Since(g.start), g.frames)
+			}
+		}
+	}
+	if g.ready {
+		screen.At(0, 0)
+		g.t.Logf("all visible layers: %s, frame %d", time.Since(g.start), g.frames)
+		g.done = true
+	}
 }

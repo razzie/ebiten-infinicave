@@ -1,9 +1,13 @@
 package terrain
 
 import (
+	"context"
 	"math"
+	"math/rand"
 	"sort"
 	"sync"
+
+	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
 
 // Generation returns these large buffers after growth, never with a Section.
@@ -179,4 +183,103 @@ func newVineTerrainWithWorkspace(background, foreground RockGrid, onForeground b
 	}
 	parallelFor(len(fields), func(n int) { chamferVineField(fields[n]) })
 	return field
+}
+
+// Beyond one cell's width, let the existing terrain steering find a seam.
+// Exact segment distances in this narrow band avoid raster stair-step turns.
+const vineBorderRange = .032
+
+func newVineBorders(background RockGrid) []float64 {
+	return vineBordersForEdges(newVineEdgeGraph(background), nil)
+}
+
+// Seed exact distances in a narrow band around each seam, then propagate
+// them in two linear scans. The graph still supplies exact twig geometry;
+// the field is only a smooth steering attraction, capped at one cell width.
+func vineBordersForEdges(graph *vineEdgeGraph, workspace *vineWorkspace) []float64 {
+	distances := workspace.take()
+	fillFloat64(distances, vineBorderRange)
+	const reach = 2 * vineFieldStep
+	for _, edge := range graph.edges {
+		a, b := graph.points[edge.a], graph.points[edge.b]
+		d := b.Sub(a)
+		inverse := 1 / d.Len2()
+		x0 := max(0, int(math.Floor((min(a.X, b.X)-reach)/vineFieldStep)))
+		x1 := min(vineFieldWidth-1, int(math.Ceil((max(a.X, b.X)+reach)/vineFieldStep)))
+		y0 := max(0, int(math.Floor((min(a.Y, b.Y)-reach-GenerationMinY)/vineFieldStep)))
+		y1 := min(vineFieldHeight-1, int(math.Ceil((max(a.Y, b.Y)+reach-GenerationMinY)/vineFieldStep)))
+		for y := y0; y <= y1; y++ {
+			if x0 <= x1 {
+				segmentDistanceSpan(distances[y*vineFieldWidth+x0:y*vineFieldWidth+x1+1], x0, GenerationMinY+(float64(y)+.5)*vineFieldStep, a, d, inverse, false, false)
+			}
+		}
+	}
+	chamferVineField(distances)
+	return distances
+}
+
+// Bilinear sampling gives growth a smooth attraction across field pixels.
+func (f *VineTerrain) borderDistance(p geom.V) float64 {
+	x := geom.Clamp(p.X/vineFieldStep-.5, 0, float64(vineFieldWidth-1))
+	y := geom.Clamp((p.Y-GenerationMinY)/vineFieldStep-.5, 0, float64(vineFieldHeight-1))
+	x0, y0 := int(x), int(y)
+	x1, y1 := min(x0+1, vineFieldWidth-1), min(y0+1, vineFieldHeight-1)
+	a := geom.Lerp(f.borders[y0*vineFieldWidth+x0], f.borders[y0*vineFieldWidth+x1], x-float64(x0))
+	b := geom.Lerp(f.borders[y1*vineFieldWidth+x0], f.borders[y1*vineFieldWidth+x1], x-float64(x0))
+	return geom.Lerp(a, b, y-float64(y0))
+}
+
+const foregroundVineGuideClearance = .030
+
+func newForegroundVineTerrain(foreground RockGrid, guides []Guide) *VineTerrain {
+	return newForegroundVineTerrainWithWorkspace(foreground, guides, nil)
+}
+
+func newForegroundVineTerrainWithWorkspace(foreground RockGrid, guides []Guide, workspace *vineWorkspace) *VineTerrain {
+	// Growth is based on the visible footprint, including its screen inset,
+	// rather than rock brightness: shaded and lit faces both support vines.
+	support := InsetForegroundGrid(foreground)
+	field := newVineTerrainWithWorkspace(support, nil, true, workspace)
+	// Restrict the same clearance field used by root placement, steering,
+	// and seam-following twigs so the full family keeps off the crests.
+	// The existing conservative sampler also reserves room for ribbon width.
+	const reach = foregroundVineGuideClearance + vineBorderRange
+	for _, guide := range guides {
+		for j := 1; j < len(guide.Pts); j++ {
+			a, b := guide.Pts[j-1], guide.Pts[j]
+			d := b.Sub(a)
+			length2 := d.Len2()
+			if length2 < 1e-18 {
+				continue
+			}
+			x0 := max(0, int(math.Floor((min(a.X, b.X)-reach)/vineFieldStep)))
+			x1 := min(vineFieldWidth-1, int(math.Ceil((max(a.X, b.X)+reach)/vineFieldStep)))
+			y0 := max(0, int(math.Floor((min(a.Y, b.Y)-reach-GenerationMinY)/vineFieldStep)))
+			y1 := min(vineFieldHeight-1, int(math.Ceil((max(a.Y, b.Y)+reach-GenerationMinY)/vineFieldStep)))
+			for y := y0; y <= y1; y++ {
+				if x0 <= x1 {
+					segmentDistanceSpan(field.clearance[y*vineFieldWidth+x0:y*vineFieldWidth+x1+1], x0, GenerationMinY+(float64(y)+.5)*vineFieldStep, a, d, length2, true, true)
+				}
+			}
+		}
+	}
+	return field
+}
+
+func generateForegroundVines(foreground RockGrid, guides []Guide, rng *rand.Rand) []Vine {
+	return generateForegroundVinesWithWorkspace(foreground, guides, rng, nil)
+}
+
+func generateForegroundVinesWithWorkspace(foreground RockGrid, guides []Guide, rng *rand.Rand, workspace *vineWorkspace) []Vine {
+	return generateForegroundVinesContext(context.Background(), foreground, guides, rng, workspace)
+}
+
+func generateForegroundVinesContext(ctx context.Context, foreground RockGrid, guides []Guide, rng *rand.Rand, workspace *vineWorkspace) []Vine {
+	field := newForegroundVineTerrainWithWorkspace(foreground, guides, workspace)
+	defer field.release()
+	vines := generateVinesInBandContext(ctx, field, rng, 0, SectionHeight, 6)
+	for i := range vines {
+		vines[i].Foreground = true
+	}
+	return vines
 }

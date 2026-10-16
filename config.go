@@ -259,3 +259,76 @@ func (c Config) validate() error {
 func (c Config) shapeOptions() terrain.ShapeOptions {
 	return terrain.ShapeOptions{BranchingStrategy: c.BranchingStrategy, BranchMinThickness: c.BranchMinThickness, BranchMaxThickness: c.BranchMaxThickness, SpikeDensity: c.SpikeDensity, EdgeRoughness: c.EdgeRoughness}
 }
+
+// AntialiasingMode selects geometry antialiasing or a final scene filter.
+type AntialiasingMode = render.AntialiasingMode
+
+const (
+	AntialiasingFull = render.AntialiasingFull
+	AntialiasingOff  = render.AntialiasingOff
+	AntialiasingFXAA = render.AntialiasingFXAA
+)
+
+// ParseAntialiasingMode accepts full, off, and fxaa. Empty selects full.
+func ParseAntialiasingMode(value string) (AntialiasingMode, error) {
+	return render.ParseAntialiasingMode(value)
+}
+
+// BranchingStrategy controls rock branches on the solid side of each guide.
+type BranchingStrategy = terrain.BranchingStrategy
+
+const (
+	// BranchingSimple uses short tapering spurs with one generation of forks.
+	BranchingSimple = terrain.BranchingSimple
+	// BranchingRecursive grows longer limbs with several generations of forks.
+	// It is the default, including for a zero Config.
+	BranchingRecursive = terrain.BranchingRecursive
+	// BranchingLoops grows irregular reconnecting routes and secondary loops.
+	BranchingLoops = terrain.BranchingLoops
+)
+
+// ParseBranchingStrategy accepts simple, recursive, or loops.
+func ParseBranchingStrategy(name string) (BranchingStrategy, error) {
+	return terrain.ParseBranchingStrategy(name)
+}
+
+// Orientation selects the cave's fixed scrolling axis. Vertical grows upward
+// from Y = 0; Horizontal grows rightward from X = 0. The bounded axis spans
+// [0, 1]. Section IDs are 0, -1, -2, ... in the direction of growth.
+type Orientation = terrain.Orientation
+
+const Vertical = terrain.Vertical
+
+const Horizontal = terrain.Horizontal
+
+func orientedViewport(o Orientation, v Viewport) (Viewport, bool) {
+	if o == Horizontal {
+		// Validate X independently: adding Width must not hide a negative X.
+		if !terrain.FiniteCarveValue(v.X) || v.X < 0 || !terrain.FiniteCarveValue(v.Width) || v.Width <= 0 {
+			return Viewport{}, false
+		}
+		v = Viewport{Y: -(v.X + v.Width), Height: v.Width, Velocity: -v.Velocity}
+	}
+	return v, render.ValidViewport(v)
+}
+
+// View selects the rendered material or a diagnostic view.
+type View = render.View
+
+// Viewport describes the region to render. Vertical scenes use Y and Height,
+// with Y <= -Height and a starting viewport at Y = -Height. Horizontal scenes
+// use X and Width, with X >= 0 and a starting viewport at X = 0. The other
+// axis spans [0, 1]. Velocity is movement along world Y or X in scene units
+// per tick and controls prefetching; the caller owns camera movement.
+type Viewport = render.Viewport
+
+const (
+	ViewShaded  = render.ViewShaded
+	ViewClay    = render.ViewClay
+	ViewHeight  = render.ViewHeight
+	ViewNormals = render.ViewNormals
+	ViewShadows = render.ViewShadows
+)
+
+// ParseView converts a viewer flag to a View. Empty means shaded.
+func ParseView(value string) (View, error) { return render.ParseView(value) }

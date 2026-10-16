@@ -348,3 +348,111 @@ func (g *Scene) Close() {
 		g.material.Deallocate()
 	}
 }
+
+// SceneReadiness reports independently drawable layers for a viewport.
+// Disabled layers count as ready. It does not request or wait for generation.
+type SceneReadiness struct {
+	Collision, Foreground, Background, Decorations bool
+}
+
+// Readiness reports current layer availability. Call on the game goroutine.
+// Foreground recipes arrive before background and decoration recipes. Uploads
+// can finish independently; Update returns whether all layers needed by the
+// viewport have finished.
+func (g *Scene) Readiness(viewport Viewport) SceneReadiness {
+	viewport, valid := orientedViewport(g.orientation, viewport)
+	if g.closed || !valid || g.world == nil {
+		return SceneReadiness{}
+	}
+	w := g.world
+	ready := SceneReadiness{Collision: true, Foreground: true, Background: true, Decorations: true}
+	low, high := visibleSections(viewport.Y, viewport.Height)
+	for id := low; id <= high; id++ {
+		s := w.sections[id]
+		if s == nil || s.geometry == nil {
+			ready.Collision = ready.Collision && w.collision[id] != nil
+		}
+		if s == nil || s.foreground == nil || s.renderWidth() != w.renderWidth() {
+			ready.Foreground = false
+		}
+		if s == nil || s.grassPending || s.grassWidth() != w.renderWidth() || (s.mesh != nil && !s.growthReady(w.renderWidth())) {
+			ready.Decorations = false
+		}
+		if !g.disableBackground && (s == nil || s.terrain == nil || s.backgroundWidth() != w.renderWidth()) {
+			ready.Background = false
+		}
+	}
+	// Until ownership migrates to shared references, neighboring padded recipes
+	// may supply plants to this viewport. Unknown recipes are still pending.
+	for id := max(0, low-1); id <= high+1; id++ {
+		s := w.sections[id]
+		if s != nil && s.mesh != nil && !s.mesh.TerrainOnly && !meshVisible(*s.mesh, viewport) {
+			continue
+		}
+		if s == nil || s.vegetationPending || s.vegetationWidth() != w.renderWidth() {
+			ready.Decorations = false
+		}
+	}
+	return ready
+}
+
+// RenderPass draws custom content once per valid DrawWithPasses call, on the
+// game goroutine, including while terrain is loading and in diagnostic views.
+// A pass must only draw: do not update, reset, carve, or close the Scene here.
+type RenderPass func(RenderContext)
+
+// RenderPasses inserts custom content into the scene's back-to-front order.
+// Nil callbacks skip their passes. Passes do not participate in background
+// blur or shadow masks. Bats draw after both passes and all decorations.
+type RenderPasses struct {
+	// BehindRocks runs after background effects and fog, before foreground rocks.
+	BehindRocks RenderPass
+	// AboveRocks runs after rocks, mushrooms, webs, and foreground vines,
+	// before all grass ground patches and blades.
+	AboveRocks RenderPass
+}
+
+// RenderContext maps public world coordinates to the current drawing target.
+// Horizontal scenes draw into a temporary rotated target; always use
+// WorldToTarget rather than assuming Dst has the final screen orientation.
+type RenderContext struct {
+	// Antialiasing selects the scene's geometry policy. Custom triangle/path
+	// draws should use GeometryAA(); FXAA includes both passes in its output.
+	Antialiasing AntialiasingMode
+	// Dst is borrowed for this callback; do not retain or deallocate it.
+	Dst *ebiten.Image
+	// Viewport uses public world axes, adjusted to the renderer's pixel alignment.
+	Viewport    Viewport
+	Orientation Orientation
+	// WorldToTarget includes camera translation, native scale, centering, and
+	// orientation. Concat it after a sprite's own placement in world units.
+	WorldToTarget ebiten.GeoM
+	// Min and Max bound the whole target in world units, including side margins.
+	Min, Max V
+}
+
+func newRenderContext(dst *ebiten.Image, viewport Viewport, orientation Orientation, y float64) RenderContext {
+	view := render.TargetTransform(dst)
+	y = render.RenderAlignedY(y, view.Pixels)
+	c := RenderContext{Dst: dst, Viewport: viewport, Orientation: orientation}
+	if orientation == Horizontal {
+		c.Viewport.X = -(y + viewport.Width)
+		// (world X, world Y) -> (world Y, -world X) in the section frame.
+		c.WorldToTarget.SetElement(0, 0, 0)
+		c.WorldToTarget.SetElement(0, 1, 1)
+		c.WorldToTarget.SetElement(1, 0, -1)
+		c.WorldToTarget.SetElement(1, 1, 0)
+	} else {
+		c.Viewport.Y = y
+	}
+	c.WorldToTarget.Translate(0, -y)
+	c.WorldToTarget.Scale(float64(view.Pixels), float64(view.Pixels))
+	c.WorldToTarget.Translate(view.OffsetX, 0)
+	inverse := c.WorldToTarget
+	inverse.Invert()
+	bounds := dst.Bounds()
+	x0, y0 := inverse.Apply(float64(bounds.Min.X), float64(bounds.Min.Y))
+	x1, y1 := inverse.Apply(float64(bounds.Max.X), float64(bounds.Max.Y))
+	c.Min, c.Max = V{X: min(x0, x1), Y: min(y0, y1)}, V{X: max(x0, x1), Y: max(y0, y1)}
+	return c
+}

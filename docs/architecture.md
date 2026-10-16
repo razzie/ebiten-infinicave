@@ -8,14 +8,41 @@ them directly.
 | Area | Start here | Responsibility |
 | --- | --- | --- |
 | Configuration and scene lifecycle | `config.go`, `scene.go` | Validate settings; create, update, reset, draw, and close scenes |
-| Public geometry | `geometry.go`, `section.go`, `collision.go`, `orientation.go`, `carve.go` | Expose types and entry points with the existing import path |
-| Streaming | `world.go`, `world_stream.go` | Request sections, retain CPU results, publish terrain, budget GPU uploads, and evict distant sections |
-| World composition | `render_passes.go`, `world_render.go`, `carve_render.go` | Expose custom drawing hooks, draw cached layers, and refresh images after edits |
-| Queries and identity | `query.go`, `query_index.go` | Track loaded coverage, formation and guide IDs, aliases, and revisions |
+| Public geometry | `geometry.go`, `config.go`, `carve.go` | Expose geometry, generation, collision, orientation, and edit entry points with the existing import path |
+| Streaming | `world.go`, `world_workers.go`, `world_stream.go`, `uploads.go` | Request sections, coordinate workers and request identities, retain CPU results, budget and publish GPU uploads, and evict distant sections |
+| World composition | `scene.go`, `world_render.go`, `carve_render.go`, `carve_burn.go` | Expose custom drawing hooks, draw cached layers and fades, refresh images after edits, and capture removed decorations |
+| Queries and identity | `query.go` | Track loaded coverage, formation and guide IDs, aliases, and revisions |
 | Geometry algorithms | `internal/geom/` | Vectors, polygon clipping and triangulation, and ray/segment intersections |
 | Terrain and vegetation | `internal/terrain/` | Deterministic section generation, guides, Voronoi rock, lighting, vines, mushrooms, collision topology, and geometry edits |
 | Meshes and effects | `internal/render/` | Prepare meshes, scale raster coordinates, batch draws, render effects, and manage their GPU resources |
 | Viewer | `cmd/infinicave/` | Parse flags, manage the camera and input, draw UI and hover effects, and export PNGs |
+
+Files group complete responsibilities within each package. Add related helpers
+and regression tests to the existing owner before creating another file. Distinct
+algorithms, resource lifecycles, and build constraints justify separate files;
+line counts prompt a readability review rather than an automatic split.
+
+Within `internal/terrain/`, start with these owners:
+
+| Area | Files |
+| --- | --- |
+| Section generation and loading | `builder.go`, `section.go` |
+| Branch strategies and guide geometry | `branching.go`, `guide.go`, `guide_layout.go`, `guide_cells.go` |
+| Rock construction and appearance | `rock_grid.go`, `rock_shape.go`, `rock_surface.go` |
+| Topology, support identities, collision, and cuts | `topology.go`, `geometry.go`, `collision.go`, `carve.go`, `shape_difference.go` |
+| Vine generation | `vines.go`, `path_vines.go`, `vine_fields.go`, `vine_graph.go`, `vine_routes.go`, `vine_growth.go`, `vine_style.go` |
+| Supported decorations | `decorations.go`, `mushrooms.go`, `spider_webs.go`, `web_network.go` |
+| Numeric kernels | `noise.go`, `raster_scalar.go`, `kernels_default.go`, `kernels_simd.go` |
+
+Within `internal/render/`, `mesh.go` owns mesh contracts and section preparation;
+`mesh_batches.go`, `coordinates.go`, `atlas.go`, and `attachments.go` own batching,
+raster/material coordinates and image helpers, atlas pages, and attachment
+indexing/liveness. Rock faces and boundaries live in `rock.go`, with growth,
+grass, vines, supported decorations, and cut masks/rims in `rock_growth.go`,
+`grass.go`, `vines.go`, `decorations.go`, and `carve.go`. Effects retain their own
+resource lifecycles. In the viewer, `main.go` owns flags, startup, and the Windows
+resource generation directive; camera, input features, and the game loop remain
+separate.
 
 ## Dependencies
 
@@ -69,9 +96,9 @@ pixel-work, and submission-time budgets. Foreground rocks, background rocks,
 grass, vegetation, hanging underlay, and surface growth rotate independently
 within each section. Background and
 grass each retain their own cursor and AA surface, so neither waits for the
-foreground image to finish. `terrain_upload.go` and `grass_upload.go` own those
-publication paths. Starting or publishing an upload does
-not require an extra update. `vegetation_upload.go` owns independent cursors,
+foreground image to finish. `uploads.go` owns those publication paths and shared
+atlas/material preparation. Starting or publishing an upload does
+not require an extra update. The same file owns independent cursors,
 images, widths, and reveal clocks for background vines, foreground vines,
 mushrooms, and webs. These products can advance alongside terrain uploads and
 publish individually as soon as their raster work completes.
@@ -218,13 +245,15 @@ Its collision callback runs on the calling goroutine.
 
 Tests live in the package that owns the behavior and use the corresponding
 source filename (`coordinates.go` / `coordinates_test.go`, for example).
-Files that cover several owners are split between those owners.
+Tests for helpers that share a consolidated owner stay together in its companion
+test file.
 
 Scene configuration and effect lifecycle tests belong in root `scene_test.go`,
 including fog, background, and bat enablement, updates, reset, and close.
 Independent effect and mesh behavior belongs in `internal/render/`. Streaming
-and GPU upload integration tests belong in root `world_test.go` and
-`world_stream_test.go`; public section generation belongs in `section_test.go`.
+and GPU upload integration tests belong in root `world_test.go`,
+`world_stream_test.go`, `world_workers_test.go`, and `uploads_test.go`; public
+section generation and collision access belong in root `geometry_test.go`.
 Terrain generation, caching, and geometry tests live beside their implementations
 in `internal/terrain/`.
 
@@ -234,7 +263,10 @@ easy to distinguish: root `scene_fixtures_test.go`,
 `internal/render/render_fixtures_test.go`, and
 `internal/terrain/terrain_fixtures_test.go`. Benchmarks use the owner's test file
 or an owner-prefixed `*_bench_test.go` file. These API, fixture, and benchmark
-files are the exceptions to matching source filenames.
+files, plus the separate opt-in `visual_capture_test.go` and
+`carve_latency_test.go` diagnostic harnesses, are the exceptions to matching source
+filenames. Preserve subprocess test names and environment-variable controls when
+moving tests.
 
 Public geometry types are aliases to their implementation types. Exported names,
 fields, methods, constants, and function signatures are preserved. Aliases do
