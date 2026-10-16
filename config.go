@@ -105,9 +105,10 @@ type Config struct {
 	// from 0 (disabled) to 1 (all eligible groups). The viewer default is 0.5. Placement remains
 	// deterministic for a seed; lower density preserves surviving clusters.
 	MushroomDensity float64
-	// MossDensity controls green and yellow moss on upward-facing foreground
-	// facets, from 0 (disabled) to 1 (maximum coverage). The default is 0.72.
-	// Lower density preserves the placement and shape of surviving patches.
+	// MossDensity is the probability of retaining a moss colony around a
+	// foreground ledge, from 0 (disabled) to 1 (all eligible colonies).
+	// The default is 0.72. Lower density reduces colony count while preserving
+	// the placement, size, shape, and colors of surviving colonies.
 	MossDensity float64
 	// GrassDensity controls yellow or green grass beside guides on upward-facing
 	// foreground facets, from 0 (disabled) to 1 (maximum coverage). Some tufts

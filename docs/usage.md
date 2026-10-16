@@ -100,12 +100,35 @@ The order is background and fog, `BehindRocks`, rear grass blades and hanging gr
 | `Fog`, `BatsPerMinute` | Animated atmosphere and bat arrivals; zero disables each. |
 | `DecorationBurn` | Burn dissolve decorations removed by runtime carving; enabled by `DefaultConfig()`. |
 | `AppearanceFade` | Fade in arriving rocks and vegetation; enabled by `DefaultConfig()`. |
-| `MushroomDensity`, `MossDensity`, `GrassDensity`, `HangingGrowthDensity`, `SpiderWebDensity` | Decoration occurrence or coverage from 0 to 1. |
+| `MushroomDensity`, `GrassDensity`, `HangingGrowthDensity`, `SpiderWebDensity` | Decoration occurrence or coverage from 0 to 1. |
+| `MossDensity` | Moss colony occurrence probability, from 0 (disabled) to 1 (all eligible colonies); default 0.72. |
 | `BackgroundBlur`, `ShadowBlur` | Softness in scene units, from 0 to 0.05. |
 | `DisableBackground` | Skip background rocks, vines, blur, shadows, and their GPU uploads. Defaults to false; fog remains controlled by `Fog`. |
 | `ShadowOpacity` | Dynamic background shadow opacity from 0 to 1. |
 | `CollisionTolerance` | Optional collision polygon simplification tolerance; zero keeps exact boundaries. |
 | `View` | `ViewShaded`, `ViewClay`, `ViewHeight`, `ViewNormals`, or `ViewShadows`. |
+
+Small moss colonies spread across the lighter, lower parts of upward-facing
+rock cells, following nearby horizontal cell edges with a stronger lateral spread
+and ragged fringes wrapping onto neighboring facets. Some also gather around
+bends and tips or touch exposed rims. Colonies break into smaller
+polygonal fragments as they spread down the rock. Each colony favors olive green
+or ochre yellow, with subtle mottling and shading from each
+receiving face. World coordinates keep colonies continuous across cell and
+section boundaries. `MossDensity` controls the number of colonies; changing it
+preserves the placement, size, shape, and colors of surviving colonies. For
+example, retain about a quarter of eligible colonies with:
+
+```go
+config := infinicave.DefaultConfig()
+config.MossDensity = 0.25
+```
+
+The viewer exposes the same setting:
+
+```sh
+go run ./cmd/infinicave -seed 42 -moss-density 0.25
+```
 
 Diagnostic views hide vegetation and disable texture, background effects, fog, and bats. See the `Config` documentation for validation ranges and complete defaults.
 

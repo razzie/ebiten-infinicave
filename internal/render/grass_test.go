@@ -119,7 +119,7 @@ func TestGrassRequiresAdjacentGuidesAndSurvivingCrest(t *testing.T) {
 		if len(grassForCell(cut, guides, 1).blades) != 0 {
 			t.Fatal("grass reappeared on the cut below a removed guide crest")
 		}
-		if _, indices := appendRockMoss(nil, nil, cell, 1); len(indices) == 0 {
+		if len(prepareGrowthAttachments(terrain.RockGrid{cell}, nil, RockGrowthOptions{Moss: 1}, false)) == 0 {
 			t.Fatal("grass's guide restriction affected moss")
 		}
 	}

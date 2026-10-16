@@ -78,7 +78,7 @@ func newSpriteAttachment(kind AttachmentKind, atlas AtlasKind, cell int, anchor 
 func prepareGrowthAttachments(grid terrain.RockGrid, boundary []terrain.RockEdge, growth RockGrowthOptions, owned bool, trim ...Attachment) []Attachment {
 	var out []Attachment
 	var clearance growthClearance
-	if growth.Hanging > 0 {
+	if growth.Hanging > 0 || growth.Moss > 0 {
 		clearance = newGrowthClearance(grid)
 	}
 	// Lichen lies beneath the rock, then moss covers faces, then edge trim.
@@ -110,38 +110,7 @@ func prepareGrowthAttachments(grid terrain.RockGrid, boundary []terrain.RockEdge
 		}
 		out = append(out, a)
 	}
-	for _, c := range grid {
-		mode := terrain.RockOrientation(c)
-		upward := -terrain.WorldNormal(mode, c.Normal).Y
-		random := rockGrowthRandom(c, c.Center, 0x6d6f7373)
-		if growth.Moss <= 0 || upward < .10 || random(0) > growth.Moss*geom.Smoothstep(.08, .35, upward) {
-			continue
-		}
-		size := math.Min(.014, math.Sqrt(math.Abs(geom.PolygonArea(c.Polygon)))*.42)
-		if size < .001 {
-			continue
-		}
-		a := newSpriteAttachment(SurfaceMoss, MossAtlas, int(random(1)*64), c.Center.Add(terrain.InternalPoint(mode, geom.V{Y: -size * .55})), 0, size/.014, mode, .48+.52*geom.Clamp(float64(c.Color.R)/165, 0, 1))
-		if owned && !inTerrainBand(a.Min, a.Max) {
-			continue
-		}
-		a.Anchors = nil
-		poly := a.Footprint[0]
-		a.Mesh.Vertices = nil
-		a.Mesh.Indices = nil
-		for _, tri := range geom.Triangulate(c.Polygon) {
-			piece := poly
-			for j, index := range tri {
-				p, q := c.Polygon[index], c.Polygon[tri[(j+1)%3]]
-				n := q.Sub(p).Perp().Mul(-1).Norm()
-				piece = geom.ClipHalfPlane(piece, n, p.Dot(n))
-			}
-			if geom.PolygonArea(piece) > 1e-15 {
-				appendSpritePolygon(&a.Mesh, piece, MossAtlas, int(random(1)*64), a.Anchor, 0, size/.014, mode, .48+.52*geom.Clamp(float64(c.Color.R)/165, 0, 1))
-			}
-		}
-		out = append(out, a)
-	}
+	out = append(out, prepareRockMoss(grid, boundary, clearance, growth.Moss, owned)...)
 	var blades []Attachment
 	supports := make([][]terrain.RockEdge, len(grid))
 	for _, e := range boundary {

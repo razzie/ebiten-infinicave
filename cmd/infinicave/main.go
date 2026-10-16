@@ -93,7 +93,7 @@ func parseOptions() (viewerOptions, error) {
 	appearanceFade := flag.Bool("appearance-fade", defaults.AppearanceFade, "fade in arriving rocks and vegetation (interactive viewer only)")
 	flag.BoolVar(appearanceFade, "appearance-burn", defaults.AppearanceFade, "deprecated alias for -appearance-fade")
 	mushroomDensity := flag.Float64("mushroom-density", defaults.MushroomDensity, "mushroom cluster occurrence probability (0 disables mushrooms, range 0-1)")
-	mossDensity := flag.Float64("moss-density", defaults.MossDensity, "green and yellow moss coverage on upward-facing rocks (0 disables moss, range 0-1)")
+	mossDensity := flag.Float64("moss-density", defaults.MossDensity, "moss colony occurrence probability (0 disables moss, 1 keeps all eligible colonies)")
 	grassDensity := flag.Float64("grass-density", defaults.GrassDensity, "yellow or green grass tuft coverage beside guides on upward-facing rocks (0 disables grass, range 0-1)")
 	hangingGrowthDensity := flag.Float64("hanging-growth-density", defaults.HangingGrowthDensity, "hanging cave bulb and lichen occurrence probability (0 disables them, range 0-1)")
 	webDensity := flag.Float64("spider-web-density", defaults.SpiderWebDensity, "spider web occurrence probability per eligible pocket (0 disables webs, range 0-1)")

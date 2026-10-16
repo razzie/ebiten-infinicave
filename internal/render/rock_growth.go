@@ -3,6 +3,7 @@ package render
 import (
 	"image/color"
 	"math"
+	"sort"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/razzie/ebiten-infinicave/internal/geom"
@@ -43,58 +44,245 @@ func rockGrowthRandom(cell terrain.RockCell, point geom.V, seed int64) func(int6
 	return func(channel int64) float64 { return terrain.SiteRandom(seed, key[0], key[1], channel) }
 }
 
-// Moss follows upward-facing relief, including interior facets below a crest.
-// Clip against individual face triangles so deep concavities and runtime holes
-// cannot acquire a floating patch across their empty space.
-func appendRockMoss(vertices []ebiten.Vertex, indices []uint32, cell terrain.RockCell, density float64) ([]ebiten.Vertex, []uint32) {
-	if density <= 0 || !cell.Raised || cell.Color.A == 0 || len(cell.Polygon) < 3 {
-		return vertices, indices
+type mossColony struct {
+	anchor          geom.V
+	rotation, scale float64
+	sample          int
+}
+
+// A jittered lattice in material/world coordinates defines one continuous colony
+// mask across facets and padded section windows. Only nearby ledges attract it.
+func rockMossColonies(grid terrain.RockGrid, boundary []terrain.RockEdge, density float64) []mossColony {
+	if density <= 0 || len(grid) == 0 {
+		return nil
 	}
-	mode := terrain.RockOrientation(cell)
-	upward := -terrain.WorldNormal(mode, cell.Normal).Y
-	random := rockGrowthRandom(cell, cell.Center, 0x6d6f7373)
-	if upward < .10 || random(0) > density*geom.Smoothstep(.08, .35, upward) {
-		return vertices, indices
+	const spacing, reach = .055, .037
+	type ledge struct {
+		a, b       geom.V
+		tipA, tipB bool
+		rim        bool
+		light      float64
 	}
-	up := terrain.InternalPoint(mode, geom.V{Y: -1})
-	right := terrain.InternalPoint(mode, geom.V{X: 1})
-	size := math.Min(.014, math.Sqrt(math.Abs(geom.PolygonArea(cell.Polygon)))*.42)
-	if size < .001 {
-		return vertices, indices
-	}
-	base := cell.Center.Add(up.Mul(size * .55))
-	triangles := geom.Triangulate(cell.Polygon)
-	light := .48 + .52*geom.Clamp(float64(cell.Color.R)/165, 0, 1)
-	for patch := int64(0); patch < 2+int64(random(1)*3); patch++ {
-		channel := 10 + patch*20
-		center := base.Add(right.Mul((random(channel) - .5) * size * 2)).Add(up.Mul((random(channel+1) - .5) * size))
-		radius := size * geom.Lerp(.38, .85, random(channel+2))
-		palette := color.NRGBA{R: 111, G: 128, B: 55, A: 255}
-		if random(channel+3) < .43 {
-			palette = color.NRGBA{R: 183, G: 164, B: 70, A: 255}
+	var ledges []ledge
+	// Significant changes of silhouette direction identify real bends/tips;
+	// collinear cell subdivisions do not create new growth hot spots.
+	corners := make(map[[2]int64][]geom.V)
+	for _, edge := range boundary {
+		c := grid[edge.Cell]
+		a, b := terrain.RockMaterialPoint(c, edge.A), terrain.RockMaterialPoint(c, edge.B)
+		n := a.Sub(b).Perp().Norm()
+		for _, p := range []geom.V{a, b} {
+			key := terrain.CollisionVertexKey(p)
+			corners[key] = append(corners[key], n)
 		}
-		palette = growthColor(palette, light*geom.Lerp(.87, 1.08, random(channel+4)))
-		outline := make([]geom.V, 9)
-		for i := range outline {
-			angle := float64(i) * 2 * math.Pi / float64(len(outline))
-			r := radius * geom.Lerp(.65, 1.15, random(channel+5+int64(i)))
-			outline[i] = center.Add(right.Mul(math.Cos(angle) * r)).Sub(up.Mul(math.Sin(angle) * r * .72))
+	}
+	isTip := func(p, n geom.V) bool {
+		for _, other := range corners[terrain.CollisionVertexKey(p)] {
+			if n.Dot(other) < .75 {
+				return true
+			}
 		}
-		for _, tri := range triangles {
-			for i, a := range outline {
-				piece := []geom.V{center, a, outline[(i+1)%len(outline)]}
-				for j, index := range tri {
-					p, q := cell.Polygon[index], cell.Polygon[tri[(j+1)%3]]
-					n := q.Sub(p).Perp().Mul(-1).Norm()
-					piece = geom.ClipHalfPlane(piece, n, p.Dot(n))
-				}
-				if len(piece) >= 3 && math.Abs(geom.PolygonArea(piece)) > 1e-15 {
-					vertices, indices = appendCellMesh(vertices, indices, piece, geom.PolygonCenter(piece), palette, cell.Normal)
-				}
+		return false
+	}
+	for _, edge := range boundary {
+		c := grid[edge.Cell]
+		if !c.Raised || c.Color.A == 0 {
+			continue
+		}
+		a, b := terrain.RockMaterialPoint(c, edge.A), terrain.RockMaterialPoint(c, edge.B)
+		n := a.Sub(b).Perp().Norm()
+		if n.Y < -.15 {
+			ledges = append(ledges, ledge{a: a, b: b, rim: true, tipA: isTip(a, n), tipB: isTip(b, n)})
+		}
+	}
+	for _, c := range grid {
+		if !c.Raised || c.Color.A == 0 || c.Color.R < 85 || -terrain.WorldNormal(terrain.RockOrientation(c), c.Normal).Y < .3 {
+			continue
+		}
+		for i, p := range c.Polygon {
+			a, b := terrain.RockMaterialPoint(c, p), terrain.RockMaterialPoint(c, c.Polygon[(i+1)%len(c.Polygon)])
+			if a.Sub(b).Perp().Norm().Y > .35 {
+				ledges = append(ledges, ledge{a: a, b: b, light: geom.Clamp((float64(c.Color.R)-85)/100, 0, 1)})
 			}
 		}
 	}
-	return vertices, indices
+	type candidate struct {
+		colony mossColony
+		score  float64
+		edge   [4]int64
+	}
+	candidates := make(map[[2]int64]candidate)
+	ref := grid[0]
+	origin := terrain.RockMaterialPoint(ref, geom.V{})
+	mode := terrain.RockOrientation(ref)
+	for _, edge := range ledges {
+		d := edge.b.Sub(edge.a)
+		if d.Len2() < 1e-12 {
+			continue
+		}
+		lo, hi := geom.PolygonBounds([]geom.V{edge.a, edge.b})
+		for x := int64(math.Floor((lo.X - reach) / spacing)); x <= int64(math.Floor((hi.X+reach)/spacing)); x++ {
+			for y := int64(math.Floor((lo.Y - reach) / spacing)); y <= int64(math.Floor((hi.Y+reach)/spacing)); y++ {
+				random := func(channel int64) float64 { return terrain.SiteRandom(0x6d6f7373636f6c, x, y, channel) }
+				if random(0) > density {
+					continue
+				}
+				p := geom.V{X: (float64(x) + .25 + .5*random(1)) * spacing, Y: (float64(y) + .25 + .5*random(2)) * spacing}
+				t := geom.Clamp(p.Sub(edge.a).Dot(d)/d.Len2(), 0, 1)
+				q := edge.a.Add(d.Mul(t))
+				distance := p.Sub(q).Len2()
+				if distance > reach*reach {
+					continue
+				}
+				feature := 0.0
+				if edge.tipA {
+					feature = math.Exp(-q.Sub(edge.a).Len2() / .0003)
+				}
+				if edge.tipB {
+					feature = max(feature, math.Exp(-q.Sub(edge.b).Len2()/.0003))
+				}
+				score := distance / (1 + feature*.7 + edge.light*.8)
+				// Prefer the foot of an upward-facing facet when a site can
+				// reach both it and the exposed rim. Nearby tips can still
+				// attract colonies, and rim-only sites remain eligible.
+				if random(6) < .18 {
+					if edge.rim {
+						score *= .65
+					}
+				} else if edge.rim {
+					score += reach * reach * .2
+				} else {
+					score *= .35
+				}
+				key, edgeKey := [2]int64{x, y}, geom.EdgeKey(edge.a, edge.b)
+				previous, exists := candidates[key]
+				if exists && (score > previous.score+1e-15 || (math.Abs(score-previous.score) <= 1e-15 && !mossEdgeLess(edgeKey, previous.edge))) {
+					continue
+				}
+				tangent := d.Norm()
+				if tangent.X < 0 {
+					tangent = tangent.Mul(-1)
+				}
+				sample := int(random(3) * 32)
+				if random(4) < .55 {
+					sample += 32
+				}
+				scale := geom.Lerp(.45, .80, random(5)) + feature*.10
+				if !edge.rim {
+					// Spread the smaller colonies farther onto their lit
+					// supporting face while retaining a fringe over the seam.
+					inset := (.009 + .003*edge.light) * scale
+					q = q.Sub(edge.a.Sub(edge.b).Perp().Norm().Mul(inset))
+				}
+				colony := mossColony{anchor: terrain.InternalPoint(mode, q.Sub(origin)), rotation: math.Atan2(tangent.Y, tangent.X), scale: scale, sample: sample}
+				candidates[key] = candidate{colony: colony, score: score, edge: edgeKey}
+			}
+		}
+	}
+	keys := make([][2]int64, 0, len(candidates))
+	for key := range candidates {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i][0] < keys[j][0] || (keys[i][0] == keys[j][0] && keys[i][1] < keys[j][1])
+	})
+	colonies := make([]mossColony, 0, len(keys))
+	for _, key := range keys {
+		colonies = append(colonies, candidates[key].colony)
+	}
+	return colonies
+}
+
+func mossEdgeLess(a, b [4]int64) bool {
+	for i := range a {
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+	return false
+}
+
+// Colonies rooted near a horizontal seam follow that seam laterally. The world
+// field still owns their centers, sizes, and palettes; this only fits the growth
+// direction to nearby edges of lit, upward-facing cells.
+func mossSeamRotation(colony mossColony, rock growthClearance) float64 {
+	radius := .028 * colony.scale
+	pad := geom.V{X: radius, Y: radius}
+	bounds := geom.Bounds{Min: colony.anchor.Sub(pad), Max: colony.anchor.Add(pad)}
+	best, rotation := radius*radius, colony.rotation
+	var bestKey [4]int64
+	found := false
+	rock.index.Query(bounds, func(i int) bool {
+		c := rock.grid[i]
+		mode := terrain.RockOrientation(c)
+		if !c.Raised || c.Color.A == 0 || c.Color.R < 85 || -terrain.WorldNormal(mode, c.Normal).Y < .3 {
+			return true
+		}
+		for j, a := range c.Polygon {
+			b := c.Polygon[(j+1)%len(c.Polygon)]
+			direction := terrain.WorldPoint(mode, b.Sub(a))
+			if direction.Len2() < 1e-12 || math.Abs(direction.X)/direction.Len() < .75 {
+				continue
+			}
+			distance := geom.SegmentDistanceSquared(colony.anchor, colony.anchor, a, b)
+			key := geom.EdgeKey(terrain.RockMaterialPoint(c, a), terrain.RockMaterialPoint(c, b))
+			if distance > best+1e-15 || (found && math.Abs(distance-best) <= 1e-15 && !mossEdgeLess(key, bestKey)) {
+				continue
+			}
+			if direction.X < 0 || (direction.X == 0 && direction.Y < 0) {
+				direction = direction.Mul(-1)
+			}
+			best, bestKey, found = distance, key, true
+			rotation = math.Atan2(direction.Y, direction.X)
+		}
+		return true
+	})
+	return rotation
+}
+
+// One atlas mask wraps over every receiving facet. Geometry clips it to solid
+// rock while each face supplies its own light; seams never restart the texture.
+func prepareRockMoss(grid terrain.RockGrid, boundary []terrain.RockEdge, rock growthClearance, density float64, owned bool) []Attachment {
+	var out []Attachment
+	for _, colony := range rockMossColonies(grid, boundary, density) {
+		colony.rotation = mossSeamRotation(colony, rock)
+		mode := terrain.RockOrientation(grid[0])
+		a := newSpriteAttachment(SurfaceMoss, MossAtlas, colony.sample, colony.anchor, colony.rotation, colony.scale, mode, 1)
+		if owned && !inTerrainBand(a.Min, a.Max) {
+			continue
+		}
+		a.Anchors = nil
+		poly := a.Footprint[0]
+		a.Mesh.Vertices, a.Mesh.Indices = nil, nil
+		bounds := geom.Bounds{Min: a.Min, Max: a.Max}
+		rock.index.Query(bounds, func(i int) bool {
+			c := grid[i]
+			if !c.Raised || c.Color.A == 0 {
+				return true
+			}
+			lo, hi := geom.PolygonBounds(c.Polygon)
+			if !bounds.Overlaps(geom.Bounds{Min: lo, Max: hi}) {
+				return true
+			}
+			tint := .38 + .62*geom.Clamp(float64(c.Color.R)/165, 0, 1)
+			for _, tri := range geom.Triangulate(c.Polygon) {
+				piece := poly
+				for j, index := range tri {
+					p, q := c.Polygon[index], c.Polygon[tri[(j+1)%3]]
+					n := p.Sub(q).Perp().Norm()
+					piece = geom.ClipHalfPlane(piece, n, p.Dot(n))
+				}
+				if len(piece) >= 3 && geom.PolygonArea(piece) > 1e-15 {
+					appendSpritePolygon(&a.Mesh, piece, MossAtlas, colony.sample, a.Anchor, a.Rotation, a.Scale, mode, tint)
+				}
+			}
+			return true
+		})
+		if len(a.Mesh.Indices) > 0 {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 type hangingGrowth struct {
