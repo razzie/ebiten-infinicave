@@ -233,6 +233,7 @@ func checkIndependentGrassPixels(t *testing.T) {
 		if _, err := g.CarveCircle(terrain.WorldPoint(orientation, root), .006); err != nil {
 			t.Fatal(err)
 		}
+		g.flushCarveImages()
 		if bytes.Equal(before, read()) {
 			t.Fatal("carving used the older rock width or recipe for new grass")
 		}
@@ -279,6 +280,7 @@ func TestCarvingPrivateGrassKeepsTerrainProgress(t *testing.T) {
 	if _, err := g.CarveCircle(root, .006); err != nil {
 		t.Fatal(err)
 	}
+	g.flushCarveImages()
 	if u.grassInitialized || u.grassFacesDone || u.grassCursor.next != 0 {
 		t.Fatal("private grass did not reconcile removed attachments")
 	}

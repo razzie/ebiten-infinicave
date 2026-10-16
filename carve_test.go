@@ -357,6 +357,7 @@ func TestCarveDuringEveryUploadStage(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			scene.flushCarveImages()
 			if u.data.Geometry.Collision.Contains(V{X: .5, Y: -.5}) {
 				t.Fatal("upload geometry ignored cut")
 			}

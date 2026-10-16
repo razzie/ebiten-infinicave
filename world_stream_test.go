@@ -66,6 +66,7 @@ func TestGrassAndDecorationCachesPublishResizeAndCarveTogether(t *testing.T) {
 	if _, err := g.CarveCircle(V{X: .5, Y: -.5}, 1); err != nil {
 		t.Fatal(err)
 	}
+	g.flushCarveImages()
 	for _, list := range [][]render.Attachment{s.mesh.Foreground.Growth, s.mesh.Plants, s.mesh.Webs} {
 		for _, a := range list {
 			if a.Kind != render.SurfaceMoss && len(a.Anchors) > 0 && !a.Dead {

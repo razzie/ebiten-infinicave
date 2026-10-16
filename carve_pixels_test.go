@@ -65,6 +65,7 @@ func (g *carvePixelGame) Draw(*ebiten.Image) {
 	defer scene.Close()
 	data := carvePixelFixture()
 	finish := func() {
+		scene.flushCarveImages()
 		for i := 0; i < 500 && scene.world.upload != nil; i++ {
 			scene.world.receive(scene)
 		}
@@ -166,6 +167,7 @@ func (g *carvePixelGame) Draw(*ebiten.Image) {
 		if _, err := scene.CarveCircle(V{X: .49, Y: -.35}, .055); err != nil {
 			g.t.Fatal(err)
 		}
+		scene.flushCarveImages()
 		if alpha(s.foreground, V{X: .45, Y: .65}, 256) != 0 || !reflect.DeepEqual(before, s.foreground.At(217, 192)) {
 			g.t.Fatalf("stage %d: overlapping tile replay changed untouched rock", stage)
 		}
@@ -191,6 +193,7 @@ func (g *carvePixelGame) Draw(*ebiten.Image) {
 			if _, err := scene.CarveCircle(root.Add(V{Y: -1}), .006); err != nil {
 				g.t.Fatal(err)
 			}
+			scene.flushCarveImages()
 			if !s.mesh.Plants[0].Dead || s.mesh.Plants[len(s.mesh.Plants)-1].Dead {
 				g.t.Fatal("attachment removal damaged a neighboring group")
 			}
@@ -199,12 +202,14 @@ func (g *carvePixelGame) Draw(*ebiten.Image) {
 				if _, err := scene.CarveCircle(p.Add(V{Y: -1}), .004); err != nil {
 					g.t.Fatal(err)
 				}
+				scene.flushCarveImages()
 				if s.mesh.Webs[0].Dead {
 					g.t.Fatal("free-node damage removed a supported web")
 				}
 				if _, err := scene.CarveCircle(s.mesh.Webs[0].Anchors[0].Add(V{Y: -1}), .002); err != nil {
 					g.t.Fatal(err)
 				}
+				scene.flushCarveImages()
 				if !s.mesh.Webs[0].Dead {
 					g.t.Fatal("support damage retained a web")
 				}
@@ -255,7 +260,7 @@ func carvePixelFixture() terrain.SectionData {
 		Vines: []Vine{{Parent: -1, Points: []VinePoint{{P: V{X: .1, Y: .6}, Radius: .004}, {P: V{X: .9, Y: .6}, Radius: .004}}}}, ForegroundVines: []Vine{{Parent: -1, Foreground: true, Points: []VinePoint{{P: V{X: .2, Y: .55}, Radius: .0014}, {P: V{X: .8, Y: .7}, Radius: .0014}}}}}
 }
 
-// CPU submission benchmark uses already baked meshes and synthetic GPU caches;
+// API latency benchmark uses already baked meshes and synthetic GPU caches;
 // initialization/generation are excluded. Pixel tests above check correctness.
 func BenchmarkCarveWithCachedImages(b *testing.B) {
 	data := carvePixelFixture()

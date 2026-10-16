@@ -411,6 +411,7 @@ func (w *world) receive(g *Scene) {
 }
 
 func (w *world) receiveBudget(g *Scene, budget *uploadBudget) {
+	g.flushCarveImages()
 	w.collect()
 	w.absorbPending(g)
 	blocked := make(map[*sectionUpload]bool)

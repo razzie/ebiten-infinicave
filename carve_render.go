@@ -11,6 +11,37 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
+// Keep each cut's immutable physical snapshot so several calls before a draw
+// replay in order, including decoration burns and overlapping cut rims.
+type carveSectionImageEdit struct {
+	id       int64
+	section  *worldSection
+	geometry *terrain.Geometry
+	removals terrain.DecorationChanges
+}
+
+type carveImageEdit struct {
+	cut      terrain.RockCut
+	sections []carveSectionImageEdit
+}
+
+// Flush before uploads can replace published images, or drawing can use them.
+// Reset and Close discard this world-owned queue along with its resources.
+func (g *Scene) flushCarveImages() {
+	w := g.world
+	queued := w.carveImages
+	w.carveImages = nil
+	for _, edit := range queued {
+		for _, s := range edit.sections {
+			if w.sections[s.id] == s.section {
+				geometry := s.geometry.WithoutGuides(w.retiredGuides)
+				g.editSectionImages(s.section, s.id, edit.cut, geometry, s.removals)
+			}
+		}
+		g.carveUpload(edit.cut)
+	}
+}
+
 func (g *Scene) finishVinesAt(img *ebiten.Image, bounds image.Rectangle, top float64, pixels int) *ebiten.Image {
 	if img == nil || g.vineMaterial == nil {
 		return img
@@ -97,7 +128,7 @@ func (g *Scene) applyStoredCuts(mesh *render.SectionMesh) {
 
 // Dirty regions are reconstructed from original recipes before masking, so
 // repeated/overlapping antialiased cuts cannot progressively erode their edges.
-func (g *Scene) editSectionImages(section *worldSection, id int64, cut terrain.RockCut, removals terrain.DecorationChanges) {
+func (g *Scene) editSectionImages(section *worldSection, id int64, cut terrain.RockCut, geometry *terrain.Geometry, removals terrain.DecorationChanges) {
 	if section.mesh == nil || cut.Max.Y <= terrain.SectionTop(id)+terrain.GenerationMinY || cut.Min.Y >= terrain.SectionTop(id)+2*SectionHeight {
 		return
 	}
@@ -105,12 +136,13 @@ func (g *Scene) editSectionImages(section *worldSection, id int64, cut terrain.R
 	oldCuts := mesh.VisualCuts
 	edits := editMeshImages(&mesh, cut, removals)
 	grassEdits := edits
-	mesh.Geometry = section.geometry
+	mesh.Geometry = geometry
 	mesh.AppliedCuts = uint64(len(g.world.cuts))
 	section.mesh = &mesh
 	// A completed plant recipe may arrive while the old rock base is still
 	// displayed. Replay and burn only the rock recipe that supplied its pixels.
 	displayed := *section
+	displayed.geometry = geometry
 	if section.rockSource != nil {
 		rock, rockEdits := g.editLayerSource(*section.rockSource, render.ForegroundLayer, cut, removals)
 		section.rockSource = &rock
@@ -178,7 +210,7 @@ func (g *Scene) editSectionImages(section *worldSection, id int64, cut terrain.R
 	if previous := section.foregroundReveal.Previous; previous != nil {
 		g.eraseCuts(previous, bounds, top, []terrain.RockCut{cut}, pixels)
 	}
-	g.editGrowthImages(section, id, cut, removals, dirty, overlap)
+	g.editGrowthImages(section, id, cut, geometry, removals, dirty, overlap)
 	if overlap || len(edits.rock) > 0 {
 		g.replayGridRegions(&displayed, id, append(edits.rock, dirty), false)
 	} else {

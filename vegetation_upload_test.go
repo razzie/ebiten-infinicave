@@ -50,6 +50,7 @@ func checkPartialVegetationCarvePixels(t *testing.T) {
 	if _, err := g.CarveCircle(root, .006); err != nil {
 		t.Fatal(err)
 	}
+	g.flushCarveImages()
 	if !s.mesh.Plants[0].Dead || bytes.Equal(before, read()) {
 		t.Fatal("carving left the already-published mushroom unchanged")
 	}

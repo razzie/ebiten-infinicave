@@ -112,7 +112,8 @@ func checkAppearanceFadePixels(t *testing.T) {
 			if s.geometry.Collision.Contains(point) {
 				t.Fatal("appearance delayed collision removal")
 			}
-			// Every published span respects the cut immediately.
+			scene.flushCarveImages()
+			// Every published span respects the cut before the next draw.
 			for _, layer := range []*ebiten.Image{s.foreground, s.trim, s.growth[underGrowth].image, s.growth[surfaceGrowth].image} {
 				if layer != nil {
 					_, _, _, alpha := layer.At(115, 166).RGBA()

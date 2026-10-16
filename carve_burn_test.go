@@ -47,6 +47,7 @@ func checkDecorationBurnPixels(t *testing.T) {
 			root := s.mesh.Plants[0].Anchors[0].Add(V{Y: -1})
 			carve(root, .006)
 			carve(s.mesh.Webs[0].Anchors[0].Add(V{Y: -1}), .004)
+			scene.flushCarveImages()
 			if !s.mesh.Plants[0].Dead || !s.mesh.Webs[0].Dead || s.geometry.Collision.Contains(root) {
 				t.Fatal("burn delayed decoration or collision removal")
 			}

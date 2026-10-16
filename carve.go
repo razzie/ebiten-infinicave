@@ -54,6 +54,8 @@ type CarveResult struct {
 // Completely destroyed formations release their guides once no supported
 // fragment or uncached continuation remains. Reloads skip those guide sources
 // and their procedural branches.
+// Collision, exact queries, and the result are ready when the call returns.
+// Texture edits run on the next valid Update or Draw, before rendering.
 // Call on the game goroutine after Update. Closed scenes return an error.
 func (g *Scene) CarveCircle(center V, radius float64) (CarveResult, error) {
 	return g.Carve(Hole{Shape: HoleCircle, Center: center, Radius: radius})
@@ -94,6 +96,7 @@ func (g *Scene) carve(cut terrain.RockCut, hole Hole) (CarveResult, error) {
 		return result, nil
 	}
 	affected := make(map[uint64]bool)
+	images := carveImageEdit{cut: cut}
 	// Track each replacement face's origin, including unchanged faces from
 	// the same formation. This maps both sides of a split to their parent.
 	origins := make(map[[2]int64]uint64)
@@ -106,7 +109,11 @@ func (g *Scene) carve(cut terrain.RockCut, hole Hole) (CarveResult, error) {
 		if collision := w.collision[id]; terrain.SameTerrain(old, collision) {
 			w.collision[id] = updated
 		}
-		g.editSectionImages(section, id, cut, removals)
+		if section.mesh != nil {
+			images.sections = append(images.sections, carveSectionImageEdit{
+				id: id, section: section, geometry: updated, removals: removals,
+			})
+		}
 		if !changed {
 			if plantsChanged {
 				section.geometry = updated
@@ -170,7 +177,9 @@ func (g *Scene) carve(cut terrain.RockCut, hole Hole) (CarveResult, error) {
 		}
 	}
 	sort.Slice(result.SectionIDs, func(i, j int) bool { return result.SectionIDs[i] > result.SectionIDs[j] })
-	g.carveUpload(cut)
+	if len(images.sections) > 0 || w.upload != nil || len(w.parked) > 0 {
+		w.carveImages = append(w.carveImages, images)
+	}
 	if len(result.SectionIDs) > 0 {
 		w.revision++
 	}

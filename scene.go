@@ -145,6 +145,7 @@ func (g *Scene) Update(viewport Viewport) bool {
 		return false
 	}
 	w := g.world
+	g.flushCarveImages()
 	w.receiveCollision(g)
 	if g.closed || g.world != w { // The callback may close or reset the scene.
 		return false
@@ -240,6 +241,7 @@ func (g *Scene) DrawWithPasses(dst *ebiten.Image, viewport Viewport, passes Rend
 		return
 	}
 	composition := dst
+	g.flushCarveImages()
 	if g.fxaa != nil {
 		composition = g.fxaa.Begin(dst)
 	}

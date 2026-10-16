@@ -112,8 +112,12 @@ atlas pages, including carving replay. FXAA owns a reusable final-size target
 and filters the scene once after custom passes, grass, bats, and orientation
 mapping. CPU geometry and recipes are independent of that raster policy.
 Carving replaces connected outer/inner loops independently of material facets.
-Finished foreground rock/vine images receive cut masks; background rock and
-background vines remain intact. Removed attachments and overlapping
+Carving calls publish geometry, collision, query identities, and results before
+returning, and queue texture work with immutable per-cut geometry snapshots.
+The next valid update or draw replays that queue in order on the game goroutine,
+before uploads replace images or composition uses them. Reset and close discard
+queued image edits with the world. Finished foreground rock/vine images receive
+cut masks; background rock and background vines remain intact. Removed attachments and overlapping
 edits replay only dirty image tiles, independently for each layer. Adjacent dirty
 tiles are coalesced into rectangles without filling gaps; surviving growth and
 wall recipes are batched in their original texture and blend order for replay.
@@ -178,9 +182,10 @@ advancing its samples during `Game.Update`.
 Optional decoration burn dissolves capture cropped removed growth recipes and
 foreground vine pixels during runtime carving. `internal/render` owns their
 shader, animation, and temporary images; the root coordinates capture and draws
-remnants on the original side of `AboveRocks`. Cached images and geometry change
-immediately. Snapshots expire during `Update` and are released on reset or close;
-stored cuts, loading, and upload replay never start animations.
+remnants on the original side of `AboveRocks`. Geometry changes immediately;
+cached images and burn captures follow when queued texture edits run before the
+next update or draw. Snapshots expire during `Update` and are released on reset
+or close; stored cuts, loading, and upload replay never start animations.
 
 Material shaders reconstruct canonical artwork coordinates from raster sample
 centers. Scaling, cropping, and supersampling preserve that frame, including

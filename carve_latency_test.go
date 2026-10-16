@@ -62,6 +62,7 @@ func (g *carveLatencyGame) Draw(*ebiten.Image) {
 	defer target.Deallocate()
 	readback := make([]byte, 4*768*768)
 	flush := func() {
+		scene.flushCarveImages()
 		target.Clear()
 		for id := int64(0); id < int64(len(prepared)); id++ {
 			s := scene.world.sections[id]
@@ -75,7 +76,7 @@ func (g *carveLatencyGame) Draw(*ebiten.Image) {
 	}
 	for _, radius := range []float64{.05, .2, .4} {
 		for _, overlap := range []bool{false, true} {
-			var submissions, completions []time.Duration
+			var calls, completions []time.Duration
 			for sample := 0; sample < 5; sample++ {
 				scene.world.close()
 				scene.world = &world{sections: make(map[int64]*worldSection), done: make(chan struct{}), pixels: 768}
@@ -99,13 +100,13 @@ func (g *carveLatencyGame) Draw(*ebiten.Image) {
 				if _, err := scene.CarveCircle(V{X: .5, Y: -.5}, radius); err != nil {
 					g.t.Fatal(err)
 				}
-				submissions = append(submissions, time.Since(start))
+				calls = append(calls, time.Since(start))
 				flush()
 				completions = append(completions, time.Since(start))
 			}
-			sort.Slice(submissions, func(i, j int) bool { return submissions[i] < submissions[j] })
+			sort.Slice(calls, func(i, j int) bool { return calls[i] < calls[j] })
 			sort.Slice(completions, func(i, j int) bool { return completions[i] < completions[j] })
-			g.t.Logf("radius=%.2f overlap=%v: submission median=%v; completion median=%v max=%v", radius, overlap, submissions[2], completions[2], completions[4])
+			g.t.Logf("radius=%.2f overlap=%v: API median=%v; completion median=%v max=%v", radius, overlap, calls[2], completions[2], completions[4])
 		}
 	}
 }

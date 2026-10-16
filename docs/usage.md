@@ -189,7 +189,7 @@ if err != nil {
 _ = result
 ```
 
-`CarveSegment(start, end, width)` makes a flat-ended cut; `Carve(Hole)` accepts the same descriptors as authored holes, using world coordinates. Inputs must be finite and sizes positive. Cuts update rendering, collision, and exact queries together, persist through section eviction, and are cleared by `Reset`.
+`CarveSegment(start, end, width)` makes a flat-ended cut; `Carve(Hole)` accepts the same descriptors as authored holes, using world coordinates. Inputs must be finite and sizes positive. Calls return as soon as collision, exact queries, formation IDs, and the result reflect the cut. Texture edits and decoration burn captures run on the next valid `Update` or `Draw`, before uploads or rendering use the edited images; carving calls do not perform texture replay or wait for GPU completion. Cuts persist through section eviction and are cleared by `Reset`.
 
 Foreground vines, their leaves, moss and rock surface details are carved by erasing their rendered textures. Background rock and background vines remain intact. Original geometry remains available for baking after resizing or reloading; vine paths returned by section generation are not split around holes. Mushroom groups disappear when any inset root support is cut, and webs disappear when any rock attachment support is cut. Cutting only a mushroom cap, stalk or free web strand retains the supported decoration. Grass and hanging growth are erased locally, with the whole tuft or instance removed when a support anchor is cut.
 

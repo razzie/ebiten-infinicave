@@ -133,6 +133,7 @@ func checkGrowthCompositionPixels(t *testing.T) {
 				return pixels
 			}
 			draw := func() []byte {
+				g.flushCarveImages()
 				dst := ebiten.NewImage(256, 256)
 				defer dst.Deallocate()
 				w.DrawForegroundRocks(dst, -1, 1, 0, render.RenderTransform{Pixels: 256})
@@ -262,6 +263,7 @@ func TestCarvingPrivateGrowthKeepsSiblingProgress(t *testing.T) {
 	if _, err := g.CarveCircle(root, .002); err != nil {
 		t.Fatal(err)
 	}
+	g.flushCarveImages()
 	if u.growth[underGrowth].initialized || u.growth[underGrowth].image != nil || u.growth[underGrowth].cursor.next != 0 {
 		t.Fatal("damaged private hanging growth was not reconciled")
 	}

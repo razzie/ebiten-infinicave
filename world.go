@@ -66,6 +66,7 @@ type world struct {
 	collisionRevision uint64 // early collision availability changes
 	queries           *worldQueryIndex
 	cuts              []cutCommand      // compact world-space edits survive eviction
+	carveImages       []carveImageEdit  // game-goroutine work deferred until Update or Draw
 	retiredGuides     map[[32]byte]bool // immutable snapshots shared with generation jobs
 	cutKeys           map[Hole]bool
 	cutBuckets        map[int64][]int
@@ -280,6 +281,7 @@ func (w *world) close() {
 		w.atlases = nil
 	}
 	w.cuts = nil
+	w.carveImages = nil
 	w.retiredGuides = nil
 	w.queries = nil
 	w.cutKeys = nil

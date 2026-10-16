@@ -34,7 +34,7 @@ func (g *Scene) replayForegroundAttachments(dst *ebiten.Image, source render.Gri
 	}
 }
 
-func (g *Scene) editGrowthImages(s *worldSection, id int64, cut terrain.RockCut, removals terrain.DecorationChanges, dirty geom.Bounds, overlap bool) {
+func (g *Scene) editGrowthImages(s *worldSection, id int64, cut terrain.RockCut, geometry *terrain.Geometry, removals terrain.DecorationChanges, dirty geom.Bounds, overlap bool) {
 	for kind := growthProduct(0); kind < growthProducts; kind++ {
 		p := &s.growth[kind]
 		if p.source == nil {
@@ -43,7 +43,7 @@ func (g *Scene) editGrowthImages(s *worldSection, id int64, cut terrain.RockCut,
 		source := *p.source
 		oldCuts := source.VisualCuts
 		edits := editMeshImages(&source, cut, removals)
-		source.Geometry, source.AppliedCuts = s.geometry, uint64(len(g.world.cuts))
+		source.Geometry, source.AppliedCuts = geometry, uint64(len(g.world.cuts))
 		p.source = &source
 		g.captureGrowthBurn(s, kind, id, cut, oldCuts, edits)
 		if p.image == nil {
