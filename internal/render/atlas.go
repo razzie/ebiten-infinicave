@@ -30,7 +30,7 @@ type atlasSpec struct {
 func specForAtlas(kind AtlasKind) atlasSpec {
 	switch kind {
 	case GrassAtlas:
-		return atlasSpec{8, 8, 64, geom.V{X: -.027, Y: -.042}, geom.V{X: .027, Y: .012}}
+		return atlasSpec{8, 8, 64, geom.V{X: -.027, Y: -.050}, geom.V{X: .027, Y: .004}}
 	case MossAtlas:
 		return atlasSpec{8, 8, 48, geom.V{X: -.02, Y: -.02}, geom.V{X: .02, Y: .02}}
 	case HangingAtlas:
@@ -88,22 +88,18 @@ func grassSample(cell int) TriangleMesh {
 	// A sample is one blade; roots are placed along the actual surface by the
 	// worker, independently of the blade's upward growth direction.
 	root := geom.V{}
-	height := .010 + .019*random(2)
-	bend := (random(3) - .5) * .012
-	width := .0008 + .0009*random(4)
-	control := root.Add(geom.V{X: bend * .2, Y: -height * .65})
+	height := .022 + .022*random(2)
+	bend := (random(3) - .5) * .009
+	width := height * (.20 + .07*random(4))
 	tip := root.Add(geom.V{X: bend, Y: -height})
-	var left, right []geom.V
-	for j := 0; j < 4; j++ {
-		t := float64(j) / 4
-		p := root.Mul((1 - t) * (1 - t)).Add(control.Mul(2 * (1 - t) * t)).Add(tip.Mul(t * t))
-		n := control.Sub(root).Mul(1 - t).Add(tip.Sub(control).Mul(t)).Norm().Perp().Mul(width * .5 * (1 - t))
-		left = append(left, p.Add(n))
-		right = append(right, p.Sub(n))
-	}
-	poly := append(left, tip)
-	for j := len(right) - 1; j >= 0; j-- {
-		poly = append(poly, right[j])
+	// A broad shoulder and long straight taper read as a pointed leaf even
+	// at native scene resolution. Each blade has its own slight lean.
+	poly := []geom.V{
+		{X: -width * .5, Y: .001},
+		{X: -width*.48 + bend*.08, Y: -height * .24},
+		tip,
+		{X: width*.40 + bend*.24, Y: -height * .38},
+		{X: width * .5, Y: .001},
 	}
 	if geom.PolygonArea(poly) < 0 {
 		reversePoints(poly)

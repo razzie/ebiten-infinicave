@@ -3,6 +3,7 @@ package infinicave
 import (
 	"bytes"
 	"image"
+	"image/color"
 	"testing"
 	"time"
 
@@ -512,6 +513,45 @@ func checkIndependentGrassPixels(t *testing.T) {
 		s = w.sections[0]
 		if !bytes.Equal(want, read()) {
 			t.Fatal("mixed-width grass carving differs from reload")
+		}
+	}
+}
+
+// Run in the GPU readback loop: coverage must extend past the structural
+// silhouette, including rough crests and nonintegral raster coordinates.
+func checkGrassEdgePixels(t *testing.T) {
+	t.Helper()
+	white := ebiten.NewImage(1, 1)
+	white.Fill(color.White)
+	defer white.Deallocate()
+	for _, aa := range []AntialiasingMode{AntialiasingFull, AntialiasingOff, AntialiasingFXAA} {
+		data := carvePixelFixture()
+		data.Shape = terrain.ShapeOptions{EdgeRoughness: 1, SpikeDensity: 1}
+		mesh := render.PrepareForeground(data, ViewShaded, render.RockGrowthOptions{Grass: 1})
+		var patch render.Attachment
+		for _, a := range mesh.Foreground.Growth {
+			if a.Kind == render.GrassAttachment && a.Mesh.Texture == render.NoAtlas {
+				patch = a
+				break
+			}
+		}
+		if len(patch.Mesh.Indices) == 0 {
+			t.Fatal("edge fixture has no foreground sod")
+		}
+		for _, pixels := range []int{256, 501, 1000} {
+			layer := ebiten.NewImage(pixels, pixels)
+			scaled := render.ScaleGridMesh(render.GridMesh{Growth: []render.Attachment{patch}}, pixels, 0)
+			scaled.Growth[0].Mesh.DrawWithAntialiasing(layer, white, aa.GeometryAA())
+			rgba := make([]byte, 4*pixels*pixels)
+			layer.ReadPixels(rgba)
+			layer.Deallocate()
+			for step := -10; step <= 10; step++ {
+				x := int((patch.Anchor.X + float64(step)*.001) * float64(pixels))
+				y := int((.35 - .0005) * float64(pixels))
+				if alpha := rgba[4*(y*pixels+x)+3]; alpha < 200 {
+					t.Fatalf("AA=%v width=%d: pale rock edge remains under sod at x=%d (coverage %d)", aa, pixels, x, alpha)
+				}
+			}
 		}
 	}
 }

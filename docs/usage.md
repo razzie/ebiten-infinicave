@@ -82,7 +82,7 @@ scene.DrawWithPasses(screen, viewport, infinicave.RenderPasses{
 
 Callbacks run once per valid draw, including while terrain is loading. They should draw only; do not update or mutate the scene from a callback. `ctx.WorldToTarget` maps world coordinates to the target. `ctx.Min` and `ctx.Max` bound the target in world units. In horizontal scenes, `ctx.Dst` is a temporary rotated target and should only be borrowed for the callback. `Draw` is equivalent to `DrawWithPasses` with no callbacks.
 
-The order is background and fog, `BehindRocks`, foreground rocks, mushrooms and webs, foreground vines, `AboveRocks`, grass, then bats. Custom content is not included in background blur or shadow masks.
+The order is background and fog, `BehindRocks`, rear grass blades and hanging growth, foreground rocks, mushrooms and webs, foreground vines, `AboveRocks`, foreground grass with ground patches, then bats. Grass forms compact fans of broad, pointed blades with a partial upward lean from the surface normal (about 45° on a vertical wall, with variation). Rear tufts have no ground patch; foreground sod matches the blade bases, overlaps the rock edge, and covers its small protrusions. Custom content is not included in background blur or shadow masks.
 
 ## Configuration
 

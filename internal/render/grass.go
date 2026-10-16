@@ -24,10 +24,15 @@ type grassPatch struct {
 
 const grassRootGuideDistance = .004
 
-// Find the closest guide whose crest still has supporting rock immediately
-// below it. A nearby guide outside the face, or removed by a cut, is ineligible.
+// Sod overlaps the silhouette so independent AA caches cannot expose a pale
+// rock rim underneath. It also covers the small chips along guide crests.
+const grassEdgeOverlap = .002
+
+// Find the closest guide with supporting rock immediately below or beside it.
+// A nearby guide outside the face, or removed by a cut, is ineligible.
 func grassGuideAnchor(cell terrain.RockCell, guides []terrain.Guide) (int, geom.V) {
 	down := terrain.InternalPoint(terrain.RockOrientation(cell), geom.V{Y: 1})
+	right := down.Perp().Mul(-1)
 	best, distance, anchor := -1, math.Inf(1), geom.V{}
 	lo, hi := geom.PolygonBounds(cell.Polygon)
 	for i := range guides {
@@ -41,7 +46,12 @@ func grassGuideAnchor(cell terrain.RockCell, guides []terrain.Guide) (int, geom.
 			continue
 		}
 		q, d := g.NearestPoint(cell.Center)
-		if d < distance && geom.InsidePolygon(q.Add(down.Mul(.003)), cell.Polygon) {
+		// Side-facing crests need support beside the guide, rather than
+		// directly below it. This also permits grass on vertical surfaces.
+		supported := geom.InsidePolygon(q.Add(down.Mul(.003)), cell.Polygon) ||
+			geom.InsidePolygon(q.Add(right.Mul(.003)), cell.Polygon) ||
+			geom.InsidePolygon(q.Sub(right.Mul(.003)), cell.Polygon)
+		if d < distance && supported {
 			best, distance, anchor = i, d, q
 		}
 	}
@@ -90,7 +100,7 @@ func grassForCell(cell terrain.RockCell, guides []terrain.Guide, density float64
 		}
 		height := geom.Lerp(.010, .029, random(channel+1)) * geom.Clamp(size/.009, .55, 1)
 		bend := size * (along*.75 + geom.Lerp(-.4, .4, random(channel+2)))
-		width := geom.Lerp(.0008, .0018, random(channel+3))
+		width := geom.Lerp(.0018, .0034, random(channel+3))
 		control := root.Add(up.Mul(height * .65)).Add(right.Mul(bend * .15))
 		tip := root.Add(up.Mul(height)).Add(right.Mul(bend))
 		var left, rightSide [3]geom.V
@@ -141,7 +151,7 @@ func prepareRockGrass(grid terrain.RockGrid, guides []terrain.Guide, owned bool,
 			if owned && !inTerrainBand(poly...) {
 				continue
 			}
-			mesh.Vertices, mesh.Indices = appendCellMesh(mesh.Vertices, mesh.Indices, poly, geom.PolygonCenter(poly), growthColor(patch.color, .78), cell.Normal)
+			mesh.Vertices, mesh.Indices = appendCellMesh(mesh.Vertices, mesh.Indices, poly, geom.PolygonCenter(poly), growthColor(patch.color, .68), cell.Normal)
 		}
 		for _, blade := range patch.blades {
 			if owned && !inTerrainBand(blade.polygon...) {
@@ -187,7 +197,7 @@ func prepareGrassAttachments(c terrain.RockCell, growth RockGrowthOptions, suppo
 			continue
 		}
 		inward := d.Norm().Perp()
-		if terrain.WorldPoint(mode, inward).Y < .15 {
+		if terrain.WorldPoint(mode, inward).Y < -1e-9 {
 			continue
 		}
 		q := e.A.Add(d.Mul(geom.Clamp(candidate.Sub(e.A).Dot(d)/d.Len2(), 0, 1)))
@@ -221,22 +231,21 @@ func prepareGrassAttachments(c terrain.RockCell, growth RockGrowthOptions, suppo
 	}
 	triangles := geom.Triangulate(c.Polygon)
 	type rootPoint struct {
-		p     geom.V
-		along float64
+		p                   geom.V
+		along, surfaceAngle float64
 	}
 	var roots []rootPoint
+	type crestSpan struct{ a, b, inward geom.V }
+	var spans []crestSpan
 	half := .017 * scale
 	for edge, e := range support {
-		if len(roots) >= 12 {
-			break
-		}
 		d := e.B.Sub(e.A)
 		length := d.Len()
-		if length < .001 {
+		if length < 1e-8 {
 			continue
 		}
 		inward := d.Norm().Perp()
-		if terrain.WorldPoint(mode, inward).Y < .15 {
+		if terrain.WorldPoint(mode, inward).Y < -1e-9 {
 			continue
 		}
 		mid := geom.LerpVector(e.A, e.B, .5)
@@ -254,15 +263,18 @@ func prepareGrassAttachments(c terrain.RockCell, growth RockGrowthOptions, suppo
 		}
 		delta := math.Sqrt(half*half-perp2) / length
 		lo, hi := max(0, u-delta), min(1, u+delta)
-		if (hi-lo)*length < .002 {
+		if (hi-lo)*length < 1e-8 {
 			continue
 		}
-		count := max(2, min(12-len(roots), int(math.Ceil((hi-lo)*length/.0035))))
-		for j := 0; j < min(3, count); j++ {
-			x0, x1 := geom.Lerp(lo, hi, float64(j)/float64(min(3, count))), geom.Lerp(lo, hi, float64(j+1)/float64(min(3, count)))
+		spans = append(spans, crestSpan{e.A.Add(d.Mul(lo)), e.A.Add(d.Mul(hi)), inward})
+		// Cover every eligible segment independently of the blade fan.
+		// Rough silhouettes can have many short segments.
+		pieces := max(1, min(3, int(math.Ceil((hi-lo)*length/.0035))))
+		for j := 0; j < pieces; j++ {
+			x0, x1 := geom.Lerp(lo, hi, float64(j)/float64(pieces)), geom.Lerp(lo, hi, float64(j+1)/float64(pieces))
 			a, b := e.A.Add(d.Mul(x0)), e.A.Add(d.Mul(x1))
-			depth := scale * (.004 + .003*random(100+int64(edge)*31+int64(j)))
-			poly := []geom.V{a.Add(inward.Mul(.0002)), b.Add(inward.Mul(.0002)), b.Add(inward.Mul(depth)), a.Add(inward.Mul(depth * .85))}
+			depth := scale * (.006 + .003*random(100+int64(edge)*31+int64(j)))
+			poly := []geom.V{a, b, b.Add(inward.Mul(depth)), a.Add(inward.Mul(depth * .85))}
 			for _, tri := range triangles {
 				piece := poly
 				for k, index := range tri {
@@ -271,19 +283,40 @@ func prepareGrassAttachments(c terrain.RockCell, growth RockGrowthOptions, suppo
 					piece = geom.ClipHalfPlane(piece, n, p.Dot(n))
 				}
 				if geom.PolygonArea(piece) > 1e-15 {
-					patch.Mesh.Vertices, patch.Mesh.Indices = appendCellMesh(patch.Mesh.Vertices, patch.Mesh.Indices, piece, geom.PolygonCenter(piece), growthColor(clr, tint*.78), c.Normal)
+					patch.Mesh.Vertices, patch.Mesh.Indices = appendCellMesh(patch.Mesh.Vertices, patch.Mesh.Indices, piece, geom.PolygonCenter(piece), growthColor(clr, tint*.68), c.Normal)
 					patch.Footprint = append(patch.Footprint, piece)
 				}
 			}
-
+			// The clipped inner strip alone shares the rock's AA edge and
+			// leaves bright pixels visible. A narrow outer lip crosses it.
+			along := d.Norm().Mul(.0004)
+			lip := []geom.V{a.Sub(along).Sub(inward.Mul(grassEdgeOverlap)), b.Add(along).Sub(inward.Mul(grassEdgeOverlap)), b.Add(along).Add(inward.Mul(.001)), a.Sub(along).Add(inward.Mul(.001))}
+			patch.Mesh.Vertices, patch.Mesh.Indices = appendCellMesh(patch.Mesh.Vertices, patch.Mesh.Indices, lip, geom.PolygonCenter(lip), growthColor(clr, tint*.68), c.Normal)
+			patch.Footprint = append(patch.Footprint, lip)
 		}
-		for j := 0; j < count; j++ {
-			u := geom.Lerp(lo, hi, (float64(j)+.25+.5*random(200+int64(edge)*31+int64(j)))/float64(count))
-			root := e.A.Add(d.Mul(u)).Add(inward.Mul(.001 * scale))
-			if geom.InsidePolygon(root, c.Polygon) {
-				roots = append(roots, rootPoint{root, geom.Clamp(root.Sub(anchor).Dot(tangent)/half, -1, 1)})
-				patch.Anchors = append(patch.Anchors, root)
+	}
+	// A compact fan shares one base rather than forming a row of isolated
+	// needles. Sample the whole crest, independently of its tessellation.
+	count := 5 + int(random(3)*3)
+	for j := 0; j < count; j++ {
+		along := geom.Lerp(-1, 1, float64(j)/float64(count-1))
+		target := anchor.Add(tangent.Mul(half * .42 * along))
+		bestDistance := math.Inf(1)
+		var root geom.V
+		var surfaceAngle float64
+		for _, span := range spans {
+			d := span.b.Sub(span.a)
+			q := span.a.Add(d.Mul(geom.Clamp(target.Sub(span.a).Dot(d)/d.Len2(), 0, 1)))
+			p := q.Add(span.inward.Mul(.0015 * scale))
+			if ds := q.Sub(target).Len2(); ds < bestDistance && geom.InsidePolygon(p, c.Polygon) {
+				root, bestDistance = p, ds
+				outward := terrain.WorldPoint(mode, span.inward.Mul(-1))
+				surfaceAngle = math.Atan2(outward.X, -outward.Y)
 			}
+		}
+		if !math.IsInf(bestDistance, 1) {
+			roots = append(roots, rootPoint{root, along, surfaceAngle})
+			patch.Anchors = append(patch.Anchors, root)
 		}
 	}
 	if len(roots) < 3 || len(patch.Mesh.Indices) == 0 {
@@ -307,7 +340,9 @@ func prepareGrassAttachments(c terrain.RockCell, growth RockGrowthOptions, suppo
 		for (terrain.SiteRandom(0x677261737361746c, int64(cell), 0, 0) < .48) != yellow {
 			cell = (cell + 1) % 64
 		}
-		rotation := angle*.10 + point.along*.18 + (random(11+int64(i)*3)-.5)*.12
+		// Split the angle between the local outward normal and world-up:
+		// a vertical wall produces a roughly 45-degree upward lean.
+		rotation := point.surfaceAngle*.5 + point.along*.58 + (random(11+int64(i)*3)-.5)*.12
 		mesh, bounds := spriteMesh(GrassAtlas, cell, root, rotation, scale, mode, tint)
 		offset := uint32(len(blades.Mesh.Vertices))
 		blades.Mesh.Vertices = append(blades.Mesh.Vertices, mesh.Vertices...)
@@ -322,4 +357,44 @@ func prepareGrassAttachments(c terrain.RockCell, growth RockGrowthOptions, suppo
 	patch.Min, patch.Max = lo, hi
 	blades.Min, blades.Max, blades.Footprint = lo, hi, patch.Footprint
 	return patch, blades, len(blades.Mesh.Indices) > 0
+}
+
+// Protruding rock teeth are separate structural attachments, outside the face
+// polygon. Extend sod over teeth rooted in its strip so their pale tips cannot
+// poke through the grass. Covered teeth also support the tuft during carving.
+func coverGrassTrim(patch *Attachment, trim []Attachment) {
+	tangent := terrain.InternalPoint(patch.Orientation, geom.Rotate(geom.V{X: 1}, patch.Rotation))
+	half := .017*patch.Scale + .0004
+	v := patch.Mesh.Vertices[0]
+	clr := color.NRGBA{R: uint8(math.Round(float64(v.ColorR) * 255)), G: uint8(math.Round(float64(v.ColorG) * 255)), B: uint8(math.Round(float64(v.ColorB) * 255)), A: 255}
+	base := patch.Footprint
+	for _, tooth := range trim {
+		if tooth.Kind != EdgeAttachment || tooth.Underlay || len(tooth.Footprint) == 0 || tooth.Max.X < patch.Min.X || tooth.Min.X > patch.Max.X || tooth.Max.Y < patch.Min.Y || tooth.Min.Y > patch.Max.Y {
+			continue
+		}
+		covered := false
+		for _, anchor := range tooth.Anchors {
+			for _, piece := range base {
+				covered = covered || geom.InsidePolygon(anchor, piece)
+			}
+		}
+		if !covered {
+			continue
+		}
+		poly := geom.ClipHalfPlane(tooth.Footprint[0], tangent, patch.Anchor.Dot(tangent)+half)
+		poly = geom.ClipHalfPlane(poly, tangent.Mul(-1), -patch.Anchor.Dot(tangent)+half)
+		if geom.PolygonArea(poly) <= 1e-15 {
+			continue
+		}
+		start := len(patch.Mesh.Vertices)
+		patch.Mesh.Vertices, patch.Mesh.Indices = appendCellMesh(patch.Mesh.Vertices, patch.Mesh.Indices, poly, geom.PolygonCenter(poly), clr, geom.V3{Z: 1})
+		for i := start; i < len(patch.Mesh.Vertices); i++ {
+			patch.Mesh.Vertices[i].SrcX, patch.Mesh.Vertices[i].SrcY = .5, .5
+		}
+		patch.Footprint = append(patch.Footprint, poly)
+		patch.Anchors = append(patch.Anchors, tooth.Anchors...)
+		lo, hi := geom.PolygonBounds(poly)
+		patch.Min = geom.V{X: min(patch.Min.X, lo.X), Y: min(patch.Min.Y, lo.Y)}
+		patch.Max = geom.V{X: max(patch.Max.X, hi.X), Y: max(patch.Max.Y, hi.Y)}
+	}
 }

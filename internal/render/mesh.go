@@ -287,7 +287,7 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 	mesh := GridMesh{Faces: TriangleMesh{MaterialFrame: ReferenceMaterialFrame(), Vertices: vertices, Indices: indices}}
 	mesh.Growth = append(walls, trim...)
 	if raised && view == ViewShaded {
-		growth := prepareGrowthAttachments(grid, boundary, density, owned)
+		growth := prepareGrowthAttachments(grid, boundary, density, owned, trim...)
 		growth = append(growth, trim...)
 		var ordered []Attachment
 		for _, a := range growth {
@@ -644,8 +644,8 @@ func PrepareForegroundGrowth(data terrain.SectionData, view View, base SectionMe
 		}
 		topology = terrain.PrepareRockAppearance(topology)
 		grid, boundary := topology.Appearance, topology.Boundary
-		grid, boundary, _ = visualBoundaryGrid(grid, boundary, density, true, view)
-		growth := prepareGrowthAttachments(grid, boundary, density, true)
+		grid, boundary, trim := visualBoundaryGrid(grid, boundary, density, true, view)
+		growth := prepareGrowthAttachments(grid, boundary, density, true, trim...)
 		stampGrowthIDs(growth, grid)
 		var ordered []Attachment
 		for _, a := range growth {

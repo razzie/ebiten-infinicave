@@ -179,14 +179,22 @@ their supporting material. Scene builders allocate no dense vine fields.
 
 `Scene.DrawWithPasses` inserts optional drawing after fog (`BehindRocks`) and
 after foreground rocks, mushrooms, webs, and foreground vines (`AboveRocks`).
-All grass ground patches and blades follow that second hook; bats draw last.
+Foreground grass patches and blades follow that second hook; rear grass blades
+share the undergrowth span behind foreground rocks and have no ground patch.
+Bats draw last.
 `Draw` delegates with empty hooks. Pass callbacks receive a transform from public
 world coordinates into the current target, including the intermediate rotated
 target used by horizontal scenes. Hooks run once on the game goroutine and are
 excluded from offscreen background and shadow composition.
 
-Grass has its own image, with clipped vector ground patches aligned to cell
-normals and atlas blades rooted along the surface but angled toward world-up.
+Foreground grass has its own image, with clipped vector ground patches aligned
+to the geometric boundary and thick atlas blades rooted along the surface but
+angled halfway between each root's surface normal and world-up in compact fans.
+Sod uses a shade close to the blade bases. A narrow lip overlaps the boundary
+to hide raster fringes, and covers protruding structural teeth with shared
+support liveness. Strips cover all eligible silhouette segments independently
+of the blade count. A stable per-cell choice places some tufts in the
+undergrowth image as blades alone.
 It shares the immutable foreground CPU recipe and supplies the shadow silhouette
 alongside rocks, while retaining an independent upload, publication, resize
 width, displayed recipe, and reveal clock. A late full foreground recipe can
@@ -224,7 +232,7 @@ trim publishes with rocks; growth products keep their own images, recipes,
 widths, and reveal clocks. Each product accepts edits at its displayed width,
 and overlapping cuts replay only its affected tiles. Support removal restarts
 only the affected private growth upload. Burns capture the product's published
-pixels and reveal progress. Grass remains above `AboveRocks`.
+pixels and reveal progress. Foreground grass remains above `AboveRocks`.
 
 Optional appearance fades blend in each cached rock or vegetation layer as it
 publishes. The root advances independent clocks in `Update`; ordinary drawing

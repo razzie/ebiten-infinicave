@@ -1,8 +1,25 @@
 package render
 
 import (
+	"math"
 	"testing"
 )
+
+func TestGrassAtlasKeepsBroadBladeSilhouettes(t *testing.T) {
+	for cell, mesh := range AtlasRecipes(GrassAtlas) {
+		minY, maxY, area := math.Inf(1), math.Inf(-1), 0.0
+		for _, v := range mesh.Vertices {
+			minY, maxY = min(minY, float64(v.DstY)), max(maxY, float64(v.DstY))
+		}
+		for i := 0; i < len(mesh.Indices); i += 3 {
+			a, b, c := mesh.Vertices[mesh.Indices[i]], mesh.Vertices[mesh.Indices[i+1]], mesh.Vertices[mesh.Indices[i+2]]
+			area += math.Abs(float64(b.DstX-a.DstX)*float64(c.DstY-a.DstY)-float64(b.DstY-a.DstY)*float64(c.DstX-a.DstX)) * .5
+		}
+		if area/math.Pow(maxY-minY, 2) < .09 {
+			t.Fatalf("sample %d is too thin to read as a broad pointed blade", cell)
+		}
+	}
+}
 
 func TestAtlasBatchesKeepSamplesIsolated(t *testing.T) {
 	for kind := GrassAtlas; kind < atlasKinds; kind++ {

@@ -224,15 +224,15 @@ func TestGrassPatchFollowsSurfaceAndBladesGrowUp(t *testing.T) {
 		for _, v := range patch.Mesh.Vertices {
 			p := geom.V{X: float64(v.DstX) / RasterPixelsPerUnit, Y: float64(v.DstY)/RasterPixelsPerUnit + terrain.GenerationMinY}
 			local := geom.Rotate(terrain.WorldPoint(mode, p.Sub(anchor)), -angle)
-			if local.Y < -1e-6 || local.Y > .009 {
+			if local.Y < -grassEdgeOverlap-1e-6 || local.Y > .010 {
 				t.Fatal("ground patch floats away from its facet")
 			}
 		}
 		for i := 0; i < len(blades.Mesh.Vertices); i += 4 {
 			a, b := blades.Mesh.Vertices[i], blades.Mesh.Vertices[i+1]
 			d := terrain.WorldPoint(mode, geom.V{X: float64(b.DstX - a.DstX), Y: float64(b.DstY - a.DstY)})
-			if math.Abs(math.Atan2(d.Y, d.X)) > .3 {
-				t.Fatal("blades rotate with the whole slope instead of growing up")
+			if math.Abs(math.Atan2(d.Y, d.X)-angle*.5) > .65 {
+				t.Fatal("blades lost their partial upward lean from the surface")
 			}
 		}
 		// Body-only damage is handled by texture erasure, with no deletion.
@@ -277,13 +277,215 @@ func TestGrassBaseFitsOffsetGuideAndCellCorner(t *testing.T) {
 		for _, v := range patch.Mesh.Vertices {
 			p := geom.V{X: float64(v.DstX) / RasterPixelsPerUnit, Y: float64(v.DstY)/RasterPixelsPerUnit + terrain.GenerationMinY}
 			if !geom.InsidePolygon(p, c.Polygon) {
-				t.Fatal("ground strip crosses the cell boundary")
+				// The sod lip overlaps the silhouette to hide its AA fringe.
+				distance := math.Inf(1)
+				for j, a := range c.Polygon {
+					distance = min(distance, geom.SegmentDistanceSquared(p, p, a, c.Polygon[(j+1)%len(c.Polygon)]))
+				}
+				if distance > math.Pow(grassEdgeOverlap+.0005, 2) {
+					t.Fatal("ground strip extends beyond its narrow edge overlap")
+				}
 			}
 		}
 		for _, root := range patch.Anchors {
 			_, distance := guide.NearestPoint(root)
 			if distance > .010 {
 				t.Fatal("root no longer follows the eligible crest")
+			}
+		}
+	}
+}
+
+func TestGrassPatchCoversSegmentedRockEdge(t *testing.T) {
+	for _, mode := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
+		point := func(p geom.V) geom.V { return geom.V{X: .5, Y: .5}.Add(terrain.InternalPoint(mode, p)) }
+		var poly []geom.V
+		// Many short segments reproduce chipped silhouettes, including edges
+		// shorter than the old strip cutoff. All still belong to one tuft.
+		for j := 0; j <= 80; j++ {
+			poly = append(poly, point(geom.V{X: -.02 + float64(j)*.0005}))
+		}
+		poly = append(poly, point(geom.V{X: .02, Y: .06}), point(geom.V{X: -.02, Y: .06}))
+		c := terrain.WithRockOrientation(terrainRock(poly), mode)
+		n := terrain.InternalPoint(mode, geom.V{Y: -.8})
+		c.Normal = geom.V3{X: n.X, Y: n.Y, Z: .6}
+		guides := []terrain.Guide{{Pts: []geom.V{poly[0], poly[80]}}}
+		patch, blades, ok := prepareGrassAttachments(c, RockGrowthOptions{Grass: 1, Guides: guides})
+		if !ok || len(blades.Mesh.Vertices)/4 < 5 || len(blades.Mesh.Vertices)/4 > 7 {
+			t.Fatal("segmented fixture lost its compact blade fan")
+		}
+		checkMesh(t, patch.Mesh)
+		for j := -12; j <= 12; j++ {
+			// Test the actual crest and the strip immediately below it, on
+			// both sides of the anchor, including the outer overlap.
+			for _, depth := range []float64{-.0015, 1e-9, .0001, .001} {
+				p := patch.Anchor.Add(terrain.InternalPoint(mode, geom.V{X: float64(j) * .001, Y: depth}))
+				covered := false
+				for _, piece := range patch.Footprint {
+					covered = covered || geom.InsidePolygon(p, piece)
+					for k, a := range piece {
+						covered = covered || geom.SegmentDistanceSquared(p, p, a, piece[(k+1)%len(piece)]) < 1e-20
+					}
+				}
+				if !covered {
+					t.Fatalf("bare rock edge in %s mode at %+v", mode, p)
+				}
+			}
+		}
+	}
+}
+
+func TestGrassTuftsUseRearBladesAndForegroundSod(t *testing.T) {
+	for _, mode := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
+		rear, front, sparse := 0, 0, 0
+		for i := 0; i < 80; i++ {
+			c := growthTestCell(mode, .05+float64(i)*.01)
+			if mode == terrain.Horizontal {
+				c.Center.Y++
+				for j := range c.Polygon {
+					c.Polygon[j].Y++
+				}
+			}
+			grid := terrain.RockGrid{c}
+			topology := terrain.NewRockTopology(grid)
+			options := RockGrowthOptions{Grass: 1, Guides: grassTestGuides(c)}
+			all := prepareGrowthAttachments(grid, topology.Boundary, options, false)
+			if len(all) == 0 {
+				t.Fatal("eligible tuft disappeared")
+			}
+			if all[0].Kind == BackgroundGrassAttachment {
+				rear++
+				if len(all) != 1 || !all[0].Underlay || all[0].Mesh.Texture != GrassAtlas || !UnderGrowthSpan.Contains(all[0]) || GrassSpan.Contains(all[0]) {
+					t.Fatal("rear tuft must draw only blades behind rocks")
+				}
+			} else {
+				front++
+				if len(all) != 2 || all[0].Mesh.Texture != NoAtlas || all[1].Mesh.Texture != GrassAtlas {
+					t.Fatal("foreground tuft lost its sod or blades")
+				}
+				for _, a := range all {
+					if !GrassSpan.Contains(a) || UnderGrowthSpan.Contains(a) {
+						t.Fatal("foreground grass moved behind rocks")
+					}
+				}
+			}
+			options.Grass = .25
+			if survivor := prepareGrowthAttachments(grid, topology.Boundary, options, false); len(survivor) > 0 {
+				sparse++
+				if !reflect.DeepEqual(survivor, all) {
+					t.Fatal("density changed a surviving tuft's layer or shape")
+				}
+			}
+			owned := prepareGrowthAttachments(grid, topology.Boundary, RockGrowthOptions{Grass: 1, Guides: options.Guides}, true)
+			if !reflect.DeepEqual(owned, all) {
+				t.Fatal("owned preparation changed a visible tuft")
+			}
+			cut, err := terrain.CutFromHole(terrain.Hole{Shape: terrain.HoleCircle, Center: all[0].Anchors[0], Radius: .0003})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, a := range FilterAttachments(all, []terrain.RockCut{cut}, 0) {
+				if !a.Dead {
+					t.Fatal("cut support retained grass")
+				}
+			}
+		}
+		if rear == 0 || front == 0 || sparse == 0 {
+			t.Fatalf("missing grass variation in %s: rear=%d front=%d sparse=%d", mode, rear, front, sparse)
+		}
+	}
+}
+
+func TestGrassSodCoversProtrudingRockTrim(t *testing.T) {
+	for _, mode := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
+		poly := []geom.V{{X: -.04}, {X: .04}, {X: .04, Y: .06}, {X: -.04, Y: .06}}
+		terrain.MapPoints(poly, func(p geom.V) geom.V { return geom.V{X: .5, Y: .5}.Add(terrain.InternalPoint(mode, p)) })
+		c := terrain.WithRockOrientation(terrainRock(poly), mode)
+		n := terrain.InternalPoint(mode, geom.V{Y: -.8})
+		c.Normal = geom.V3{X: n.X, Y: n.Y, Z: .6}
+		patch, _, ok := prepareGrassAttachments(c, RockGrowthOptions{Grass: 1, Guides: grassTestGuides(c)})
+		if !ok {
+			t.Fatal("missing grass fixture")
+		}
+		right := terrain.InternalPoint(mode, geom.V{X: 1})
+		up := terrain.InternalPoint(mode, geom.V{Y: -1})
+		tip := patch.Anchor.Add(up.Mul(.006))
+		trim := visualTooth(c, patch.Anchor.Sub(right.Mul(.006)), patch.Anchor.Add(right.Mul(.006)), tip, up, false, ViewShaded)
+		if len(trim) == 0 {
+			t.Fatal("missing protruding tooth")
+		}
+		supports := len(patch.Anchors)
+		coverGrassTrim(&patch, trim)
+		covered := false
+		for _, piece := range patch.Footprint {
+			covered = covered || geom.InsidePolygon(tip.Sub(up.Mul(.0001)), piece)
+		}
+		if !covered || len(patch.Anchors) <= supports {
+			t.Fatal("rock spike protrudes through sod or has no live support")
+		}
+		checkMesh(t, patch.Mesh)
+		cut, err := terrain.CutFromHole(terrain.Hole{Shape: terrain.HoleCircle, Center: trim[0].Anchors[0], Radius: .00002})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !patch.Hit(cut, 0) {
+			t.Fatal("removing a sod-covered spike leaves floating grass")
+		}
+	}
+}
+
+func TestGrassBladeAnglesFollowSurfaceWithPartialUpwardLean(t *testing.T) {
+	for _, mode := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
+		for _, angle := range []float64{-math.Pi / 2, -1, 0, 1, math.Pi / 2} {
+			poly := []geom.V{{X: -.06}, {X: .06}, {X: .06, Y: .06}, {X: -.06, Y: .06}}
+			terrain.MapPoints(poly, func(p geom.V) geom.V {
+				return geom.V{X: .5, Y: .5}.Add(terrain.InternalPoint(mode, geom.Rotate(p, angle)))
+			})
+			c := terrain.WithRockOrientation(terrainRock(poly), mode)
+			n := terrain.InternalPoint(mode, geom.V{Y: -.8})
+			c.Normal = geom.V3{X: n.X, Y: n.Y, Z: .6}
+			guide := terrain.Guide{Pts: []geom.V{poly[0], poly[1]}}
+			_, blades, ok := prepareGrassAttachments(c, RockGrowthOptions{Grass: 1, Guides: []terrain.Guide{guide}})
+			if !ok {
+				t.Fatalf("missing grass on surface angle %g in %s mode", angle, mode)
+			}
+			mean, lo, hi := 0.0, math.Inf(1), math.Inf(-1)
+			for i := 0; i < len(blades.Mesh.Vertices); i += 4 {
+				a, b := blades.Mesh.Vertices[i], blades.Mesh.Vertices[i+1]
+				d := terrain.WorldPoint(mode, geom.V{X: float64(b.DstX - a.DstX), Y: float64(b.DstY - a.DstY)})
+				rotation := math.Atan2(d.Y, d.X)
+				mean += rotation
+				lo, hi = min(lo, rotation), max(hi, rotation)
+			}
+			mean /= float64(len(blades.Mesh.Vertices) / 4)
+			if math.Abs(mean-angle*.5) > .065 || hi-lo < .9 {
+				t.Fatalf("surface %g in %s mode: blade fan has mean %g and spread %g", angle, mode, mean, hi-lo)
+			}
+		}
+	}
+}
+
+func TestGrassSodShadeMatchesBladeBases(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		c := growthTestCell(terrain.Vertical, .05+float64(i)*.025)
+		patch, blades, ok := prepareGrassAttachments(c, RockGrowthOptions{Grass: 1, Guides: grassTestGuides(c)})
+		if !ok {
+			t.Fatal("missing grass color fixture")
+		}
+		s := specForAtlas(GrassAtlas)
+		quad := blades.Mesh.Vertices[0]
+		cell := int(quad.SrcY)/s.pixels*s.columns + int(quad.SrcX)/s.pixels
+		sample := AtlasRecipes(GrassAtlas)[cell]
+		base := sample.Vertices[0]
+		for _, v := range sample.Vertices {
+			if v.DstY > base.DstY {
+				base = v
+			}
+		}
+		sod := patch.Mesh.Vertices[0]
+		for _, pair := range [][2]float32{{sod.ColorR, base.ColorR * quad.ColorR}, {sod.ColorG, base.ColorG * quad.ColorG}, {sod.ColorB, base.ColorB * quad.ColorB}} {
+			if math.Abs(float64(pair[0]/pair[1])-1) > .14 {
+				t.Fatal("sod shade differs too much from the actual blade base")
 			}
 		}
 	}

@@ -20,6 +20,7 @@ const (
 	EdgeAttachment
 	MushroomAttachment
 	WebAttachment
+	BackgroundGrassAttachment
 )
 
 // Attachment keeps its baked sample/mesh and support metadata across edits.
@@ -74,7 +75,7 @@ func newSpriteAttachment(kind AttachmentKind, atlas AtlasKind, cell int, anchor 
 	return Attachment{Kind: kind, ID: terrain.CollisionVertexKey(anchor), Mesh: m, Min: lo, Max: hi, Anchors: []geom.V{anchor}, Footprint: [][]geom.V{poly}, Cell: cell, Anchor: anchor, Rotation: rotation, Scale: scale, Orientation: mode}
 }
 
-func prepareGrowthAttachments(grid terrain.RockGrid, boundary []terrain.RockEdge, growth RockGrowthOptions, owned bool) []Attachment {
+func prepareGrowthAttachments(grid terrain.RockGrid, boundary []terrain.RockEdge, growth RockGrowthOptions, owned bool, trim ...Attachment) []Attachment {
 	var out []Attachment
 	var clearance growthClearance
 	if growth.Hanging > 0 {
@@ -154,6 +155,18 @@ func prepareGrowthAttachments(grid terrain.RockGrid, boundary []terrain.RockEdge
 		if !ok || (owned && !inTerrainBand(patch.Min, patch.Max)) {
 			continue
 		}
+		// Choose depth independently of density, so surviving tufts keep their
+		// layer on rebuild. Rear blades grow behind the rock without sod.
+		if rockGrowthRandom(c, c.Center, 0x6772617373)(4) < .4 {
+			blade.Kind, blade.Underlay = BackgroundGrassAttachment, true
+			out = append(out, blade)
+			continue
+		}
+		coverGrassTrim(&patch, trim)
+		blade.Min = geom.V{X: min(blade.Min.X, patch.Min.X), Y: min(blade.Min.Y, patch.Min.Y)}
+		blade.Max = geom.V{X: max(blade.Max.X, patch.Max.X), Y: max(blade.Max.Y, patch.Max.Y)}
+		blade.Footprint = patch.Footprint
+		blade.Anchors = patch.Anchors
 		out = append(out, patch)
 		blades = append(blades, blade)
 	}

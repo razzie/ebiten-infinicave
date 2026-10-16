@@ -230,7 +230,8 @@ func (g *Scene) Draw(dst *ebiten.Image, viewport Viewport) {
 
 // DrawWithPasses renders like Draw with optional custom passes around the
 // foreground rocks. Foreground vines, mushrooms, and webs precede AboveRocks;
-// all grass ground patches and blades follow it. Bats draw last.
+// foreground grass patches and blades follow it. Rear grass blades precede
+// the rocks. Bats draw last.
 // Callbacks run once per draw, including across unloaded terrain, and never
 // run for invalid viewports or a closed Scene. Drawing does not animate them;
 // advance custom effects in the caller's Update.
@@ -408,7 +409,7 @@ type RenderPasses struct {
 	// BehindRocks runs after background effects and fog, before foreground rocks.
 	BehindRocks RenderPass
 	// AboveRocks runs after rocks, mushrooms, webs, and foreground vines,
-	// before all grass ground patches and blades.
+	// before foreground grass patches and blades.
 	AboveRocks RenderPass
 }
 

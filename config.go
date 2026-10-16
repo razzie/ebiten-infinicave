@@ -109,9 +109,9 @@ type Config struct {
 	// facets, from 0 (disabled) to 1 (maximum coverage). The default is 0.72.
 	// Lower density preserves the placement and shape of surviving patches.
 	MossDensity float64
-	// GrassDensity controls yellow or green grass tufts and their ground
-	// patches beside guides on upward-facing foreground facets, from
-	// 0 (disabled) to 1 (maximum coverage).
+	// GrassDensity controls yellow or green grass beside guides on upward-facing
+	// foreground facets, from 0 (disabled) to 1 (maximum coverage). Some tufts
+	// grow behind rocks; foreground tufts include ground patches over the edge.
 	// The default is 0.35. Lower density preserves surviving tufts.
 	GrassDensity float64
 	// HangingGrowthDensity is the occurrence probability for cave bulbs and
