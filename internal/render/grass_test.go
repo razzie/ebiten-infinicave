@@ -1,6 +1,7 @@
 package render
 
 import (
+	"context"
 	"image/color"
 	"math"
 	"reflect"
@@ -366,9 +367,10 @@ func TestGrassPatchCoversSegmentedRockEdge(t *testing.T) {
 	}
 }
 
-func TestGrassTuftsUseRearBladesAndForegroundSod(t *testing.T) {
+func TestGrassColoniesUseRearBladesAndForegroundSod(t *testing.T) {
 	for _, mode := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
-		rear, front, sparse := 0, 0, 0
+		rear, front, sparse, mixed := 0, 0, 0, 0
+		counts := make(map[int]bool)
 		for i := 0; i < 80; i++ {
 			c := growthTestCell(mode, .05+float64(i)*.01)
 			if mode == terrain.Horizontal {
@@ -381,48 +383,177 @@ func TestGrassTuftsUseRearBladesAndForegroundSod(t *testing.T) {
 			topology := terrain.NewRockTopology(grid)
 			options := RockGrowthOptions{Grass: 1, Guides: grassTestGuides(c)}
 			all := prepareGrowthAttachments(grid, topology.Boundary, options, false)
-			if len(all) == 0 {
-				t.Fatal("eligible tuft disappeared")
+			tufts := make(map[geom.V][]Attachment)
+			for _, a := range all {
+				tufts[a.Anchor] = append(tufts[a.Anchor], a)
 			}
-			if all[0].Kind == BackgroundGrassAttachment {
-				rear++
-				if len(all) != 1 || !all[0].Underlay || all[0].Mesh.Texture != GrassAtlas || !UnderGrowthSpan.Contains(all[0]) || GrassSpan.Contains(all[0]) {
-					t.Fatal("rear tuft must draw only blades behind rocks")
-				}
-			} else {
-				front++
-				if len(all) != 2 || all[0].Mesh.Texture != NoAtlas || all[1].Mesh.Texture != GrassAtlas {
-					t.Fatal("foreground tuft lost its sod or blades")
-				}
-				for _, a := range all {
-					if !GrassSpan.Contains(a) || UnderGrowthSpan.Contains(a) {
-						t.Fatal("foreground grass moved behind rocks")
+			if len(tufts) < 2 || len(tufts) > 3 {
+				t.Fatalf("colony in %s mode has %d instances, want 2–3", mode, len(tufts))
+			}
+			counts[len(tufts)] = true
+			colonyRear, colonyFront := false, false
+			for _, tuft := range tufts {
+				if tuft[0].Kind == BackgroundGrassAttachment {
+					rear++
+					colonyRear = true
+					if len(tuft) != 1 || !tuft[0].Underlay || tuft[0].Mesh.Texture != GrassAtlas || !UnderGrowthSpan.Contains(tuft[0]) || GrassSpan.Contains(tuft[0]) {
+						t.Fatal("rear tuft must draw only blades behind rocks")
+					}
+				} else {
+					front++
+					colonyFront = true
+					if len(tuft) != 2 || tuft[0].Mesh.Texture != NoAtlas || tuft[1].Mesh.Texture != GrassAtlas || !reflect.DeepEqual(tuft[0].Anchors, tuft[1].Anchors) {
+						t.Fatal("foreground tuft lost its paired sod and blades")
+					}
+					for _, a := range tuft {
+						if !GrassSpan.Contains(a) || UnderGrowthSpan.Contains(a) {
+							t.Fatal("foreground grass moved behind rocks")
+						}
 					}
 				}
+			}
+			if colonyRear && colonyFront {
+				mixed++
+			}
+			if !reflect.DeepEqual(all, prepareGrowthAttachments(grid, topology.Boundary, options, false)) {
+				t.Fatal("colony changed on rebuild")
 			}
 			options.Grass = .25
 			if survivor := prepareGrowthAttachments(grid, topology.Boundary, options, false); len(survivor) > 0 {
 				sparse++
 				if !reflect.DeepEqual(survivor, all) {
-					t.Fatal("density changed a surviving tuft's layer or shape")
+					t.Fatal("density changed a surviving colony's layers or shape")
 				}
 			}
 			owned := prepareGrowthAttachments(grid, topology.Boundary, RockGrowthOptions{Grass: 1, Guides: options.Guides}, true)
 			if !reflect.DeepEqual(owned, all) {
-				t.Fatal("owned preparation changed a visible tuft")
+				t.Fatal("owned preparation changed a visible colony")
 			}
-			cut, err := terrain.CutFromHole(terrain.Hole{Shape: terrain.HoleCircle, Center: all[0].Anchors[0], Radius: .0003})
+			cut, err := terrain.CutFromHole(terrain.Hole{Shape: terrain.HoleCircle, Center: all[0].Anchors[0], Radius: .0001})
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, a := range FilterAttachments(all, []terrain.RockCut{cut}, 0) {
-				if !a.Dead {
-					t.Fatal("cut support retained grass")
+			filtered := FilterAttachments(all, []terrain.RockCut{cut}, 0)
+			dead, live := 0, 0
+			for j, a := range filtered {
+				if a.Dead != all[j].Hit(cut, 0) {
+					t.Fatal("colony support damage removed the wrong instance")
+				}
+				if a.Dead {
+					dead++
+				} else {
+					live++
 				}
 			}
+			if dead == 0 || live == 0 {
+				t.Fatal("support damage must remove its tuft while retaining neighbors")
+			}
 		}
-		if rear == 0 || front == 0 || sparse == 0 {
-			t.Fatalf("missing grass variation in %s: rear=%d front=%d sparse=%d", mode, rear, front, sparse)
+		if rear == 0 || front == 0 || sparse == 0 || mixed == 0 || len(counts) != 2 {
+			t.Fatalf("missing colony variation in %s: rear=%d front=%d sparse=%d mixed=%d counts=%v", mode, rear, front, sparse, mixed, counts)
+		}
+	}
+}
+
+func TestGrassColoniesFollowConnectedSurface(t *testing.T) {
+	for _, mode := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
+		point := func(p geom.V) geom.V { return geom.V{X: .5, Y: .5}.Add(terrain.InternalPoint(mode, p)) }
+		poly := []geom.V{point(geom.V{X: -.04, Y: -.015}), point(geom.V{}), point(geom.V{X: .04, Y: -.015}), point(geom.V{X: .04, Y: .06}), point(geom.V{X: -.04, Y: .06})}
+		c := terrain.WithRockOrientation(terrainRock(poly), mode)
+		n := terrain.InternalPoint(mode, geom.V{Y: -.8})
+		c.Normal = geom.V3{X: n.X, Y: n.Y, Z: .6}
+		guide := terrain.Guide{Pts: poly[:3]}
+		support := []terrain.RockEdge{{A: poly[0], B: poly[1]}, {A: poly[1], B: poly[2]}}
+		colony := prepareGrassColony(c, RockGrowthOptions{Grass: 1, Guides: []terrain.Guide{guide}}, support)
+		if len(colony) < 2 || len(colony) > 3 {
+			t.Fatal("corner lost its colony")
+		}
+		left, right := false, false
+		for _, tuft := range colony {
+			patch, blades := tuft[0], tuft[1]
+			checkMesh(t, patch.Mesh)
+			checkMesh(t, blades.Mesh)
+			world := terrain.WorldPoint(mode, patch.Anchor.Sub(poly[1]))
+			left, right = left || world.X < 0, right || world.X > 0
+			_, distance := guide.NearestPoint(patch.Anchor)
+			if distance > 1e-10 {
+				t.Fatal("colony instance floated away from its rock surface")
+			}
+			for _, root := range patch.Anchors {
+				if !geom.InsidePolygon(root, c.Polygon) {
+					t.Fatal("colony blade has no rock support")
+				}
+			}
+			angle := math.Atan2(-.015, .04)
+			if world.X < 0 {
+				angle = -angle
+			}
+			if math.Abs(patch.Rotation-angle) > 1e-10 {
+				t.Fatal("colony instance ignored its local surface slope")
+			}
+		}
+		if !left || !right {
+			t.Fatal("colony did not follow the surface around its corner")
+		}
+		// Walking a crest must stop at missing support rather than jumping
+		// across a nearby air gap to another exposed segment.
+		support[1].A = geom.LerpVector(poly[1], poly[2], .1)
+		p, edge, distance := grassSurfacePoint(c, guide, support, 0, poly[1], .02)
+		if p != poly[1] || edge != 0 || distance != 0 {
+			t.Fatal("colony crossed an unsupported gap")
+		}
+	}
+}
+
+func TestGrassColoniesShareWorldCoordinatesAcrossSectionWindows(t *testing.T) {
+	for _, mode := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
+		builder := terrain.NewSectionBuilder(42, nil, mode)
+		var previous []Attachment
+		var previousCell terrain.RockCell
+		for id := int64(0); id < 2; id++ {
+			build := builder.Begin(context.Background(), id)
+			if build == nil || len(build.Data().Foreground) == 0 {
+				t.Fatal("missing section fixture")
+			}
+			// Preserve the private material origin while placing one ledge in
+			// the same world position through both padded section frames.
+			c := build.Data().Foreground[0]
+			origin := terrain.RockMaterialPoint(c, geom.V{})
+			c.Polygon = []geom.V{{X: .2, Y: -.99}, {X: .28, Y: -.99}, {X: .28, Y: -.95}, {X: .2, Y: -.95}}
+			if mode == terrain.Horizontal {
+				c.Polygon = []geom.V{{X: .99, Y: .2}, {X: 1.07, Y: .2}, {X: 1.07, Y: .24}, {X: .99, Y: .24}}
+			}
+			terrain.MapPoints(c.Polygon, func(p geom.V) geom.V { return terrain.InternalPoint(mode, p.Sub(origin)) })
+			c.Center = geom.PolygonCenter(c.Polygon)
+			c.Color, c.Raised = color.NRGBA{R: 145, A: 255}, true
+			n := terrain.InternalPoint(mode, geom.V{Y: -.8})
+			c.Normal = geom.V3{X: n.X, Y: n.Y, Z: .6}
+			grid := terrain.RockGrid{c}
+			topology := terrain.NewRockTopology(grid)
+			all := prepareGrowthAttachments(grid, topology.Boundary, RockGrowthOptions{Grass: 1, Guides: grassTestGuides(c)}, false)
+			if len(all) < 2 {
+				t.Fatalf("section fixture lost its colony in %s mode at section %d (cell mode %s)", mode, id, terrain.RockOrientation(c))
+			}
+			if id > 0 {
+				if len(all) != len(previous) {
+					t.Fatal("section window changed colony size or depth")
+				}
+				for i, a := range all {
+					b := previous[i]
+					if a.Kind != b.Kind || math.Abs(a.Scale-b.Scale) > 1e-12 || math.Abs(a.Rotation-b.Rotation) > 1e-12 || terrain.RockMaterialPoint(c, a.Anchor).Sub(terrain.RockMaterialPoint(previousCell, b.Anchor)).Len() > 1e-12 || !reflect.DeepEqual(a.Mesh.Indices, b.Mesh.Indices) || len(a.Mesh.Vertices) != len(b.Mesh.Vertices) {
+						t.Fatal("section window changed a colony instance")
+					}
+					for j, v := range a.Mesh.Vertices {
+						w := b.Mesh.Vertices[j]
+						p := geom.V{X: float64(v.DstX) / RasterPixelsPerUnit, Y: float64(v.DstY)/RasterPixelsPerUnit + terrain.GenerationMinY}
+						q := geom.V{X: float64(w.DstX) / RasterPixelsPerUnit, Y: float64(w.DstY)/RasterPixelsPerUnit + terrain.GenerationMinY}
+						if terrain.RockMaterialPoint(c, p).Sub(terrain.RockMaterialPoint(previousCell, q)).Len() > 1e-6 || v.SrcX != w.SrcX || v.SrcY != w.SrcY || v.ColorR != w.ColorR || v.ColorG != w.ColorG || v.ColorB != w.ColorB {
+							t.Fatal("section window moved or recolored grass")
+						}
+					}
+				}
+			}
+			previous, previousCell = all, c
 		}
 	}
 }

@@ -122,24 +122,26 @@ func prepareGrowthAttachments(grid terrain.RockGrid, boundary []terrain.RockEdge
 		if len(supports[i]) == 0 {
 			continue
 		}
-		patch, blade, ok := prepareGrassAttachments(c, growth, supports[i]...)
-		if !ok || (owned && !inTerrainBand(patch.Min, patch.Max)) {
-			continue
+		for _, tuft := range prepareGrassColony(c, growth, supports[i]) {
+			patch, blade := tuft[0], tuft[1]
+			if owned && !inTerrainBand(patch.Min, patch.Max) {
+				continue
+			}
+			// Each instance chooses depth independently of density and its
+			// neighbors. Rear blades grow behind the rock without sod.
+			if rockGrowthRandom(c, patch.Anchor, 0x6772617373)(4) < .4 {
+				blade.Kind, blade.Underlay = BackgroundGrassAttachment, true
+				out = append(out, blade)
+				continue
+			}
+			coverGrassTrim(&patch, trim)
+			blade.Min = geom.V{X: min(blade.Min.X, patch.Min.X), Y: min(blade.Min.Y, patch.Min.Y)}
+			blade.Max = geom.V{X: max(blade.Max.X, patch.Max.X), Y: max(blade.Max.Y, patch.Max.Y)}
+			blade.Footprint = patch.Footprint
+			blade.Anchors = patch.Anchors
+			out = append(out, patch)
+			blades = append(blades, blade)
 		}
-		// Choose depth independently of density, so surviving tufts keep their
-		// layer on rebuild. Rear blades grow behind the rock without sod.
-		if rockGrowthRandom(c, c.Center, 0x6772617373)(4) < .4 {
-			blade.Kind, blade.Underlay = BackgroundGrassAttachment, true
-			out = append(out, blade)
-			continue
-		}
-		coverGrassTrim(&patch, trim)
-		blade.Min = geom.V{X: min(blade.Min.X, patch.Min.X), Y: min(blade.Min.Y, patch.Min.Y)}
-		blade.Max = geom.V{X: max(blade.Max.X, patch.Max.X), Y: max(blade.Max.Y, patch.Max.Y)}
-		blade.Footprint = patch.Footprint
-		blade.Anchors = patch.Anchors
-		out = append(out, patch)
-		blades = append(blades, blade)
 	}
 	out = append(out, blades...)
 	return out

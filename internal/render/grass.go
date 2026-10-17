@@ -173,16 +173,24 @@ func prepareRockGrass(grid terrain.RockGrid, guides []terrain.Guide, owned bool,
 
 // Grass bases follow visible geometry; shading normals only decide eligibility.
 func prepareGrassAttachments(c terrain.RockCell, growth RockGrowthOptions, support ...terrain.RockEdge) (Attachment, Attachment, bool) {
+	guide, edge, anchor, support := grassAttachmentSite(c, growth, support)
+	if edge < 0 {
+		return Attachment{}, Attachment{}, false
+	}
+	return prepareGrassTuft(c, growth.Guides[guide], support, edge, anchor, rockGrowthRandom(c, c.Center, 0x6772617373))
+}
+
+func grassAttachmentSite(c terrain.RockCell, growth RockGrowthOptions, support []terrain.RockEdge) (int, int, geom.V, []terrain.RockEdge) {
 	mode := terrain.RockOrientation(c)
 	normal := terrain.WorldNormal(mode, c.Normal)
 	upward := -normal.Y
 	random := rockGrowthRandom(c, c.Center, 0x6772617373)
 	if growth.Grass <= 0 || !c.Raised || c.Color.A == 0 || upward < .10 || random(0) > growth.Grass*geom.Smoothstep(.08, .35, upward) {
-		return Attachment{}, Attachment{}, false
+		return -1, -1, geom.V{}, support
 	}
 	guide, candidate := grassGuideAnchor(c, growth.Guides)
 	if guide < 0 {
-		return Attachment{}, Attachment{}, false
+		return -1, -1, geom.V{}, support
 	}
 	if len(support) == 0 {
 		for j, a := range c.Polygon {
@@ -209,9 +217,85 @@ func prepareGrassAttachments(c terrain.RockCell, growth RockGrowthOptions, suppo
 			best, distance, anchor = i, ds, q
 		}
 	}
-	if best < 0 {
-		return Attachment{}, Attachment{}, false
+	return guide, best, anchor, support
+}
+
+// Walk connected crest edges, stopping at gaps, downward-facing edges, or the
+// end of the guide-side surface. Arc length keeps colonies fitted to corners.
+func grassSurfacePoint(c terrain.RockCell, guide terrain.Guide, support []terrain.RockEdge, edge int, anchor geom.V, distance float64) (geom.V, int, float64) {
+	forward := distance >= 0
+	remaining, traveled := math.Abs(distance), 0.0
+	for steps := 0; steps < len(support); steps++ {
+		e := support[edge]
+		end := e.B
+		if !forward {
+			end = e.A
+		}
+		length := end.Sub(anchor).Len()
+		if remaining <= length {
+			if length > 0 {
+				anchor = geom.LerpVector(anchor, end, remaining/length)
+			}
+			return anchor, edge, traveled + remaining
+		}
+		remaining, traveled, anchor = remaining-length, traveled+length, end
+		next := -1
+		for i, candidate := range support {
+			start := candidate.A
+			if !forward {
+				start = candidate.B
+			}
+			if i == edge || start.Sub(end).Len2() > 1e-18 || candidate.B.Sub(candidate.A).Len2() < 1e-12 {
+				continue
+			}
+			inward := candidate.B.Sub(candidate.A).Norm().Perp()
+			mid := geom.LerpVector(candidate.A, candidate.B, .5)
+			_, crestDistance := guide.NearestPoint(mid)
+			if terrain.WorldPoint(terrain.RockOrientation(c), inward).Y >= -1e-9 && crestDistance <= .014 && geom.InsidePolygon(mid.Add(inward.Mul(.001)), c.Polygon) {
+				next = i
+				break
+			}
+		}
+		if next < 0 {
+			break
+		}
+		edge = next
 	}
+	return anchor, edge, traveled
+}
+
+func prepareGrassColony(c terrain.RockCell, growth RockGrowthOptions, support []terrain.RockEdge) [][2]Attachment {
+	guide, edge, anchor, support := grassAttachmentSite(c, growth, support)
+	if edge < 0 {
+		return nil
+	}
+	random := rockGrowthRandom(c, c.Center, 0x6772617373)
+	count := 2 + int(random(5)*2)
+	crest := growth.Guides[guide]
+	_, _, left := grassSurfacePoint(c, crest, support, edge, anchor, -.06)
+	_, _, right := grassSurfacePoint(c, crest, support, edge, anchor, .06)
+	scale := geom.Clamp(math.Sqrt(math.Abs(geom.PolygonArea(c.Polygon)))/.045, .5, 1)
+	span := min(float64(count-1)*scale*geom.Lerp(.018, .024, random(6)), (left+right)*.8)
+	if span < .004*float64(count-1) {
+		return nil
+	}
+	start := geom.Clamp(-span*.5, -left*.8, right*.8-span)
+	var colony [][2]Attachment
+	for i := 0; i < count; i++ {
+		p, localEdge, _ := grassSurfacePoint(c, crest, support, edge, anchor, start+span*float64(i)/float64(count-1))
+		patch, blades, ok := prepareGrassTuft(c, crest, support, localEdge, p, rockGrowthRandom(c, p, 0x6772617373))
+		if ok {
+			colony = append(colony, [2]Attachment{patch, blades})
+		}
+	}
+	if len(colony) < 2 {
+		return nil
+	}
+	return colony
+}
+
+func prepareGrassTuft(c terrain.RockCell, guide terrain.Guide, support []terrain.RockEdge, best int, anchor geom.V, random func(int64) float64) (Attachment, Attachment, bool) {
+	mode := terrain.RockOrientation(c)
 	tangent := support[best].B.Sub(support[best].A).Norm()
 	worldTangent := terrain.WorldPoint(mode, tangent)
 	angle := math.Atan2(worldTangent.Y, worldTangent.X)
@@ -249,7 +333,7 @@ func prepareGrassAttachments(c terrain.RockCell, growth RockGrowthOptions, suppo
 			continue
 		}
 		mid := geom.LerpVector(e.A, e.B, .5)
-		_, crestDistance := growth.Guides[guide].NearestPoint(mid)
+		_, crestDistance := guide.NearestPoint(mid)
 		if crestDistance > .014 && edge != best {
 			continue
 		}

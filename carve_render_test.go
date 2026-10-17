@@ -510,9 +510,9 @@ func (g *carvePixelGame) Draw(*ebiten.Image) {
 
 func carvePixelFixture() terrain.SectionData {
 	cell := terrainRect(.05, .35, .90, .55)
-	// Keep this tuft in front so upload/readback tests exercise the separate
-	// grass image. Rear-only tufts are covered by the render package tests.
-	cell.Center.X -= .02
+	// Keep foreground tufts in this colony with both smooth and rough edges,
+	// so upload/readback tests exercise the separate grass image.
+	cell.Center.X -= .015
 	cell.Normal = V3{Y: -.6, Z: .8}
 	cell.Color = color.NRGBA{R: 130, G: 120, B: 90, A: 255}
 	cell.Shadow, cell.Ambient, cell.Z = 1, 1, .025

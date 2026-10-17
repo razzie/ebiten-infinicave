@@ -110,10 +110,12 @@ type Config struct {
 	// The default is 0.72. Lower density reduces colony count while preserving
 	// the placement, size, shape, and colors of surviving colonies.
 	MossDensity float64
-	// GrassDensity controls yellow or green grass beside guides on upward-facing
-	// foreground facets, from 0 (disabled) to 1 (maximum coverage). Some tufts
-	// grow behind rocks; foreground tufts include ground patches over the edge.
-	// The default is 0.35. Lower density preserves surviving tufts.
+	// GrassDensity controls yellow or green grass colonies beside guides on
+	// upward-facing foreground facets, from 0 (disabled) to 1 (all eligible
+	// colonies). Each colony has 2–3 tufts following the rock surface, each
+	// randomly placed in front or behind it. Foreground tufts include ground
+	// patches over the edge. The default is 0.35. Lower density preserves
+	// surviving colonies.
 	GrassDensity float64
 	// HangingGrowthDensity is the occurrence probability for leafy cave bulbs
 	// on eligible exposed undersides and guide-cell lower edges, from 0 (disabled)

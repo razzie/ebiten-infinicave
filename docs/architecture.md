@@ -193,8 +193,9 @@ angled halfway between each root's surface normal and world-up in compact fans.
 Sod uses a shade close to the blade bases. A narrow lip overlaps the boundary
 to hide raster fringes, and covers protruding structural teeth with shared
 support liveness. Strips cover all eligible silhouette segments independently
-of the blade count. A stable per-cell choice places some tufts in the
-undergrowth image as blades alone.
+of the blade count. Each eligible cell seeds a colony of 2–3 tufts spaced along
+connected crest edges. Each tuft follows its local surface slope and independently chooses the
+foreground or undergrowth image; rear tufts contain blades alone.
 It shares the immutable foreground CPU recipe and supplies the shadow silhouette
 alongside rocks, while retaining an independent upload, publication, resize
 width, displayed recipe, and reveal clock. A late full foreground recipe can
