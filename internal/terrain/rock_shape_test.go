@@ -46,6 +46,28 @@ func TestRockContourPreservesConcaveGap(t *testing.T) {
 	}
 }
 
+func TestRockContourDoesNotLeaveTeethBeyondClampedRelief(t *testing.T) {
+	// Branch relief has a solid core and a zero-height exterior. Interpolating
+	// those endpoint heights can leave tips in the flat exterior, where later
+	// gradient polishing cannot move them back onto the intended silhouette.
+	height := func(p geom.V) float64 {
+		return math.Max(0, .020-2*math.Max(0, p.Y-.18))
+	}
+	grid := contourRockGrid(RockGrid{terrainRect(.1, .1, .2, .2)}, height)
+	area := 0.0
+	for _, c := range grid {
+		area += geom.PolygonArea(c.Polygon)
+		for _, p := range c.Polygon {
+			if p.Y > .186+1e-10 || height(p) < rockContourHeight-1e-10 {
+				t.Fatalf("clipping left an unsupported tooth at %v: height %g", p, height(p))
+			}
+		}
+	}
+	if math.Abs(area-.0172) > 1e-10 {
+		t.Fatalf("clipping changed the solid footprint: area=%g", area)
+	}
+}
+
 func TestRockContourFindsInteriorRelief(t *testing.T) {
 	poly := []geom.V{{X: 0.1, Y: 0.1}, {X: 0.2, Y: 0.1}, {X: 0.2, Y: 0.2}, {X: 0.1, Y: 0.2}}
 	faces := contourRockFace(poly, geom.V{X: 0.15, Y: 0.15}, func(p geom.V) float64 { return .030 - p.Sub(geom.V{X: 0.15, Y: 0.15}).Len() })
@@ -133,9 +155,9 @@ func TestContourSamplesPartialSharedEdgesAtSameJunctions(t *testing.T) {
 	if len(clipped) != 3 {
 		t.Fatalf("expected three clipped neighbors, got %d", len(clipped))
 	}
-	// Nonlinear relief must still interpolate through the same junctions on
-	// the long merged edge and both shorter neighboring edges.
-	want := .2 + (.23*.23-.2*.2)/(.3*.3-.2*.2)*.1
+	// Nonlinear relief must cross at the actual contour on both the long
+	// merged edge and its shorter neighboring edge.
+	const want = .23
 	for _, i := range []int{0, 2} {
 		found := false
 		for _, p := range clipped[i].Polygon {
@@ -160,6 +182,18 @@ func TestContourKeepsGuideHeightDiscontinuity(t *testing.T) {
 	grid := contourRockGrid(RockGrid{terrainRect(.1, .2, .2, .1)}, height, []Guide{guide})
 	if len(grid) != 1 || math.Abs(geom.PolygonArea(grid[0].Polygon)-.02) > 1e-12 {
 		t.Fatal("sampling on the guide eroded its raised side")
+	}
+	// A crossing along the lip must sample the raised side throughout the
+	// nonlinear solve, even when the guide itself evaluates to zero height.
+	height = func(p geom.V) float64 {
+		if p.Y <= .2 {
+			return 0
+		}
+		return math.Max(0, .024-.16*(p.X-.1))
+	}
+	grid = contourRockGrid(RockGrid{terrainRect(.1, .2, .2, .1)}, height, []Guide{guide})
+	if len(grid) != 1 || math.Abs(geom.PolygonArea(grid[0].Polygon)-.01) > 1e-8 {
+		t.Fatal("contour solving crossed onto the guide's empty side")
 	}
 }
 

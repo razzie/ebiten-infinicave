@@ -97,6 +97,7 @@ The order is background and fog, `BehindRocks`, rear grass blades and hanging gr
 | `LookaheadSections` | Prefetch this many extra sections beyond the immediate neighbor in the direction of travel; default 4, nonnegative. Zero disables lookahead. |
 | `BranchingStrategy` | `BranchingSimple`, `BranchingRecursive`, or `BranchingLoops`. |
 | `Texture` | Surface grain strength, from 0 to 16. |
+| `SpikeDensity`, `EdgeRoughness` | Exposed rock edge detail, from 0 to 1. Upward-facing lips stay nearly smooth, with tiny chips, no added outward spikes, and faint bevel highlights. |
 | `Fog`, `BatsPerMinute` | Animated atmosphere and bat arrivals; zero disables each. |
 | `DecorationBurn` | Burn dissolve decorations removed by runtime carving; enabled by `DefaultConfig()`. |
 | `AppearanceFade` | Fade in arriving rocks and vegetation; enabled by `DefaultConfig()`. |
@@ -107,6 +108,11 @@ The order is background and fog, `BehindRocks`, rear grass blades and hanging gr
 | `ShadowOpacity` | Dynamic background shadow opacity from 0 to 1. |
 | `CollisionTolerance` | Optional collision polygon simplification tolerance; zero keeps exact boundaries. |
 | `View` | `ViewShaded`, `ViewClay`, `ViewHeight`, `ViewNormals`, or `ViewShadows`. |
+
+Exposed side and underside contours break into broad angular edges with deep
+folds and strongly shaded facets. Fine chips remain along both halves.
+`EdgeRoughness` controls their occurrence and depth. Upward-facing cells keep
+their smooth silhouette and shading.
 
 Small moss colonies spread across the lighter, lower parts of upward-facing
 rock cells, following nearby horizontal cell edges with a stronger lateral spread

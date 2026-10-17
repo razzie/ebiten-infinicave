@@ -226,7 +226,9 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 		grid = terrain.ShadeRockFaces(grid, boundary, neighbors)
 	}
 	var trim []Attachment
+	var splits map[int]rockFaceSplit
 	if raised && (view == ViewShaded || view == ViewClay) {
+		grid, boundary, splits = foldRockEdges(grid, boundary, density.Shape)
 		grid, boundary, trim = visualBoundaryGrid(grid, boundary, density, owned, view)
 	}
 	if raised {
@@ -249,7 +251,11 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 		if clr.A == 0 || (owned && !inTerrainBand(poly...)) {
 			continue
 		}
-		vertices, indices = appendCellMesh(vertices, indices, poly, s, clr, cell.Normal)
+		if split, ok := splits[cellIndex]; ok {
+			vertices, indices = appendSplitRockCellMesh(vertices, indices, cell, clr, split)
+		} else {
+			vertices, indices = appendCellMesh(vertices, indices, poly, s, clr, cell.Normal)
+		}
 		if raised && view == ViewShaded {
 			// Surface moss is clipped atlas geometry, generated below.
 		}
@@ -644,6 +650,7 @@ func PrepareForegroundGrowth(data terrain.SectionData, view View, base SectionMe
 		}
 		topology = terrain.PrepareRockAppearance(topology)
 		grid, boundary := topology.Appearance, topology.Boundary
+		grid, boundary, _ = foldRockEdges(grid, boundary, density.Shape)
 		grid, boundary, trim := visualBoundaryGrid(grid, boundary, density, true, view)
 		growth := prepareGrowthAttachments(grid, boundary, density, true, trim...)
 		stampGrowthIDs(growth, grid)

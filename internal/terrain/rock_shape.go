@@ -114,11 +114,15 @@ func contourRockFace(poly []geom.V, center geom.V, heightAt func(geom.V) float64
 		// a face whose perimeter vertices happen to be outside the footprint.
 		mid := poly[tri[0]].Add(poly[tri[1]]).Add(poly[tri[2]]).Mul(1.0 / 3)
 		z := heightAt(mid) - rockContourHeight
+		var boundaries []Guide
+		if len(guides) > 0 {
+			boundaries = guides[0]
+		}
 		for k, a := range tri {
 			b := tri[(k+1)%3]
 			points := []geom.V{mid, poly[a], poly[b]}
 			heights := []float64{z, values[a], values[b]}
-			clipped := clipHeightTriangle(points, heights)
+			clipped := clipHeightTriangle(points, heights, heightAt, boundaries)
 			if len(clipped) >= 3 && geom.PolygonArea(clipped) > 1e-13 {
 				faces = append(faces, clipped)
 			}
@@ -145,16 +149,42 @@ func contourRockFace(poly []geom.V, center geom.V, heightAt func(geom.V) float64
 	return faces
 }
 
-// Height is linear on each sampling triangle; crossings are independent of
-// edge traversal direction, so neighboring fragments meet without cracks.
-func clipHeightTriangle(points []geom.V, values []float64) []geom.V {
+// Find crossings on the actual relief, which can flatten to zero outside a
+// branch. Linear height interpolation there leaves protruding triangular teeth
+// that subsequent gradient projection cannot remove. Starting from the solid
+// endpoint makes the crossing independent of edge traversal direction.
+func clipHeightTriangle(points []geom.V, values []float64, heightAt func(geom.V) float64, guides []Guide) []geom.V {
 	var out []geom.V
 	prev, zp := points[len(points)-1], values[len(values)-1]
 	for i, p := range points {
 		z := values[i]
 		if (z >= 0) != (zp >= 0) {
-			t := zp / (zp - z)
-			out = append(out, geom.LerpVector(prev, p, geom.Clamp(t, 0, 1)))
+			crossing := geom.LerpVector(prev, p, geom.Clamp(zp/(zp-z), 0, 1))
+			sample := heightAt
+			if _, pr := nearestGuide(crossing, guides); pr.Dist < mergeTolerance {
+				// Guide heights jump across the lip. Keep root samples on this
+				// triangle's side, just like its original boundary vertices.
+				interior := points[0].Add(points[1]).Add(points[2]).Mul(1.0 / 3)
+				sample = func(q geom.V) float64 {
+					return heightAt(geom.LerpVector(q, interior, 1e-6))
+				}
+			}
+			if math.Abs(sample(crossing)-rockContourHeight) >= 1e-12 {
+				solid, empty := prev, p
+				if zp < 0 {
+					solid, empty = empty, solid
+				}
+				for iteration := 0; iteration < 40; iteration++ {
+					mid := geom.LerpVector(solid, empty, .5)
+					if sample(mid) >= rockContourHeight {
+						solid = mid
+					} else {
+						empty = mid
+					}
+				}
+				crossing = geom.LerpVector(solid, empty, .5)
+			}
+			out = append(out, crossing)
 		}
 		if z >= 0 {
 			out = append(out, p)

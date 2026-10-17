@@ -27,6 +27,10 @@ func TestVisualCapture(t *testing.T) {
 		config.Seed = seed
 	}
 	config.Fog, config.BatsPerMinute = 0, 0
+	config.AppearanceFade = false
+	if os.Getenv("INFINICAVE_CAPTURE_EDGES") == "0" {
+		config.SpikeDensity, config.EdgeRoughness = 0, 0
+	}
 	if os.Getenv("INFINICAVE_CAPTURE_FOG") == "1" {
 		config.Fog = DefaultConfig().Fog
 	}

@@ -53,10 +53,12 @@ func statsOf(s SectionData) sectionStats {
 // Background families retain curved paths with branches and free offshoots.
 // Foreground uses recursive branches, the default even for zero options.
 // Branch thickness varies within its bounds; negative points open shoulders.
+// Upward-facing guide lips retain only subpixel silhouette irregularity.
+// Contour intersections follow the actual relief instead of linear heights.
 func TestSectionStatsStable(t *testing.T) {
 	want := map[int64]sectionStats{
-		1:  {9710, 1877, 77, .9722268212},
-		42: {9651, 1473, 69, .7534366642},
+		1:  {9710, 1873, 110, .9509602572},
+		42: {9651, 1554, 102, .7789434915},
 	}
 	for seed, w := range want {
 		got := statsOf(BuildSection(seed, 0))

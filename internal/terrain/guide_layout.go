@@ -127,7 +127,7 @@ func randomGuide(rng *rand.Rand, center geom.V, crowded bool, orientation ...Ori
 	for i := range knots {
 		knots[i] = knots[i].Add(offset)
 	}
-	return RidgedGuide(SplineGuide(knots, 1), rng.Int63())
+	return ridgedGuide(SplineGuide(knots, 1), rng.Int63(), OptionalOrientation(orientation))
 }
 
 func (layout guideLayout) fill(rng *rand.Rand, guides, obstacles []Guide, margin float64) []Guide {

@@ -74,6 +74,177 @@ func appendCellMesh(vertices []ebiten.Vertex, indices []uint32, poly []geom.V, c
 	return vertices, indices
 }
 
+type rockFaceSplit struct {
+	edge          terrain.RockEdge
+	point, normal geom.V
+	start, count  int
+}
+
+// Replace a sampled air contour with two broad angular edges. Shared joins and
+// upward-facing cells stay fixed; the copy belongs only to the render recipe.
+func foldRockEdges(grid terrain.RockGrid, boundary []terrain.RockEdge, shape terrain.ShapeOptions) (terrain.RockGrid, []terrain.RockEdge, map[int]rockFaceSplit) {
+	if shape.EdgeRoughness == 0 {
+		return grid, boundary, nil
+	}
+	exposed := make(map[[4]int64]bool, len(boundary))
+	for _, edge := range boundary {
+		exposed[geom.EdgeKey(edge.A, edge.B)] = true
+	}
+	splits := make(map[int]rockFaceSplit)
+	out := append(terrain.RockGrid(nil), grid...)
+	for i, c := range grid {
+		mode := terrain.RockOrientation(c)
+		if !c.Raised || terrain.WorldNormal(mode, c.Normal).Y < -.15 {
+			continue
+		}
+		random := rockGrowthRandom(c, c.Center, 0x666f6c646564)
+		if random(0) >= .95*shape.EdgeRoughness {
+			continue
+		}
+		air := make([]bool, len(c.Polygon))
+		start := -1
+		for j, a := range c.Polygon {
+			b := c.Polygon[(j+1)%len(c.Polygon)]
+			outward := b.Sub(a).Norm().Perp().Mul(-1)
+			air[j] = exposed[geom.EdgeKey(a, b)] && terrain.WorldPoint(mode, outward).Y >= -.1
+			if !air[j] {
+				start = j + 1
+			}
+		}
+		if start < 0 {
+			continue
+		}
+		for offset := 0; offset < len(air); {
+			first := (start + offset) % len(air)
+			if !air[first] {
+				offset++
+				continue
+			}
+			count := 1
+			direction := c.Polygon[(first+1)%len(air)].Sub(c.Polygon[first]).Norm()
+			for offset+count < len(air) {
+				j := (first + count) % len(air)
+				if !air[j] || direction.Dot(c.Polygon[(j+1)%len(air)].Sub(c.Polygon[j]).Norm()) < .5 {
+					break
+				}
+				count++
+			}
+			offset += count
+			edge := terrain.RockEdge{A: c.Polygon[first], B: c.Polygon[(first+count)%len(air)], Cell: i}
+			length := edge.B.Sub(edge.A).Len()
+			outward := edge.B.Sub(edge.A).Norm().Perp().Mul(-1)
+			depth := c.Center.Sub(edge.A).Dot(outward.Mul(-1))
+			if length < .01 || depth < .0025 {
+				continue
+			}
+			if previous, ok := splits[i]; ok {
+				previousLength := previous.edge.B.Sub(previous.edge.A).Len()
+				if length < previousLength-1e-9 {
+					continue
+				}
+				if math.Abs(length-previousLength) <= 1e-9 {
+					a := terrain.CollisionVertexKey(terrain.RockMaterialPoint(c, edge.A.Add(edge.B).Mul(.5)))
+					b := terrain.CollisionVertexKey(terrain.RockMaterialPoint(c, previous.edge.A.Add(previous.edge.B).Mul(.5)))
+					if a[0] > b[0] || a[0] == b[0] && a[1] >= b[1] {
+						continue
+					}
+				}
+			}
+			inset := math.Min(.02, math.Min(length*.45, depth*.55)) * shape.EdgeRoughness
+			point := geom.LerpVector(edge.A, edge.B, .3+.4*random(1)).Sub(outward.Mul(inset))
+			if !geom.InsidePolygon(point, c.Polygon) {
+				continue
+			}
+			// A simplified contour must not bridge an existing air pocket.
+			contained := true
+			for _, end := range []geom.V{edge.A, edge.B} {
+				direction := end.Sub(point)
+				for j, a := range c.Polygon {
+					if _, hit := geom.RaySegment(point, direction.Norm(), a, c.Polygon[(j+1)%len(air)], direction.Len()-1e-8); hit {
+						contained = false
+						break
+					}
+				}
+				if !contained {
+					break
+				}
+			}
+			if !contained {
+				continue
+			}
+			poly := []geom.V{edge.A, point}
+			for j := count; j < len(air); j++ {
+				poly = append(poly, c.Polygon[(first+j)%len(air)])
+			}
+			if !simpleVisualOutline(poly) || geom.PolygonArea(poly) < .000001 || len(geom.Triangulate(poly)) != len(poly)-2 || !geom.InsidePolygon(c.Center, poly) {
+				continue
+			}
+			out[i].Polygon = geom.OrderPolygon(poly)
+			splits[i] = rockFaceSplit{edge: edge, point: point, normal: c.Center.Sub(point).Norm().Perp(), start: first, count: count}
+		}
+	}
+	if len(splits) == 0 {
+		return grid, boundary, nil
+	}
+	removed := make(map[[4]int64]bool)
+	for i, split := range splits {
+		poly := grid[i].Polygon
+		for j := 0; j < split.count; j++ {
+			k := (split.start + j) % len(poly)
+			removed[geom.EdgeKey(poly[k], poly[(k+1)%len(poly)])] = true
+		}
+	}
+	edges := make([]terrain.RockEdge, 0, len(boundary)+len(splits))
+	for _, edge := range boundary {
+		if !removed[geom.EdgeKey(edge.A, edge.B)] {
+			edges = append(edges, edge)
+		}
+	}
+	// Boundary order follows the stable cell order, independent of map order.
+	for i := range grid {
+		if split, ok := splits[i]; ok {
+			edges = append(edges, terrain.RockEdge{A: split.edge.A, B: split.point, Cell: i}, terrain.RockEdge{A: split.point, B: split.edge.B, Cell: i})
+		}
+	}
+	return out, edges, splits
+}
+
+// Clip individual triangles so a fold cannot bridge a concave face. Both
+// halves retain the original material coordinates and meet at the same line.
+func appendSplitRockCellMesh(vertices []ebiten.Vertex, indices []uint32, c terrain.RockCell, clr color.NRGBA, split rockFaceSplit) ([]ebiten.Vertex, []uint32) {
+	first := len(vertices)
+	triangles := geom.Triangulate(c.Polygon)
+	for _, sign := range []float64{-1, 1} {
+		n := split.normal.Mul(sign)
+		surface := (geom.V3{X: c.Normal.X + n.X*.7, Y: c.Normal.Y + n.Y*.7, Z: c.Normal.Z}).Norm()
+		light := (.25 + .75*terrain.SurfaceLight(surface, terrain.RockOrientation(c))) / (.25 + .75*terrain.SurfaceLight(c.Normal, terrain.RockOrientation(c)))
+		shade := growthColor(clr, geom.Clamp(light*(.95+sign*.12), .45, 1.65))
+		for _, tri := range triangles {
+			poly := geom.ClipHalfPlane([]geom.V{c.Polygon[tri[0]], c.Polygon[tri[1]], c.Polygon[tri[2]]}, n, split.point.Dot(n))
+			// A split through an existing vertex can emit that point twice.
+			// Each clipped triangle is convex: clean it and fan from its own
+			// interior so duplicate boundary points cannot erase a facet.
+			poly = geom.CleanPolygon(poly)
+			if len(poly) < 3 || geom.PolygonArea(poly) < 1e-14 {
+				continue
+			}
+			vertices, indices = appendCellMesh(vertices, indices, poly, geom.PolygonCenter(poly), shade, surface)
+		}
+	}
+	// Triangulation inside either half must retain one continuous plane.
+	radius := .001
+	for _, p := range c.Polygon {
+		radius = math.Max(radius, p.Sub(c.Center).Len())
+	}
+	for i := first; i < len(vertices); i++ {
+		v := &vertices[i]
+		dx := float64(v.DstX)/RasterPixelsPerUnit - c.Center.X
+		dy := float64(v.DstY)/RasterPixelsPerUnit + terrain.GenerationMinY - c.Center.Y
+		v.Custom1 = float32((dx*float64(v.Custom2) + dy*float64(v.Custom3)) / radius)
+	}
+	return vertices, indices
+}
+
 func appendRockQuad(vertices []ebiten.Vertex, indices []uint32, points [4]geom.V, clr color.NRGBA) ([]ebiten.Vertex, []uint32) {
 	first := uint32(len(vertices))
 	for _, p := range points {
@@ -176,6 +347,8 @@ func appendRockBevels(vertices []ebiten.Vertex, indices []uint32, grid terrain.R
 	for _, edge := range edges {
 		c := grid[edge.Cell]
 		inward := edge.B.Sub(edge.A).Perp().Norm()
+		worldOutward := terrain.WorldPoint(terrain.RockOrientation(c), inward.Mul(-1))
+		up := geom.Smoothstep(.15, .75, -worldOutward.Y)
 		world := terrain.RockMaterialPoint(c, edge.A.Add(edge.B).Mul(.5))
 		key := terrain.CollisionVertexKey(world)
 		chip := terrain.SiteRandom(0x626576656c, key[0], key[1], 0)
@@ -185,6 +358,7 @@ func appendRockBevels(vertices []ebiten.Vertex, indices []uint32, grid terrain.R
 		facing := geom.Smoothstep(.02, .85, edgeLight)
 		if view == ViewShaded {
 			width = math.Min((.00065+.00115*chip)*(.6+.4*facing), edge.B.Sub(edge.A).Len()*.1)
+			width *= geom.Lerp(1, .2, up)
 		}
 		a, b := edge.A.Add(inward.Mul(width)), edge.B.Add(inward.Mul(width))
 		if len(owned) > 0 && owned[0] && !inTerrainBand(edge.A, edge.B, b, a) {
@@ -197,10 +371,10 @@ func appendRockBevels(vertices []ebiten.Vertex, indices []uint32, grid terrain.R
 		clr := terrain.RockSurfaceColor(normal, c.Shadow, c.Ambient, terrain.RockOrientation(c))
 		clr = rockViewColor(terrain.RockCell{Color: clr, Raised: true}, view)
 		if view == ViewShaded {
-			// A broader pale rim catches the upper-left light on exposed tops
-			// and side facets. Occluded and light-opposing edges stay subdued.
+			// Side facets catch a pale rim; exposed tops keep only a faint lip
+			// so small boundary changes do not read as bright raised ridges.
 			light := terrain.SurfaceLight(normal, terrain.RockOrientation(c))
-			warmth := .8 * facing * light * c.Shadow * (.5 + .5*chip)
+			warmth := .8 * facing * light * c.Shadow * (.5 + .5*chip) * geom.Lerp(1, .2, up)
 			clr.R = uint8(math.Round(geom.Lerp(float64(clr.R), 255, warmth)))
 			clr.G = uint8(math.Round(geom.Lerp(float64(clr.G), 234, warmth)))
 			clr.B = uint8(math.Round(geom.Lerp(float64(clr.B), 193, warmth)))
@@ -323,7 +497,13 @@ func visualBoundaryGrid(grid terrain.RockGrid, boundary []terrain.RockEdge, grow
 			}
 		}
 		n := e.B.Sub(e.A).Norm().Perp().Mul(-1)
-		count := max(1, int(math.Round(length/.012)))
+		worldOutward := terrain.WorldPoint(terrain.RockOrientation(c), n)
+		up := geom.Smoothstep(.15, .75, -worldOutward.Y)
+		// Upward-facing lips have sparse, shallow irregularities. Use world
+		// up so landscape scenes receive the same treatment as portrait ones.
+		amplitude *= geom.Lerp(1, .05, up)
+		spikeDensity := shape.SpikeDensity * (1 - up)
+		count := max(1, int(math.Round(length/.012*geom.Lerp(1, .25, up))))
 		var points []geom.V
 		type tooth struct {
 			p    geom.V
@@ -334,7 +514,7 @@ func visualBoundaryGrid(grid terrain.RockGrid, boundary []terrain.RockEdge, grow
 			channel := int64(j) * 4
 			u := (float64(j) + .35 + .30*random(channel)) / float64(count)
 			h := shape.EdgeRoughness * (-.003 + .004*random(channel+1))
-			if random(channel+2) < shape.SpikeDensity {
+			if random(channel+2) < spikeDensity {
 				h += .002 + .003*random(channel+3)
 			}
 			h *= amplitude

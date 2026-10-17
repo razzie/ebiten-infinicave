@@ -174,10 +174,14 @@ func nearestGuide(p geom.V, guides []Guide) (int, Projection) {
 	return bestI, best
 }
 
-// Broad, slightly uneven facets give the crest a chipped rock silhouette.
+// Broad facets follow the crest, with only shallow unevenness on exposed tops.
 // These are border vertices, not Voronoi sites. Build them before translating
 // a guide into a section window so overlapping windows get identical ridges.
 func RidgedGuide(g Guide, seed int64) Guide {
+	return ridgedGuide(g, seed, Vertical)
+}
+
+func ridgedGuide(g Guide, seed int64, orientation Orientation) Guide {
 	rng := rand.New(rand.NewSource(seed))
 	length := g.S[len(g.S)-1]
 	pts := []geom.V{g.Pts[0]}
@@ -196,7 +200,12 @@ func RidgedGuide(g Guide, seed int64) Guide {
 		s += step
 		p, _, n := g.frameAt(s)
 		taper := geom.Smoothstep(0, 0.018, math.Min(s, length-s))
-		pts = append(pts, p.Add(n.Mul(geom.Lerp(-0.0025, 0.0025, rng.Float64())*taper)))
+		// The guide itself defines the structural silhouette. Its final rock
+		// side may be reversed by ForceGuidesUp, so flatten near-horizontal
+		// lips for either point order before rendering adds fine edge detail.
+		up := geom.Smoothstep(.15, .75, math.Abs(WorldPoint(orientation, n).Y))
+		amplitude := geom.Lerp(.0025, .00015, up)
+		pts = append(pts, p.Add(n.Mul(geom.Lerp(-amplitude, amplitude, rng.Float64())*taper)))
 	}
 	g.projection = nil
 	g.Pts, g.S = pts, make([]float64, len(pts))

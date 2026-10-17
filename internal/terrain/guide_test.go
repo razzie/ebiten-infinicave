@@ -151,9 +151,21 @@ func TestPreparedGuideProjectionTailsAndTies(t *testing.T) {
 }
 
 func TestRidgedGuideHasBroadDeterministicFacets(t *testing.T) {
+	for _, mode := range []Orientation{Vertical, Horizontal} {
+		t.Run(mode.String(), func(t *testing.T) {
+			testRidgedGuideFacets(t, mode)
+		})
+	}
+}
+
+func testRidgedGuideFacets(t *testing.T, mode Orientation) {
 	original := SplineGuide([]geom.V{{X: 0.1, Y: 0.2}, {X: 0.5, Y: 0.2}}, 1)
-	g := RidgedGuide(original, 42)
-	if !reflect.DeepEqual(g, RidgedGuide(original, 42)) {
+	if mode == Horizontal {
+		MapPoints(original.Pts, func(p geom.V) geom.V { return InternalPoint(mode, p) })
+		original.Min, original.Max = geom.PolygonBounds(original.Pts)
+	}
+	g := ridgedGuide(original, 42, mode)
+	if !reflect.DeepEqual(g, ridgedGuide(original, 42, mode)) {
 		t.Fatal("ridge changes when regenerated")
 	}
 	if len(g.Pts) >= len(original.Pts)/2 || len(g.Pts) < 15 {
@@ -164,17 +176,28 @@ func TestRidgedGuideHasBroadDeterministicFacets(t *testing.T) {
 	}
 	minY, maxY := .200, .200
 	for _, p := range g.Pts {
+		p = WorldPoint(mode, p)
 		minY, maxY = math.Min(minY, p.Y), math.Max(maxY, p.Y)
-		if math.Abs(p.Y-.200) > .0025 {
-			t.Fatal("ridge no longer follows the original guide")
+		// Less than a quarter pixel of deviation at 1000 pixels per unit:
+		// structural guide ridges must not recreate the large top-edge teeth.
+		if math.Abs(p.Y-.200) > .00025 {
+			t.Fatal("upward-facing guide still has prominent structural ridges")
 		}
 	}
-	if maxY-minY < .003 {
-		t.Fatal("guide border is still smooth")
+	if maxY-minY < .0001 {
+		t.Fatal("guide border lost all shallow irregularity")
 	}
+	// ForceGuidesUp can reverse the rock side after ridging the guide.
+	original.BrightSign = -1
+	for _, p := range ridgedGuide(original, 42, mode).Pts {
+		if math.Abs(WorldPoint(mode, p).Y-.200) > .00025 {
+			t.Fatal("reversing the guide side restored large structural ridges")
+		}
+	}
+	original.BrightSign = 1
 	// Translating a regeneration window cannot change its geometry.
 	original.translateY(-1)
-	shifted := RidgedGuide(original, 42)
+	shifted := ridgedGuide(original, 42, mode)
 	for i, p := range g.Pts {
 		if p.Sub(shifted.Pts[i].Add(geom.V{X: 0, Y: 1})).Len() > 1e-9 {
 			t.Fatal("roughness depends on section position")
