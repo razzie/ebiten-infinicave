@@ -291,7 +291,6 @@ type hangingGrowth struct {
 	lobes  [][]geom.V
 	center geom.V
 	radius float64
-	lichen bool
 }
 
 func hangingGrowthForEdge(cell terrain.RockCell, edge terrain.RockEdge, density float64) (hangingGrowth, bool) {
@@ -314,12 +313,11 @@ func hangingGrowthForEdge(cell terrain.RockCell, edge terrain.RockEdge, density 
 	down := terrain.InternalPoint(mode, geom.V{Y: 1})
 	right := terrain.InternalPoint(mode, geom.V{X: 1})
 	length := geom.Lerp(.012, .033, random(2))
-	sway := geom.Lerp(-.004, .004, random(3))
-	growth := hangingGrowth{lichen: random(4) < .42, radius: geom.Lerp(.0023, .0048, random(5))}
+	growth := hangingGrowth{radius: geom.Lerp(.0023, .0048, random(5))}
 	root := anchor.Sub(outward.Mul(.0006))
 	for i := 0; i < 6; i++ {
 		s := float64(i) / 5
-		growth.stem = append(growth.stem, root.Add(down.Mul(length*s)).Add(right.Mul(sway*s*s)))
+		growth.stem = append(growth.stem, root.Add(down.Mul(length*s)))
 	}
 	growth.center = growth.stem[len(growth.stem)-1].Add(down.Mul(growth.radius * .55))
 	for i := 0; i < 10; i++ {
@@ -329,17 +327,15 @@ func hangingGrowthForEdge(cell terrain.RockCell, edge terrain.RockEdge, density 
 		width := .8 + .2*math.Sin(angle)
 		growth.body = append(growth.body, growth.center.Add(right.Mul(math.Cos(angle)*r*width)).Add(down.Mul(math.Sin(angle)*r*1.2)))
 	}
-	if growth.lichen {
-		// Small alternating lobes turn the stem into a hanging lichen tuft.
-		for i := 2; i < len(growth.stem); i++ {
-			p := growth.stem[i]
-			side := right.Mul(float64(2*(i%2)-1) * growth.radius * .8)
-			leaf := []geom.V{p.Sub(down.Mul(.002)), p.Add(side).Sub(down.Mul(.001)), p.Add(side.Mul(.65)).Add(down.Mul(.002)), p.Add(down.Mul(.003))}
-			if geom.PolygonArea(leaf) < 0 {
-				leaf[1], leaf[3] = leaf[3], leaf[1]
-			}
-			growth.lobes = append(growth.lobes, leaf)
+	// Small alternating lobes turn every stem into a hanging lichen tuft.
+	for i := 2; i < len(growth.stem); i++ {
+		p := growth.stem[i]
+		side := right.Mul(float64(2*(i%2)-1) * growth.radius * .8)
+		leaf := []geom.V{p.Sub(down.Mul(.002)), p.Add(side).Sub(down.Mul(.001)), p.Add(side.Mul(.65)).Add(down.Mul(.002)), p.Add(down.Mul(.003))}
+		if geom.PolygonArea(leaf) < 0 {
+			leaf[1], leaf[3] = leaf[3], leaf[1]
 		}
+		growth.lobes = append(growth.lobes, leaf)
 	}
 	return growth, true
 }
@@ -418,12 +414,9 @@ func appendHangingRockGrowth(vertices []ebiten.Vertex, indices []uint32, grid te
 			n := b.Sub(a).Norm().Perp().Mul(.00055)
 			vertices, indices = appendRockQuad(vertices, indices, [4]geom.V{a.Add(n), a.Sub(n), b.Sub(n), b.Add(n)}, stemColor)
 		}
-		palette := color.NRGBA{R: 220, G: 215, B: 141, A: 255}
-		if growth.lichen {
-			palette = color.NRGBA{R: 155, G: 169, B: 93, A: 255}
-			for _, leaf := range growth.lobes {
-				vertices, indices = appendCellMesh(vertices, indices, leaf, geom.PolygonCenter(leaf), growthColor(palette, .72), geom.V3{Z: 1})
-			}
+		palette := color.NRGBA{R: 155, G: 169, B: 93, A: 255}
+		for _, leaf := range growth.lobes {
+			vertices, indices = appendCellMesh(vertices, indices, leaf, geom.PolygonCenter(leaf), growthColor(palette, .72), geom.V3{Z: 1})
 		}
 		first := len(vertices)
 		vertices, indices = appendCellMesh(vertices, indices, growth.body, growth.center, palette, geom.V3{Z: 1})
@@ -444,6 +437,58 @@ func growthColor(c color.NRGBA, light float64) color.NRGBA {
 	return color.NRGBA{R: uint8(geom.Clamp(float64(c.R)*light, 0, 255)), G: uint8(geom.Clamp(float64(c.G)*light, 0, 255)), B: uint8(geom.Clamp(float64(c.B)*light, 0, 255)), A: c.A}
 }
 
+// The lower edges of guide-facing tops can lie inside a formation. Bulbs hang
+// over its darker flanks, above the rock texture, but never across another top.
+func prepareGuideBulbs(grid terrain.RockGrid, boundary []terrain.RockEdge, growth RockGrowthOptions, owned bool) []Attachment {
+	if growth.Hanging <= 0 || len(growth.Guides) == 0 {
+		return nil
+	}
+	var tops terrain.RockGrid
+	for _, c := range grid {
+		if len(c.Polygon) >= 3 && c.Color.A != 0 && -terrain.WorldNormal(terrain.RockOrientation(c), c.Normal).Y >= .10 {
+			tops = append(tops, c)
+		}
+	}
+	clearance := newGrowthClearance(tops)
+	exposed := make(map[[4]int64]bool, len(boundary))
+	for _, e := range boundary {
+		exposed[geom.EdgeKey(e.A, e.B)] = true
+	}
+	var out []Attachment
+	for i, c := range tops {
+		if !c.Raised {
+			continue
+		}
+		if guide, _ := grassGuideAnchor(c, growth.Guides); guide < 0 {
+			continue
+		}
+		mode := terrain.RockOrientation(c)
+		for j, p := range c.Polygon {
+			q := c.Polygon[(j+1)%len(c.Polygon)]
+			outward := q.Sub(p).Norm().Perp().Mul(-1)
+			if exposed[geom.EdgeKey(p, q)] || q.Sub(p).Len() < .008 || terrain.WorldPoint(mode, outward).Y < .45 {
+				continue
+			}
+			random := rockGrowthRandom(c, geom.LerpVector(p, q, .5), 0x62756c6273)
+			if random(0) > growth.Hanging {
+				continue
+			}
+			anchor := geom.LerpVector(p, q, .22+.56*random(1))
+			support, ok := terrain.InsetRockAnchor(c.Polygon, anchor, outward.Mul(-1))
+			if !ok {
+				continue
+			}
+			a := newSpriteAttachment(HangingAttachment, HangingAtlas, int(random(3)*64), anchor, 0, .75+.35*random(2), mode, 1)
+			a.Anchors = []geom.V{support}
+			if (owned && !inTerrainBand(a.Min, a.Max)) || !clearance.fitsAroundSupport(a, i) {
+				continue
+			}
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 type growthClearance struct {
 	grid  terrain.RockGrid
 	index *geom.BoundsIndex
@@ -462,6 +507,12 @@ func newGrowthClearance(grid terrain.RockGrid) growthClearance {
 }
 
 func (c growthClearance) fits(a Attachment) bool {
+	return c.fitsAroundSupport(a, -1)
+}
+
+// Guide bulbs may overlap their supporting top. Other tops must clear every
+// painted triangle, including the root and narrow stalk segments.
+func (c growthClearance) fitsAroundSupport(a Attachment, support int) bool {
 	recipe := AtlasRecipes(a.Mesh.Texture)[a.Cell]
 	for i := 0; i < len(recipe.Indices); i += 3 {
 		var tri [3]geom.V
@@ -472,7 +523,7 @@ func (c growthClearance) fits(a Attachment) bool {
 			nearRoot = nearRoot && p.Len() < .002
 			tri[j] = a.Anchor.Add(terrain.InternalPoint(a.Orientation, geom.Rotate(p, a.Rotation).Mul(a.Scale)))
 		}
-		if nearRoot {
+		if nearRoot && support < 0 {
 			continue
 		}
 		if geom.PolygonArea(tri[:]) < 0 {
@@ -481,7 +532,7 @@ func (c growthClearance) fits(a Attachment) bool {
 		lo, hi := geom.PolygonBounds(tri[:])
 		clear := true
 		c.index.Query(geom.Bounds{Min: lo, Max: hi}, func(j int) bool {
-			if c.grid[j].Color.A == 0 {
+			if c.grid[j].Color.A == 0 || j == support {
 				return true
 			}
 			clear = !growthTriangleOverlap(tri[:], c.grid[j].Polygon)

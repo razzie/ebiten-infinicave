@@ -136,6 +136,13 @@ The viewer exposes the same setting:
 go run ./cmd/infinicave -seed 42 -moss-density 0.25
 ```
 
+Cave bulbs use the leafy lichen form, with straight stalks hanging vertically
+under gravity in either orientation. They also hang from the lower edges of
+top-facing guide cells, over the darker rock below. A bulb is omitted if its
+stalk, leaves, or body overlaps another top-facing cell.
+`HangingGrowthDensity` controls their occurrence on guide cells and exposed
+undersides.
+
 Diagnostic views hide vegetation and disable texture, background effects, fog, and bats. See the `Config` documentation for validation ranges and complete defaults.
 
 Full antialiases geometry and atlas baking. Off disables geometry antialiasing

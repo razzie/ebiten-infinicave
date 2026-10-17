@@ -115,8 +115,9 @@ type Config struct {
 	// grow behind rocks; foreground tufts include ground patches over the edge.
 	// The default is 0.35. Lower density preserves surviving tufts.
 	GrassDensity float64
-	// HangingGrowthDensity is the occurrence probability for cave bulbs and
-	// lichen on eligible exposed undersides, from 0 (disabled) to 1.
+	// HangingGrowthDensity is the occurrence probability for leafy cave bulbs
+	// on eligible exposed undersides and guide-cell lower edges, from 0 (disabled)
+	// to 1. Their stalks hang straight down under gravity in either orientation.
 	// The default is 0.28. Lower density preserves surviving growth.
 	HangingGrowthDensity float64
 	// SpiderWebMaxSize limits the distance between any two web attachments,

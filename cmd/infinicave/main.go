@@ -95,7 +95,7 @@ func parseOptions() (viewerOptions, error) {
 	mushroomDensity := flag.Float64("mushroom-density", defaults.MushroomDensity, "mushroom cluster occurrence probability (0 disables mushrooms, range 0-1)")
 	mossDensity := flag.Float64("moss-density", defaults.MossDensity, "moss colony occurrence probability (0 disables moss, 1 keeps all eligible colonies)")
 	grassDensity := flag.Float64("grass-density", defaults.GrassDensity, "yellow or green grass tuft coverage beside guides on upward-facing rocks (0 disables grass, range 0-1)")
-	hangingGrowthDensity := flag.Float64("hanging-growth-density", defaults.HangingGrowthDensity, "hanging cave bulb and lichen occurrence probability (0 disables them, range 0-1)")
+	hangingGrowthDensity := flag.Float64("hanging-growth-density", defaults.HangingGrowthDensity, "leafy hanging cave bulb occurrence probability (0 disables them, range 0-1)")
 	webDensity := flag.Float64("spider-web-density", defaults.SpiderWebDensity, "spider web occurrence probability per eligible pocket (0 disables webs, range 0-1)")
 	webMaxSize := flag.Float64("spider-web-max-size", defaults.SpiderWebMaxSize, "maximum spider web span including attachments in scene units (0 uses the default 0.15; cave cross-axis spans 1)")
 	view := flag.String("view", "shaded", "terrain view: shaded, clay, height, normals, shadows")

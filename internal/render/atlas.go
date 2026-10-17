@@ -60,8 +60,7 @@ func AtlasRecipes(kind AtlasKind) []TriangleMesh {
 			case MossAtlas:
 				m = mossSample(cell)
 			case HangingAtlas:
-				rock := terrain.RockCell{Polygon: []geom.V{{X: -.02, Y: -.02}, {X: .02, Y: -.02}, {X: .02, Y: -.001}, {X: -.02, Y: -.001}}, Center: geom.V{Y: -.01}, Raised: true, Normal: geom.V3{Z: 1}, Color: color.NRGBA{R: 100, A: 255}}
-				e := terrain.RockEdge{A: geom.V{X: .012, Y: float64(cell) * 1e-7}, B: geom.V{X: -.012, Y: float64(cell) * 1e-7}}
+				rock, e := hangingAtlasSource(cell)
 				m.Vertices, m.Indices = appendHangingRockGrowth(nil, nil, terrain.RockGrid{rock}, []terrain.RockEdge{e}, false, 1)
 				if g, ok := hangingGrowthForEdge(rock, e, 1); ok {
 					for j := range m.Vertices {
@@ -76,6 +75,12 @@ func AtlasRecipes(kind AtlasKind) []TriangleMesh {
 		}
 	})
 	return r.meshes
+}
+
+func hangingAtlasSource(sample int) (terrain.RockCell, terrain.RockEdge) {
+	rock := terrain.RockCell{Polygon: []geom.V{{X: -.02, Y: -.02}, {X: .02, Y: -.02}, {X: .02, Y: -.001}, {X: -.02, Y: -.001}}, Center: geom.V{Y: -.01}, Raised: true, Normal: geom.V3{Z: 1}, Color: color.NRGBA{R: 100, A: 255}}
+	edge := terrain.RockEdge{A: geom.V{X: .012, Y: float64(sample) * 1e-7}, B: geom.V{X: -.012, Y: float64(sample) * 1e-7}}
+	return rock, edge
 }
 
 func grassSample(cell int) TriangleMesh {

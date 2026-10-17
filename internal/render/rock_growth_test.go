@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"math"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -337,23 +338,34 @@ func TestMossDensityPreservesWholeColonies(t *testing.T) {
 
 func TestHangingGrowthFollowsGravityAndNeedsAir(t *testing.T) {
 	for _, mode := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
-		bulbs, lichens := 0, 0
+		count := 0
 		for i := 0; i < 60; i++ {
 			cell := growthTestCell(mode, .05+float64(i)*.013)
+			// Sloping ceilings must not tilt the stalk away from gravity.
+			terrain.MapPoints(cell.Polygon, func(p geom.V) geom.V {
+				world := terrain.WorldPoint(mode, p)
+				world.Y += float64(i%3-1) * .3 * world.X
+				return terrain.InternalPoint(mode, world)
+			})
 			// The bottom edge on the left arm faces downward in world axes.
 			edge := terrain.RockEdge{A: cell.Polygon[6], B: cell.Polygon[7], Cell: 0}
 			growth, ok := hangingGrowthForEdge(cell, edge, DefaultHangingGrowthDensity)
 			if !ok {
 				continue
 			}
-			if growth.lichen {
-				lichens++
-			} else {
-				bulbs++
+			count++
+			if len(growth.lobes) == 0 {
+				t.Fatal("plain bulb retained instead of leafy lichen")
+			}
+			for j := 1; j < len(growth.stem); j++ {
+				delta := terrain.WorldPoint(mode, growth.stem[j].Sub(growth.stem[j-1]))
+				if math.Abs(delta.X) > 1e-12 || delta.Y <= 0 {
+					t.Fatalf("stalk is not straight down in %s mode: %+v", mode, delta)
+				}
 			}
 			delta := terrain.WorldPoint(mode, growth.center.Sub(growth.stem[0]))
-			if delta.Y <= .01 {
-				t.Fatalf("growth hangs against gravity in %s mode: %+v", mode, delta)
+			if math.Abs(delta.X) > 1e-12 || delta.Y <= .01 {
+				t.Fatalf("bulb is not directly below its root in %s mode: %+v", mode, delta)
 			}
 			rock := mushroomRockSilhouette(&terrain.RockTopology{Grid: terrain.RockGrid{cell}, Boundary: []terrain.RockEdge{edge}})
 			if !hangingGrowthClear(growth, rock) {
@@ -384,8 +396,8 @@ func TestHangingGrowthFollowsGravityAndNeedsAir(t *testing.T) {
 				t.Fatal("hanging growth selected an upward-facing edge")
 			}
 		}
-		if bulbs == 0 || lichens == 0 {
-			t.Fatalf("missing hanging variants in %s mode: bulbs=%d lichens=%d", mode, bulbs, lichens)
+		if count == 0 {
+			t.Fatalf("missing hanging growth in %s mode", mode)
 		}
 	}
 }
@@ -444,5 +456,147 @@ func TestRockGrowthDensityReachesAllMeshPreparationPaths(t *testing.T) {
 	defaults := RockGrowthOptions{Moss: DefaultMossDensity, Hanging: DefaultHangingGrowthDensity, Grass: DefaultGrassDensity}
 	if !reflect.DeepEqual(PrepareGridWithTopology(nil, ViewShaded, topology), PrepareGridWithTopology(nil, ViewShaded, topology, defaults)) {
 		t.Fatal("default density changed the original appearance")
+	}
+}
+
+func TestGuideBulbsHangOverFlanksAndPreserveSupportedPlacement(t *testing.T) {
+	for _, mode := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
+		grid, boundary := mossTestLedge(mode, 20)
+		coarse, _ := mossTestLedge(mode, 1)
+		options := RockGrowthOptions{Hanging: 1, Guides: grassTestGuides(coarse[0])}
+		full := prepareGuideBulbs(grid, boundary, options, false)
+		if len(full) == 0 {
+			t.Fatalf("no bulbs on guide-cell bottoms in %s mode", mode)
+		}
+		if !reflect.DeepEqual(full, prepareGuideBulbs(grid, boundary, options, false)) {
+			t.Fatal("rebuilding moved or reshaped bulbs")
+		}
+		var surfaceBulbs []Attachment
+		for _, a := range prepareGrowthAttachments(grid, boundary, options, false) {
+			if a.Kind == HangingAttachment && !a.Underlay {
+				surfaceBulbs = append(surfaceBulbs, a)
+			}
+		}
+		if !reflect.DeepEqual(full, surfaceBulbs) {
+			t.Fatal("growth preparation omitted guide bulbs")
+		}
+		for _, a := range full {
+			if a.Underlay || a.Kind != HangingAttachment || a.Mesh.Texture != HangingAtlas {
+				t.Fatal("bulb must draw over the darker flank")
+			}
+			root := terrain.WorldPoint(mode, a.Anchor)
+			if math.Abs(root.Y-.42) > 1e-12 {
+				t.Fatal("bulb is not rooted at the bottom of its guide cell")
+			}
+			if len(a.Anchors) != 1 || !slices.ContainsFunc(grid[:20], func(c terrain.RockCell) bool { return geom.InsidePolygon(a.Anchors[0], c.Polygon) }) {
+				t.Fatal("bulb has no inset top-cell support")
+			}
+			rock, edge := hangingAtlasSource(a.Cell)
+			if g, ok := hangingGrowthForEdge(rock, edge, 1); !ok || len(g.lobes) == 0 {
+				t.Fatal("interior guide edge received a plain bulb instead of leafy lichen")
+			}
+			cut, err := terrain.CutFromHole(terrain.Hole{Shape: terrain.HoleCircle, Center: a.Anchors[0], Radius: .001})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !a.Hit(cut, 0) {
+				t.Fatal("cutting the support retained its bulb")
+			}
+		}
+		options.Hanging = .25
+		thin := prepareGuideBulbs(grid, boundary, options, false)
+		if len(thin) == 0 || len(thin) >= len(full) {
+			t.Fatal("density failed to thin bulbs")
+		}
+		for _, a := range thin {
+			if !slices.ContainsFunc(full, func(b Attachment) bool { return reflect.DeepEqual(a, b) }) {
+				t.Fatal("density changed a surviving bulb")
+			}
+		}
+		options.Hanging = 0
+		if len(prepareGuideBulbs(grid, boundary, options, false)) != 0 {
+			t.Fatal("zero hanging density retained bulbs")
+		}
+		options.Hanging, options.Guides = 1, nil
+		if len(prepareGuideBulbs(grid, boundary, options, false)) != 0 {
+			t.Fatal("bulbs grew without an adjacent guide")
+		}
+	}
+}
+
+func TestGuideBulbsRejectOtherTopCellsAcrossStalkAndBody(t *testing.T) {
+	for _, mode := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
+		grid, boundary := mossTestLedge(mode, 1)
+		options := RockGrowthOptions{Hanging: 1, Guides: grassTestGuides(grid[0])}
+		bulbs := prepareGuideBulbs(grid, boundary, options, false)
+		if len(bulbs) != 1 {
+			t.Fatalf("expected one guide bulb, got %d", len(bulbs))
+		}
+		a := bulbs[0]
+		recipe := AtlasRecipes(HangingAtlas)[a.Cell]
+		// Test triangle interiors along the root, stalk, and bulb. A tiny
+		// blocker inside a triangle has no bulb vertices inside it.
+		for triangle := 0; triangle < len(recipe.Indices); triangle += 3 {
+			center := geom.V{}
+			for _, index := range recipe.Indices[triangle : triangle+3] {
+				p := mossTestPoint(recipe.Vertices[index])
+				center = center.Add(a.Anchor.Add(terrain.InternalPoint(mode, p.Mul(a.Scale))).Mul(1.0 / 3))
+			}
+			blocker := grid[0]
+			const radius = .00001
+			blocker.Polygon = []geom.V{{X: center.X - radius, Y: center.Y - radius}, {X: center.X + radius, Y: center.Y - radius}, {X: center.X + radius, Y: center.Y + radius}, {X: center.X - radius, Y: center.Y + radius}}
+			blocker.Center = center
+			blocked := append(append(terrain.RockGrid(nil), grid...), blocker)
+			if got := prepareGuideBulbs(blocked, boundary, options, false); slices.ContainsFunc(got, func(b Attachment) bool { return b.Anchor.Sub(a.Anchor).Len() < 1e-12 }) {
+				t.Fatalf("bulb overlaps another top at triangle %d in %s mode", triangle/3, mode)
+			}
+			// Darker flanks and invisible cells must not obstruct surface bulbs.
+			for _, transparent := range []bool{false, true} {
+				blocked[len(grid)] = blocker
+				if transparent {
+					blocked[len(grid)].Color.A = 0
+				} else {
+					blocked[len(grid)].Normal = geom.V3{Z: 1}
+				}
+				if got := prepareGuideBulbs(blocked, boundary, options, false); !slices.ContainsFunc(got, func(b Attachment) bool { return reflect.DeepEqual(a, b) }) {
+					t.Fatal("flank or transparent cell obstructed a bulb")
+				}
+			}
+		}
+	}
+}
+
+func TestGuideBulbsShareWorldPlacementAcrossSectionWindows(t *testing.T) {
+	for _, mode := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
+		builder := terrain.NewSectionBuilder(42, nil, mode)
+		var previous Attachment
+		var previousOrigin geom.V
+		for id := int64(0); id < 2; id++ {
+			build := builder.Begin(context.Background(), id)
+			if build == nil || len(build.Data().Foreground) == 0 {
+				t.Fatal("missing section fixture")
+			}
+			c := build.Data().Foreground[0]
+			origin := terrain.RockMaterialPoint(c, geom.V{})
+			c.Polygon = []geom.V{{X: .2, Y: -.99}, {X: .8, Y: -.99}, {X: .8, Y: -.95}, {X: .2, Y: -.95}}
+			terrain.MapPoints(c.Polygon, func(p geom.V) geom.V { return terrain.InternalPoint(mode, p.Sub(origin)) })
+			c.Center = geom.PolygonCenter(c.Polygon)
+			c.Color, c.Raised = color.NRGBA{R: 145, A: 255}, true
+			up := terrain.InternalPoint(mode, geom.V{Y: -.6})
+			c.Normal = geom.V3{X: up.X, Y: up.Y, Z: .8}
+			bulbs := prepareGuideBulbs(terrain.RockGrid{c}, nil, RockGrowthOptions{Hanging: 1, Guides: grassTestGuides(c)}, false)
+			if len(bulbs) != 1 {
+				t.Fatalf("expected one bulb in %s section %d, got %d", mode, id, len(bulbs))
+			}
+			a := bulbs[0]
+			if id > 0 {
+				worldA := terrain.WorldPoint(mode, previous.Anchor).Add(previousOrigin)
+				worldB := terrain.WorldPoint(mode, a.Anchor).Add(origin)
+				if worldA.Sub(worldB).Len() > 1e-12 || previous.Cell != a.Cell || previous.Scale != a.Scale {
+					t.Fatal("section window moved or reshaped a guide bulb")
+				}
+			}
+			previous, previousOrigin = a, origin
+		}
 	}
 }

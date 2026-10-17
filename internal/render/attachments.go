@@ -81,7 +81,8 @@ func prepareGrowthAttachments(grid terrain.RockGrid, boundary []terrain.RockEdge
 	if growth.Hanging > 0 || growth.Moss > 0 {
 		clearance = newGrowthClearance(grid)
 	}
-	// Lichen lies beneath the rock, then moss covers faces, then edge trim.
+	// Exposed growth lies beneath rock. Moss covers faces, with guide bulbs
+	// hanging over the surface before the structural edge trim.
 	for _, e := range boundary {
 		c := grid[e.Cell]
 		outward := e.B.Sub(e.A).Norm().Perp().Mul(-1)
@@ -111,6 +112,7 @@ func prepareGrowthAttachments(grid terrain.RockGrid, boundary []terrain.RockEdge
 		out = append(out, a)
 	}
 	out = append(out, prepareRockMoss(grid, boundary, clearance, growth.Moss, owned)...)
+	out = append(out, prepareGuideBulbs(grid, boundary, growth, owned)...)
 	var blades []Attachment
 	supports := make([][]terrain.RockEdge, len(grid))
 	for _, e := range boundary {
