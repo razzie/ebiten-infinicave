@@ -83,7 +83,7 @@ func grassForCell(cell terrain.RockCell, guides []terrain.Guide, density float64
 	right := terrain.InternalPoint(mode, geom.V{X: 1})
 	center := anchor.Add(right.Mul((random(1) - .5) * size * .5))
 	patch := grassPatch{color: color.NRGBA{R: 126, G: 146, B: 65, A: 255}}
-	if random(2) < .48 {
+	if terrain.VegetationGreen(terrain.RockMaterialPoint(cell, anchor)) < .5 {
 		patch.color = color.NRGBA{R: 206, G: 171, B: 88, A: 255}
 	}
 	light := .62 + .38*geom.Clamp(float64(cell.Color.R)/165, 0, 1)
@@ -225,7 +225,7 @@ func prepareGrassAttachments(c terrain.RockCell, growth RockGrowthOptions, suppo
 	tint := .62 + .38*geom.Clamp(float64(c.Color.R)/165, 0, 1)
 	patch := Attachment{Kind: GrassAttachment, Anchor: anchor, Orientation: mode, Scale: scale, Rotation: angle}
 	clr := color.NRGBA{R: 126, G: 146, B: 65, A: 255}
-	yellow := random(2) < .48
+	yellow := terrain.VegetationGreen(terrain.RockMaterialPoint(c, anchor)) < .5
 	if yellow {
 		clr = color.NRGBA{R: 206, G: 171, B: 88, A: 255}
 	}

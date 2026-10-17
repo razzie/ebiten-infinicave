@@ -35,6 +35,7 @@ const (
 // measures distance from light faces and black voids, including vine width.
 type VineTerrain struct {
 	orientation Orientation
+	worldTop    float64
 	workspace   *vineWorkspace
 	// Surface growth stays entirely on the raised rock instead of tucking
 	// beneath it or making shallow excursions across the background.
@@ -139,6 +140,9 @@ type Vine struct {
 	// Keep the original material when carving creates independent fragments.
 	styleFamily int
 	styleSet    bool
+	// Generated materials sample the same world frame as rock vegetation.
+	materialOrigin      geom.V
+	materialOrientation Orientation
 }
 
 // Small bounded turns keep the centerline smooth. Looking ahead lets a tendril

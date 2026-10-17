@@ -157,6 +157,10 @@ func OrientedSection(o Orientation, s Section) Section {
 	}
 	for _, vines := range [][]Vine{s.Vines, s.ForegroundVines} {
 		for i := range vines {
+			// local adds one X unit to the rotated points; cancel that
+			// translation when recovering their original material coordinates.
+			vines[i].materialOrigin.X -= 1
+			vines[i].materialOrientation = Vertical
 			for j := range vines[i].Points {
 				vines[i].Points[j].P = o.local(vines[i].Points[j].P)
 			}

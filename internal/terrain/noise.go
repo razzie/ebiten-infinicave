@@ -64,6 +64,17 @@ func (n *Perlin) Noise(x, y float64) float64 {
 	return geom.Lerp(x1, x2, v) * 0.7071
 }
 
+var vegetationNoise = NewPerlin(rand.New(rand.NewSource(0x706c616e7473)))
+
+// VegetationGreen samples a shared world-space field: 1 is green, 0 is yellow.
+// Broad patches and a weaker detail octave keep nearby plants related without
+// repeating stripes. The fixed field is independent of section and plant IDs.
+func VegetationGreen(p geom.V) float64 {
+	value := vegetationNoise.Noise(p.X*5+17.3, p.Y*5-9.1) +
+		.3*vegetationNoise.Noise(p.X*11+41.7, p.Y*11+23.9)
+	return geom.Smoothstep(-.10, .10, value)
+}
+
 func fbmBatched(n *Perlin, p geom.V) float64 {
 	p.Y += n.OffsetY
 	var xs, ys, values [4]float64

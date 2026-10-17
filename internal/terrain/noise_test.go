@@ -43,3 +43,41 @@ func TestNoiseBatchAndFBMMatchScalar(t *testing.T) {
 		}
 	}
 }
+
+func TestVegetationFieldHasCoherentPatchesInBothDimensions(t *testing.T) {
+	green, yellow, transition := 0, 0, 0
+	xChanges, yChanges := 0, 0
+	for y := -100; y <= 100; y++ {
+		for x := -100; x <= 100; x++ {
+			p := geom.V{X: float64(x) * .01, Y: float64(y) * .01}
+			v := VegetationGreen(p)
+			if v < 0 || v > 1 || v != VegetationGreen(p) {
+				t.Fatal("vegetation field is not bounded and deterministic")
+			}
+			switch v {
+			case 0:
+				yellow++
+			case 1:
+				green++
+			default:
+				transition++
+			}
+			for axis, delta := range []geom.V{{X: .00001}, {Y: .00001}} {
+				nearby := VegetationGreen(p.Add(delta))
+				if math.Abs(nearby-v) > .01 {
+					t.Fatal("nearby vegetation colors jump instead of forming patches")
+				}
+				if nearby != v {
+					if axis == 0 {
+						xChanges++
+					} else {
+						yChanges++
+					}
+				}
+			}
+		}
+	}
+	if green == 0 || yellow == 0 || transition == 0 || xChanges == 0 || yChanges == 0 {
+		t.Fatal("vegetation field needs both hues, smooth transitions, and variation on both axes")
+	}
+}

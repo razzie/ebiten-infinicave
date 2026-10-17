@@ -40,6 +40,10 @@ func TestMossColoniesClipToSolidRockAndRebuildDeterministically(t *testing.T) {
 			}
 			for _, a := range patches {
 				retained++
+				wantYellow := terrain.VegetationGreen(terrain.RockMaterialPoint(cell, a.Anchor)) < .5
+				if (a.Cell >= 32) != wantYellow {
+					t.Fatal("moss atlas hue does not follow its world-space anchor")
+				}
 				green, yellow = green || a.Cell < 32, yellow || a.Cell >= 32
 				if a.Kind != SurfaceMoss || len(a.Anchors) != 0 || a.Dead {
 					t.Fatal("moss lost texture-only carving behavior")

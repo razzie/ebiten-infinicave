@@ -252,6 +252,36 @@ func TestVineTransitionAndForkUseLocalMaterial(t *testing.T) {
 
 }
 
+func TestGeneratedVineMeshesSampleCoordinatesInsteadOfPathDistance(t *testing.T) {
+	for _, orientation := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
+		data := terrain.NewSectionBuilder(42, nil, orientation).Build(1)
+		for _, vines := range [][]terrain.Vine{data.Vines, data.ForegroundVines} {
+			if len(vines) == 0 {
+				t.Fatal("fixture needs generated vines")
+			}
+			meshes := PrepareVines(vines)
+			for index, vine := range vines {
+				if vine.Parent >= 0 {
+					continue // Forks also inherit the parent's cross-section shading.
+				}
+				for i, point := range vine.Points {
+					palette := vinePaletteAtPoint(vines, index, point.P, 0)
+					if palette != vinePaletteAtPoint(vines, index, point.P, 123) {
+						t.Fatal("generated hue still depends on distance along a stem")
+					}
+					before := vine.Points[max(0, i-1)].P
+					after := vine.Points[min(len(vine.Points)-1, i+1)].P
+					p := point.P.Add(after.Sub(before).Norm().Perp().Mul(vineBands[3] * point.Radius))
+					want := vineVertex(p, weatherVineColor(palette[3], p, terrain.VineStyleFamily(vines, index)))
+					if got := meshes[index].Vertices[i*len(vineBands)+3]; got != want {
+						t.Fatal("stem mesh did not sample its local 2D coordinate")
+					}
+				}
+			}
+		}
+	}
+}
+
 func TestLeavesFollowCrossingStemsAndRetainForegroundShadows(t *testing.T) {
 	p := geom.V{X: .3, Y: .4}
 	vine := terrain.Vine{Parent: -1, Foreground: true, Points: []terrain.VinePoint{{P: p, Radius: .003}, {P: p.Add(geom.V{Y: .2}), Radius: 0}}, Leaves: []terrain.VineLeaf{{Anchor: p, Polygon: [4]geom.V{p, p.Add(geom.V{X: .02, Y: .01}), p.Add(geom.V{X: .04, Y: .04}), p.Add(geom.V{X: .01, Y: .025})}}}}

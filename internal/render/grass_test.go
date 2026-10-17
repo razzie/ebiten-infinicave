@@ -125,6 +125,37 @@ func TestGrassRequiresAdjacentGuidesAndSurvivingCrest(t *testing.T) {
 	}
 }
 
+func TestGrassAtlasAndGroundSampleWorldSpaceHue(t *testing.T) {
+	for _, mode := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
+		green, yellow := false, false
+		for i := range 80 {
+			cell := growthTestCell(mode, .05+float64(i)*.01)
+			patch, blades, ok := prepareGrassAttachments(cell, RockGrowthOptions{Grass: 1, Guides: grassTestGuides(cell)})
+			if !ok {
+				t.Fatal("fixture needs supported grass")
+			}
+			wantYellow := terrain.VegetationGreen(terrain.RockMaterialPoint(cell, patch.Anchor)) < .5
+			green, yellow = green || !wantYellow, yellow || wantYellow
+			for _, v := range patch.Mesh.Vertices {
+				if (v.ColorR > v.ColorG) != wantYellow {
+					t.Fatal("grass ground ignores world-space hue")
+				}
+			}
+			for _, v := range blades.Mesh.Vertices {
+				spec := specForAtlas(GrassAtlas)
+				sample := int(v.SrcX)/spec.pixels + int(v.SrcY)/spec.pixels*spec.columns
+				atlasYellow := terrain.SiteRandom(0x677261737361746c, int64(sample), 0, 0) < .48
+				if atlasYellow != wantYellow {
+					t.Fatal("grass blade atlas hue differs from its ground")
+				}
+			}
+		}
+		if !green || !yellow {
+			t.Fatal("grass fixture must exercise both coordinate-based hues")
+		}
+	}
+}
+
 func TestOwnedGrassIncludesTuftsCrossingSectionSeam(t *testing.T) {
 	cell := growthTestCell(terrain.Vertical, .3)
 	cell.Center.Y += .605

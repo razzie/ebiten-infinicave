@@ -149,6 +149,7 @@ func newVineTerrainWithWorkspace(background, foreground RockGrid, onForeground b
 	for _, grid := range []RockGrid{background, foreground} {
 		if len(grid) > 0 {
 			field.orientation = grid[0].orientation
+			field.worldTop = grid[0].worldTop
 			break
 		}
 	}

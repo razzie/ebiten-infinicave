@@ -14,7 +14,8 @@ const (
 	VineStraw
 )
 
-// A family shares one material, evaluated at distances along its stems.
+// Authored families share a material evaluated at distances along their stems.
+// Generated vines instead sample the shared vegetation field in world space.
 // Zero transition width selects a single hue. Tint is a small brightness offset.
 type VineStyle struct {
 	From, To   VineHue
@@ -98,6 +99,15 @@ func VineDistance(vine Vine, point int) float64 {
 	return along
 }
 
+// VineGreenAt keeps generated stems and leaf eligibility on the same field.
+// Explicitly authored styles retain their distance-based transitions.
+func VineGreenAt(vine Vine, p geom.V, distance float64) float64 {
+	if vine.styleSet {
+		return VegetationGreen(WorldPoint(vine.materialOrientation, p).Add(vine.materialOrigin))
+	}
+	return vine.Style.Green(distance)
+}
+
 func decorateVines(field *VineTerrain, vines []Vine) {
 	for i := range vines {
 		v := &vines[i]
@@ -106,22 +116,21 @@ func decorateVines(field *VineTerrain, vines []Vine) {
 		}
 		// A separate geometry-derived RNG never consumes growth randomness.
 		root := v.Points[0].P
-		seed := SectionSeed(int64(math.Round(root.X*1e7)), int64(math.Round(root.Y*1e7)))
+		v.materialOrientation = field.orientation
+		v.materialOrigin = WorldPoint(field.orientation, geom.V{Y: field.worldTop})
+		worldRoot := WorldPoint(v.materialOrientation, root).Add(v.materialOrigin)
+		seed := SectionSeed(int64(math.Round(worldRoot.X*1e7)), int64(math.Round(worldRoot.Y*1e7)))
 		rng := rand.New(rand.NewSource(seed))
 		v.Along = make([]float64, len(v.Points))
 		if v.Parent >= 0 && v.Parent < i {
 			v.Style = vines[v.Parent].Style
 			v.Along[0] = vines[v.Parent].Along[v.Joint]
 		} else {
-			length, _ := v.extent()
-			hue := VineHue(rng.Intn(2))
-			v.Style = VineStyle{From: hue, To: hue, Tint: geom.Lerp(-.045, .045, rng.Float64())}
-			if length >= .18 {
-				v.Style.To = 1 - hue
-				v.Style.Start = geom.Lerp(.025, .050, rng.Float64())
-				v.Style.End = v.Style.Start + geom.Lerp(.055, .085, rng.Float64())
-				v.Style.Period = geom.Lerp(.16, .22, rng.Float64())
+			hue := VineSage
+			if VegetationGreen(worldRoot) < .5 {
+				hue = VineStraw
 			}
+			v.Style = VineStyle{From: hue, To: hue, Tint: geom.Lerp(-.045, .045, rng.Float64())}
 		}
 		for j := 1; j < len(v.Points); j++ {
 			v.Along[j] = v.Along[j-1] + v.Points[j].P.Sub(v.Points[j-1].P).Len()
@@ -156,7 +165,7 @@ func generateVineLeaves(field *VineTerrain, vine Vine, rng *rand.Rand) []VineLea
 		next = vine.Along[i] + geom.Lerp(.045, .085, rng.Float64())
 		side = -side
 		p := vine.Points[i]
-		green := vine.Style.Green(vine.Along[i])
+		green := VineGreenAt(vine, p.P, vine.Along[i])
 		if p.Radius < .0007 || green < .5 || rng.Float64() > green*.85 {
 			continue
 		}

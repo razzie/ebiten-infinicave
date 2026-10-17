@@ -28,7 +28,7 @@ func PrepareVines(vines []terrain.Vine) []TriangleMesh {
 			if len(vine.Along) == len(vine.Points) {
 				distance = vine.Along[i]
 			}
-			palette := vinePaletteAt(vines, index, distance)
+			palette := vinePaletteAtPoint(vines, index, point.P, distance)
 			before, after := vine.Points[max(0, i-1)].P, vine.Points[min(len(vine.Points)-1, i+1)].P
 			n := after.Sub(before).Norm().Perp()
 			for j, band := range vineBands {
@@ -121,17 +121,27 @@ func vinePalette(vines []terrain.Vine, index int) [len(vineBands)]color.NRGBA {
 }
 
 func vinePaletteAt(vines []terrain.Vine, index int, distance float64) [len(vineBands)]color.NRGBA {
+	var p geom.V
+	if len(vines[index].Points) > 0 {
+		p = vines[index].Points[0].P
+	}
+	return vinePaletteAtPoint(vines, index, p, distance)
+}
+
+func vinePaletteAtPoint(vines []terrain.Vine, index int, p geom.V, distance float64) [len(vineBands)]color.NRGBA {
 	style := terrain.VineMaterial(vines, index)
-	from, to, blend := style.Hues(distance)
-	a := expandVineMaterial(vineMaterials[from%2])
-	b := expandVineMaterial(vineMaterials[to%2])
+	vine := vines[index]
+	vine.Style = style
+	green := terrain.VineGreenAt(vine, p, distance)
+	a := expandVineMaterial(vineMaterials[terrain.VineStraw])
+	b := expandVineMaterial(vineMaterials[terrain.VineSage])
 	// Keep depth readable without washing both hues into charcoal.
 	dim := 1.0
 	if !vines[terrain.VineFamily(vines, index)].Foreground {
 		dim = .20
 	}
 	for i := range a {
-		c := mixVineColor(a[i], b[i], blend)
+		c := mixVineColor(a[i], b[i], green)
 		shade := func(channel uint8) uint8 {
 			return uint8(geom.Clamp(math.Round(float64(channel)*dim*(1+style.Tint)), 0, 255))
 		}
@@ -147,7 +157,7 @@ func vineVertex(p geom.V, clr color.NRGBA) ebiten.Vertex {
 
 func appendVineLeaves(vines []terrain.Vine, index int, vertices *[]ebiten.Vertex, indices *[]uint32) {
 	for _, leaf := range vines[index].Leaves {
-		palette := vinePaletteAt(vines, index, leaf.Along)
+		palette := vinePaletteAtPoint(vines, index, leaf.Anchor, leaf.Along)
 		// Two flat halves meet at a root-to-tip vein, like folded paper.
 		for half := range 2 {
 			shoulder, shade := 1, palette[2]
@@ -219,7 +229,7 @@ func vineJoinColor(vines []terrain.Vine, index int, p geom.V, own color.NRGBA) c
 	after := parent.Points[min(len(parent.Points)-1, vine.Joint+1)].P
 	normal := after.Sub(before).Norm().Perp()
 	band := p.Sub(root.P).Dot(normal) / root.Radius
-	inherited := vineJoinColor(vines, vine.Parent, p, vineBandColorFrom(vinePaletteAt(vines, vine.Parent, terrain.VineDistance(parent, vine.Joint)), band))
+	inherited := vineJoinColor(vines, vine.Parent, p, vineBandColorFrom(vinePaletteAtPoint(vines, vine.Parent, root.P, terrain.VineDistance(parent, vine.Joint)), band))
 	return mixVineColor(inherited, own, blend)
 }
 

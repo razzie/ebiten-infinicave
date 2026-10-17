@@ -40,8 +40,8 @@ func TestVineDecorationStableWithoutChangingGrowth(t *testing.T) {
 	if !reflect.DeepEqual(a, b) {
 		t.Fatal("decoration is not deterministic")
 	}
-	hues := map[VineHue]bool{}
-	transitions, leaves := 0, 0
+	hues := map[bool]bool{}
+	leaves := 0
 	for i, vine := range a {
 		if !reflect.DeepEqual(vine.Points, original[i].Points) {
 			t.Fatal("decoration changed the growth path")
@@ -49,40 +49,63 @@ func TestVineDecorationStableWithoutChangingGrowth(t *testing.T) {
 		if len(vine.Along) != len(vine.Points) {
 			t.Fatal("missing material coordinates")
 		}
-		hues[vine.Style.From] = true
-		if vine.Style.From != vine.Style.To {
-			transitions++
-			if vine.Style.Period < .16 || vine.Style.Period > .22 {
-				t.Fatal("generated vine needs frequent material changes")
-			}
-			if width := vine.Style.End - vine.Style.Start; width < .055 || width > .085 {
-				t.Fatal("transition lost its smooth blend")
-			}
-			length, _ := vine.extent()
-			if i < 24 && length >= .7 {
-				seen := map[VineHue]bool{}
-				for distance := vine.Style.End; distance < length; distance += vine.Style.Period {
-					_, hue, _ := vine.Style.Hues(distance)
-					seen[hue] = true
-				}
-				if len(seen) != 2 {
-					t.Fatal("long stem does not cycle through both green and yellow")
-				}
+		for j, point := range vine.Points {
+			green := VineGreenAt(vine, point.P, vine.Along[j])
+			hues[green >= .5] = true
+			if green != VegetationGreen(point.P) {
+				t.Fatal("generated material does not sample the shared 2D field")
 			}
 		}
 		for _, leaf := range vine.Leaves {
 			leaves++
-			if vine.Style.Green(leaf.Along) < .5 || !vineLeafFits(field, leaf) {
+			if VineGreenAt(vine, leaf.Anchor, leaf.Along) < .5 || !vineLeafFits(field, leaf) {
 				t.Fatal("leaf grew on a non-green or unsupported segment")
 			}
 		}
 	}
-	if len(hues) != 2 || transitions == 0 || leaves == 0 {
-		t.Fatalf("missing variation: hues=%d transitions=%d leaves=%d", len(hues), transitions, leaves)
+	if len(hues) != 2 || leaves == 0 {
+		t.Fatalf("missing variation: hues=%d leaves=%d", len(hues), leaves)
 	}
 	child, parent := a[24], a[1]
 	if child.Style != parent.Style || child.Along[0] != parent.Along[child.Joint] {
 		t.Fatal("branch did not inherit local parent material")
+	}
+}
+
+func TestGeneratedVineColorsKeepWorldCoordinatesAcrossWindowsAndOrientation(t *testing.T) {
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		for _, top := range []float64{-2, -1, 0} {
+			// The same world-space stem appears at different local positions in
+			// overlapping windows. Family order and path distances cannot color it.
+			v := straightStyleVine(.4, .8)
+			for i := range v.Points {
+				v.Points[i].P.Y -= top
+			}
+			rock := testRockGrid([]geom.V{{X: .5, Y: .5}}, []color.NRGBA{{30, 30, 30, 255}})
+			rock[0].orientation, rock[0].worldTop = orientation, top
+			field := newVineTerrain(rock, nil)
+			vines := []Vine{v}
+			decorateVines(field, vines)
+			field.release()
+			v = vines[0]
+			before := make([]float64, len(v.Points))
+			for i, point := range v.Points {
+				world := WorldPoint(orientation, geom.V{X: .4, Y: .1 + float64(i)*.0025})
+				want := VegetationGreen(world)
+				if got := VineGreenAt(v, point.P, float64(i)*10); math.Abs(got-want) > 1e-12 {
+					t.Fatal("window or path distance changed the world-space hue")
+				}
+				before[i] = VineGreenAt(v, point.P, 0)
+			}
+			// The public synchronous result rotates local geometry; its material
+			// must still refer to the original world coordinates afterward.
+			s := OrientedSection(orientation, Section{Vines: []Vine{v}})
+			for i, point := range s.Vines[0].Points {
+				if after := VineGreenAt(s.Vines[0], point.P, 0); math.Abs(before[i]-after) > 1e-12 {
+					t.Fatal("public orientation transform changed the vine hue")
+				}
+			}
+		}
 	}
 }
 

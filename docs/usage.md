@@ -118,8 +118,13 @@ Small moss colonies spread across the lighter, lower parts of upward-facing
 rock cells, following nearby horizontal cell edges with a stronger lateral spread
 and ragged fringes wrapping onto neighboring facets. Some also gather around
 bends and tips or touch exposed rims. Colonies break into smaller
-polygonal fragments as they spread down the rock. Each colony favors olive green
-or ochre yellow, with subtle mottling and shading from each
+polygonal fragments as they spread down the rock. Grass, moss, and generated
+vines share a deterministic 2D noise field sampled at their world coordinates,
+forming green and yellow patches across nearby plants. Grass tufts and moss
+colonies choose their hue at the root; vines blend smoothly between hues as
+their stems cross patches, with leaves growing on green segments. Explicitly
+authored vine styles retain their distance-based transitions.
+Each moss colony has subtle mottling and shading from each
 receiving face. World coordinates keep colonies continuous across cell and
 section boundaries. `MossDensity` controls the number of colonies; changing it
 preserves the placement, size, shape, and colors of surviving colonies. For

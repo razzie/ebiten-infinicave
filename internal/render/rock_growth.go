@@ -164,15 +164,15 @@ func rockMossColonies(grid terrain.RockGrid, boundary []terrain.RockEdge, densit
 					tangent = tangent.Mul(-1)
 				}
 				sample := int(random(3) * 32)
-				if random(4) < .55 {
-					sample += 32
-				}
 				scale := geom.Lerp(.45, .80, random(5)) + feature*.10
 				if !edge.rim {
 					// Spread the smaller colonies farther onto their lit
 					// supporting face while retaining a fringe over the seam.
 					inset := (.009 + .003*edge.light) * scale
 					q = q.Sub(edge.a.Sub(edge.b).Perp().Norm().Mul(inset))
+				}
+				if terrain.VegetationGreen(q) < .5 {
+					sample += 32
 				}
 				colony := mossColony{anchor: terrain.InternalPoint(mode, q.Sub(origin)), rotation: math.Atan2(tangent.Y, tangent.X), scale: scale, sample: sample}
 				candidates[key] = candidate{colony: colony, score: score, edge: edgeKey}
