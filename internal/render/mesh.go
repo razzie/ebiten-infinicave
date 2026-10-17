@@ -81,12 +81,12 @@ func PrepareSection(data terrain.SectionData, view View, growth ...RockGrowthOpt
 		},
 		func() {
 			if view == ViewShaded {
-				mesh.Vines = PrepareVines(data.Vines)
+				mesh.Vines = prepareRockVines(data.Vines, terrain.ShadeRockFaces(data.Background, nil, data.BackgroundNeighbors))
 			}
 		},
 		func() {
 			if view == ViewShaded {
-				mesh.ForegroundVines = PrepareForegroundVines(data.ForegroundVines, data.Orientation)
+				mesh.ForegroundVines = prepareForegroundVines(data.ForegroundVines, sectionVineGrid(data), data.Orientation)
 			}
 		},
 		func() {
@@ -137,12 +137,12 @@ func PrepareVegetationParts(data terrain.SectionData, view View, parts terrain.V
 		parallel.Run(
 			func() {
 				if parts&terrain.BackgroundVinesPart != 0 {
-					mesh.Vines = PrepareVines(data.Vines)
+					mesh.Vines = prepareRockVines(data.Vines, terrain.ShadeRockFaces(data.Background, nil, data.BackgroundNeighbors))
 				}
 			},
 			func() {
 				if parts&terrain.ForegroundVinesPart != 0 {
-					mesh.ForegroundVines = PrepareForegroundVines(data.ForegroundVines, data.Orientation)
+					mesh.ForegroundVines = prepareForegroundVines(data.ForegroundVines, sectionVineGrid(data), data.Orientation)
 				}
 			},
 			func() {
@@ -536,6 +536,14 @@ func sectionBakeTopology(data terrain.SectionData) *terrain.RockTopology {
 	}
 	return data.ForegroundTopology
 }
+
+func sectionVineGrid(data terrain.SectionData) terrain.RockGrid {
+	if topology := sectionBakeTopology(data); topology != nil {
+		return terrain.PrepareRockAppearance(topology).Appearance
+	}
+	return terrain.PrepareRockAppearance(terrain.NewRockTopology(data.Foreground)).Appearance
+}
+
 func mushroomBakeTopology(data terrain.SectionData) *terrain.RockTopology {
 	if t := sectionBakeTopology(data); t != nil {
 		return t

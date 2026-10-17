@@ -190,7 +190,11 @@ func traceGuideVine(stem Vine, joint int, g *Guide, start, end, phase float64, s
 		sign = -1
 	}
 	base := stem.Points[joint]
-	radius := min(.0010, base.Radius*.65)
+	maxRadius := .0010
+	if stem.Foreground {
+		maxRadius *= foregroundVineWidthScale
+	}
+	radius := min(maxRadius, base.Radius*.65)
 	q, tangent, ok := guideVinePoint(g, start, phase, radius, 0, support)
 	if !ok {
 		return Vine{}
@@ -280,7 +284,11 @@ func addFreeVineBranches(vines []Vine, support *pathSupport, rng *rand.Rand) []V
 			for trial := 0; trial < 3; trial++ {
 				heading := geom.Rotate(tangent, side*(.65+.65*rng.Float64()))
 				reach := .030 + .055*rng.Float64()
-				radius := min(.0012, base.Radius*.55)
+				maxRadius := .0012
+				if stem.Foreground {
+					maxRadius *= foregroundVineWidthScale
+				}
+				radius := min(maxRadius, base.Radius*.55)
 				v := freePath(base.P, heading, reach, radius, rng.Float64()*2*math.Pi, parent, joint)
 				v.Depth, v.Foreground = stem.Depth+1, stem.Foreground
 				v.topCellLimit, v.allowedTopCells = stem.topCellLimit, stem.allowedTopCells

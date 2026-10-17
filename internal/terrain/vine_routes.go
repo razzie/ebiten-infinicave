@@ -14,6 +14,7 @@ type vineRouteJoint struct{ point, node int }
 const (
 	vineMinSurfaceTrunkLength = .18
 	vineMinSurfaceTrunkSpan   = .10
+	foregroundVineWidthScale  = 1.5
 )
 
 type vineRoutes struct {
@@ -228,7 +229,9 @@ func (r *vineRoutes) trunk(original Vine, rng *rand.Rand, seed int64) (Vine, []v
 	key := CollisionVertexKey(original.Points[0].P)
 	allowance := vineTopAllowance{}
 	if r.support != nil {
-		allowance.limit = 2 + int(SiteRandom(seed^0x746f7063656c6c, key[0], key[1], int64(r.route))*2)
+		// Let a family traverse a bright ridge rather than spending its entire
+		// allowance on the first few facets. Forks share the same cell budget.
+		allowance.limit = 6 + int(SiteRandom(seed^0x746f7063656c6c, key[0], key[1], int64(r.route))*4)
 	}
 	v, joints := r.trunkFrom(original, rng, allowance)
 	if len(v.Points) > 0 || r.support == nil {
@@ -288,7 +291,7 @@ func (r *vineRoutes) trunkFrom(original Vine, rng *rand.Rand, allowance vineTopA
 			q = a.Add(d.Mul(geom.Clamp(root.Sub(a).Dot(d)/d.Len2(), 0, 1)))
 		}
 		distance := q.Sub(root).Len2()
-		if !r.used[i] && q.Y >= 0 && q.Y < SectionHeight && r.fits(q, q, .0015) && distance < limit {
+		if !r.used[i] && q.Y >= 0 && q.Y < SectionHeight && r.fitsWithTopCells(q, q, .0015*foregroundVineWidthScale, allowance) && distance < limit {
 			best, anchor = i, q
 			return distance
 		}
@@ -317,7 +320,7 @@ func (r *vineRoutes) trunkFrom(original Vine, rng *rand.Rand, allowance vineTopA
 				next = e.b
 			}
 			q := r.graph.points[next]
-			if s := q.Sub(anchor).Norm().Dot(heading); s > score && r.fitsWithTopCells(anchor, q, .0015, allowance) {
+			if s := q.Sub(anchor).Norm().Dot(heading); s > score && r.fitsWithTopCells(anchor, q, .0015*foregroundVineWidthScale, allowance) {
 				best, end, score = candidate, next, s
 			}
 		}
@@ -335,7 +338,7 @@ func (r *vineRoutes) finishTrunk(original Vine, anchor geom.V, edge, end int, he
 	reach *= 1.2
 	radius := .0032
 	if r.support != nil {
-		radius = .0013
+		radius = .0013 * foregroundVineWidthScale
 		reach = geom.Clamp(reach*1.25, .35, .90)
 	}
 	v, js := r.trace(anchor, edge, end, original.Points, heading, reach, radius, rng, allowance)
@@ -486,7 +489,7 @@ func (r *vineRoutes) plan(root geom.V, edge, end int, guide []VinePoint, heading
 			if topHits != nil {
 				for _, cell := range topHits[next] {
 					if references[cell] == 0 {
-						score -= .35
+						score -= .15
 					}
 				}
 			}

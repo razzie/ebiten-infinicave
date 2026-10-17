@@ -105,8 +105,8 @@ func TestPrepareSectionMatchesSerialLayers(t *testing.T) {
 	for _, view := range []View{ViewShaded, ViewClay, ViewHeight, ViewNormals, ViewShadows} {
 		want := SectionMesh{ID: data.ID, BakedInstances: view == ViewShaded, Background: prepareGrid(data.Background, view), Foreground: prepareGrid(data.Foreground, view)}
 		if view == ViewShaded {
-			want.Vines = PrepareVines(data.Vines)
-			want.ForegroundVines = PrepareForegroundVines(data.ForegroundVines)
+			want.Vines = prepareRockVines(data.Vines, terrain.ShadeRockFaces(data.Background, nil, data.BackgroundNeighbors))
+			want.ForegroundVines = prepareForegroundVines(data.ForegroundVines, sectionVineGrid(data), data.Orientation)
 			want.Mushrooms = PrepareMushrooms(data.Mushrooms, terrain.NewRockTopology(data.Foreground))
 			want.Plants = prepareMushroomAttachments(data.Mushrooms, terrain.NewRockTopology(data.Foreground), data.Orientation)
 		}

@@ -32,8 +32,8 @@ func TestStreamedVinesStaySupportedAndKeepForksAttached(t *testing.T) {
 			for i, v := range vines {
 				vineSupport := support.forVine(v)
 				if layer == 1 {
-					if v.topCellLimit < 2 || v.topCellLimit > 3 || len(v.allowedTopCells) > v.topCellLimit {
-						t.Fatal("vine exceeded its seeded two-or-three-cell allowance")
+					if v.topCellLimit < 6 || v.topCellLimit > 9 || len(v.allowedTopCells) > v.topCellLimit {
+						t.Fatal("vine exceeded its seeded six-to-nine-cell allowance")
 					}
 					if v.Parent >= 0 && !reflect.DeepEqual(v.allowedTopCells, vines[v.Parent].allowedTopCells) {
 						t.Fatal("fork reset its family's top-cell allowance")
@@ -237,6 +237,54 @@ func TestVineTopAllowanceCountsDistinctCellsAndStopsAtTheLimit(t *testing.T) {
 			}
 			if len(touched) != limit {
 				t.Fatalf("limit %d was counted per sample instead of per cell: %d cells", limit, len(touched))
+			}
+		}
+	}
+}
+
+func TestVineTrunksStartOnAndCrossBrightRidges(t *testing.T) {
+	for _, mode := range []Orientation{Vertical, Horizontal} {
+		var grid RockGrid
+		for i := 0; i < 13; i++ {
+			cell := terrainRect(.15+float64(i)*.05, .2, .05, .4)
+			MapPoints(cell.Polygon, mode.internalLocal)
+			cell.Center, cell.orientation = mode.internalLocal(cell.Center), mode
+			grid = append(grid, cell)
+		}
+		topology := NewRockTopology(grid)
+		topology.Appearance = append(RockGrid(nil), grid...)
+		up := InternalPoint(mode, geom.V{Y: -.6})
+		for i := range topology.Appearance {
+			topology.Appearance[i].Normal = geom.V3{X: up.X, Y: up.Y, Z: .8}
+			topology.Appearance[i].Color.R = 180
+		}
+		support := newPathSupport(topology, nil)
+		source := Vine{Parent: -1, Foreground: true}
+		for _, cell := range grid {
+			source.Points = append(source.Points, VinePoint{P: cell.Center, Radius: .0013})
+		}
+		for _, seed := range []int64{1, 42, 123} {
+			grow := func() Vine {
+				routes := newVineRoutesForGraph(newVineCenterGraph(grid), &support, CellCenterVineRoute)
+				v, _ := routes.trunk(source, rand.New(rand.NewSource(seed)), seed)
+				return v
+			}
+			v := grow()
+			if !surfaceVineLongEnough(v) || len(v.allowedTopCells) < 6 || len(v.allowedTopCells) > v.topCellLimit {
+				t.Fatalf("mode %v seed %d: vine failed to traverse a bright ridge: %d cells", mode, seed, len(v.allowedTopCells))
+			}
+			if v.Points[0].P != source.Points[0].P {
+				t.Fatal("vine could not start inside a bright cell")
+			}
+			if !reflect.DeepEqual(v, grow()) {
+				t.Fatal("bright ridge route changed on reload")
+			}
+			growth := support.forVine(v)
+			for i := 1; i < len(v.Points); i++ {
+				a, b := v.Points[i-1], v.Points[i]
+				if !growth.fits(a.P, b.P, max(a.Radius, b.Radius)) {
+					t.Fatal("bright ridge crossing left its rock support or allowed cells")
+				}
 			}
 		}
 	}

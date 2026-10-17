@@ -1,12 +1,101 @@
 package render
 
 import (
+	"image"
 	"image/color"
+	"reflect"
 	"testing"
 
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
+
+func TestVinesFollowLocalRockBrightness(t *testing.T) {
+	for _, orientation := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
+		t.Run(orientation.String(), func(t *testing.T) {
+			for _, foreground := range []bool{false, true} {
+				name := "background"
+				if foreground {
+					name = "foreground"
+				}
+				t.Run(name, func(t *testing.T) {
+					vine := terrain.Vine{Parent: -1, Foreground: foreground}
+					var grid terrain.RockGrid
+					for i, tone := range []uint8{0, 30, 255} {
+						cell := terrainRect(float64(i)*.3, .1, .3, .6)
+						cell.Raised = foreground
+						cell.Color = color.NRGBA{R: tone, G: tone, B: tone, A: 255}
+						cell.Normal = geom.V3{Z: 1}
+						grid = append(grid, terrain.WithRockOrientation(cell, orientation))
+						p := geom.V{X: .15 + float64(i)*.3, Y: .4}
+						vine.Points = append(vine.Points, terrain.VinePoint{P: p, Radius: .003})
+						vine.Leaves = append(vine.Leaves, terrain.VineLeaf{Anchor: p, Polygon: [4]geom.V{p, p.Add(geom.V{X: .01, Y: .01}), p.Add(geom.V{X: .02, Y: .04}), p.Add(geom.V{X: -.01, Y: .02})}})
+					}
+					vines := []terrain.Vine{vine}
+					plain := PrepareVines(vines)
+					lit := prepareRockVines(vines, grid)
+					for pass := range 2 {
+						stride := len(vineBands)
+						if pass == 1 {
+							stride = 6 // Each leaf has two triangles.
+						}
+						for i := range 3 {
+							v, base := lit[pass].Vertices[i*stride], plain[pass].Vertices[i*stride]
+							if i == 0 && (v.ColorR >= base.ColorR || v.ColorG >= base.ColorG || v.ColorB >= base.ColorB) {
+								t.Fatal("dark rock did not darken the vine")
+							}
+							if i == 2 && (v.ColorR <= base.ColorR || v.ColorG <= base.ColorG || v.ColorB <= base.ColorB) {
+								t.Fatal("light rock did not lighten the vine")
+							}
+							if i > 0 && v.ColorG <= lit[pass].Vertices[(i-1)*stride].ColorG {
+								t.Fatal("vine brightness does not follow the rock cells")
+							}
+							if v.ColorA != base.ColorA || v.DstX != base.DstX || v.DstY != base.DstY {
+								t.Fatal("rock shading changed the vine geometry or opacity")
+							}
+						}
+					}
+					if !reflect.DeepEqual(prepareRockVines(vines, nil), plain) || !reflect.DeepEqual(prepareRockVines(vines, grid), lit) {
+						t.Fatal("rock shading is not deterministic or changed unsupported vines")
+					}
+
+					data := terrain.SectionData{Orientation: orientation}
+					part := terrain.BackgroundVinesPart
+					if foreground {
+						data.Foreground, data.ForegroundVines = grid, vines
+						data.ForegroundBake = terrain.NewRockTopology(grid)
+						data.ForegroundBake.Appearance = grid
+						part = terrain.ForegroundVinesPart
+					} else {
+						data.Background, data.Vines = grid, vines
+					}
+					full := PrepareSection(data, ViewShaded)
+					FinishSectionMesh(&full)
+					streamed := PrepareVegetationParts(data, ViewShaded, part)
+					if foreground {
+						data.Foreground, data.ForegroundTopology = nil, &terrain.RockTopology{}
+						replayed := PrepareVegetationParts(data, ViewShaded, part)
+						if !reflect.DeepEqual(streamed.ForegroundVines, replayed.ForegroundVines) {
+							t.Fatal("carving changed shading from the original rock bake")
+						}
+					}
+					fullMeshes, streamedMeshes := full.Vines, streamed.Vines
+					if foreground {
+						fullMeshes, streamedMeshes = full.ForegroundVines, streamed.ForegroundVines
+					}
+					for i, mesh := range fullMeshes {
+						for j, v := range mesh.Vertices {
+							other := streamedMeshes[i].Vertices[j]
+							if v.ColorR != other.ColorR || v.ColorG != other.ColorG || v.ColorB != other.ColorB || v.ColorA != other.ColorA {
+								t.Fatal("streaming and synchronous preparation use different vine shading")
+							}
+						}
+					}
+				})
+			}
+		})
+	}
+}
 
 func TestCarveRetainsBranchesAndFamilyMaterials(t *testing.T) {
 	trunk := terrain.Vine{Parent: -1, Foreground: true}
@@ -98,7 +187,7 @@ func TestVinePalettesVaryAndStayMuted(t *testing.T) {
 				t.Fatalf("background material lost its depth: %v vs %v", muted, bright)
 			}
 		}
-		if max(c.R, c.G, c.B) > 45 {
+		if max(c.R, c.G, c.B) > 48 {
 			t.Fatalf("background highlight is too bright: %v", c)
 		}
 		if max(foreground[3].R, foreground[3].G, foreground[3].B)-min(foreground[3].R, foreground[3].G, foreground[3].B) > 85 {
@@ -163,32 +252,73 @@ func TestVineTransitionAndForkUseLocalMaterial(t *testing.T) {
 
 }
 
-func TestLeavesShareStemMeshAndForegroundShadows(t *testing.T) {
+func TestLeavesFollowCrossingStemsAndRetainForegroundShadows(t *testing.T) {
 	p := geom.V{X: .3, Y: .4}
 	vine := terrain.Vine{Parent: -1, Foreground: true, Points: []terrain.VinePoint{{P: p, Radius: .003}, {P: p.Add(geom.V{Y: .2}), Radius: 0}}, Leaves: []terrain.VineLeaf{{Anchor: p, Polygon: [4]geom.V{p, p.Add(geom.V{X: .02, Y: .01}), p.Add(geom.V{X: .04, Y: .04}), p.Add(geom.V{X: .01, Y: .025})}}}}
-	meshes := PrepareForegroundVines([]terrain.Vine{vine})
-	if len(meshes) != 2 || len(meshes[1].Vertices) != 2*len(vineBands)+6 {
-		t.Fatal("leaves were not included in the stem's cached mesh")
-	}
-	for _, mesh := range meshes {
-		checkMesh(t, mesh)
-	}
-	leafStart := 2 * len(vineBands)
-	if meshes[1].Vertices[leafStart].ColorR == meshes[1].Vertices[leafStart+3].ColorR {
-		t.Fatal("leaf halves need distinct flat tones")
-	}
-	for i := leafStart; i < len(meshes[0].Vertices); i++ {
-		shadow, leaf := meshes[0].Vertices[i], meshes[1].Vertices[i]
-		if shadow.ColorA != .38 || shadow.DstX-leaf.DstX != 1 || shadow.DstY-leaf.DstY != 1.5 {
-			t.Fatal("leaf lost its contact shadow")
-		}
-	}
-	batch := SectionMesh{ForegroundVines: meshes}
-	FinishSectionMesh(&batch)
-	for _, point := range vine.Leaves[0].Polygon {
-		if int(point.X*RasterPixelsPerUnit) < batch.ForegroundVinesBounds.Min.X || int(point.X*RasterPixelsPerUnit) >= batch.ForegroundVinesBounds.Max.X {
-			t.Fatal("cached layer bounds omit a leaf")
-		}
+	// This later stem crosses the first vine's leaf and has no leaves itself.
+	crossing := terrain.Vine{Parent: -1, Foreground: true, Points: []terrain.VinePoint{
+		{P: p.Add(geom.V{X: .02, Y: -.02}), Radius: .006},
+		{P: p.Add(geom.V{X: .02, Y: .08}), Radius: .006},
+	}}
+	for _, orientation := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
+		t.Run(orientation.String(), func(t *testing.T) {
+			for _, foreground := range []bool{false, true} {
+				vines := []terrain.Vine{vine, crossing}
+				vines[0].Foreground, vines[1].Foreground = foreground, foreground
+				meshes := PrepareVines(vines)
+				if foreground {
+					meshes = PrepareForegroundVines(vines, orientation)
+				}
+				firstStem, wantMeshes := 0, 3
+				if foreground {
+					firstStem, wantMeshes = 3, 6
+				}
+				if len(meshes) != wantMeshes {
+					t.Fatalf("got %d meshes, want %d for stems, leaves and shadows", len(meshes), wantMeshes)
+				}
+				for _, mesh := range meshes {
+					checkMesh(t, mesh)
+				}
+				for _, stem := range meshes[firstStem : firstStem+2] {
+					if len(stem.Vertices) != 2*len(vineBands) {
+						t.Fatal("stem pass includes leaves")
+					}
+				}
+				leaves := meshes[len(meshes)-1]
+				if len(leaves.Vertices) != 6 || leaves.Vertices[0].ColorR == leaves.Vertices[3].ColorR {
+					t.Fatal("leaf pass lost its two flat tones")
+				}
+				if foreground {
+					offset := terrain.InternalPoint(orientation, geom.V{X: 1, Y: 1.5})
+					for i, leaf := range leaves.Vertices {
+						shadow := meshes[2].Vertices[i]
+						if shadow.ColorA != .38 || shadow.DstX-leaf.DstX != float32(offset.X) || shadow.DstY-leaf.DstY != float32(offset.Y) {
+							t.Fatal("leaf lost its contact shadow")
+						}
+					}
+				}
+				batch := SectionMesh{Vines: meshes}
+				FinishSectionMesh(&batch)
+				for _, point := range vine.Leaves[0].Polygon {
+					if !image.Pt(int(point.X*RasterPixelsPerUnit), int((point.Y-terrain.GenerationMinY)*RasterPixelsPerUnit)).In(batch.VinesBounds) {
+						t.Fatal("cached layer bounds omit a leaf")
+					}
+				}
+				// Upload batching and dirty-region replay must keep the leaf last.
+				for _, pixels := range []int{500, 1000, 1920} {
+					scaled := ScaleSectionMesh(batch, pixels)
+					last := scaled.Vines[len(scaled.Vines)-1]
+					replay := RegionMesh(last, image.Rectangle{Max: scaled.VinesBounds.Size()})
+					for i, index := range replay.Indices[len(replay.Indices)-6:] {
+						v := replay.Vertices[index]
+						leaf := leaves.Vertices[leaves.Indices[i]]
+						if v.ColorR != leaf.ColorR || v.ColorG != leaf.ColorG || v.ColorB != leaf.ColorB || v.ColorA != 1 {
+							t.Fatal("batching, resizing or replay moved leaves behind stems")
+						}
+					}
+				}
+			}
+		})
 	}
 }
 

@@ -11,9 +11,11 @@ import (
 
 // Ribbons have flat highlight and body bands with dark outlines. Children inherit the
 // parent shading at their attachment, so a ribbon edge cannot cut across a fork.
+// All stems precede the leaf pass so later vines cannot cover earlier leaves.
 func PrepareVines(vines []terrain.Vine) []TriangleMesh {
 	meshes := make([]TriangleMesh, 0, len(vines))
-	prepare := func(index int) {
+	// Generation stores each parent before its children.
+	for index := range vines {
 		vine := vines[index]
 		var vertices []ebiten.Vertex
 		var indices []uint32
@@ -40,12 +42,60 @@ func PrepareVines(vines []terrain.Vine) []TriangleMesh {
 				}
 			}
 		}
-		appendVineLeaves(vines, index, &vertices, &indices)
 		meshes = append(meshes, TriangleMesh{Vertices: vertices, Indices: indices})
 	}
-	// Generation stores each parent before its children.
 	for i := range vines {
-		prepare(i)
+		if len(vines[i].Leaves) == 0 {
+			continue
+		}
+		var leaves TriangleMesh
+		appendVineLeaves(vines, i, &leaves.Vertices, &leaves.Indices)
+		meshes = append(meshes, leaves)
+	}
+	return meshes
+}
+
+// Bake local rock lighting into the immutable recipe so uploads, cut replay,
+// and resizing all retain the same shading without sampling cached images.
+func prepareRockVines(vines []terrain.Vine, grid terrain.RockGrid) []TriangleMesh {
+	meshes := PrepareVines(vines)
+	if len(vines) == 0 || len(grid) == 0 {
+		return meshes
+	}
+	bounds := make([]geom.Bounds, len(grid))
+	shades := make([]float32, len(grid))
+	for i, cell := range grid {
+		if len(cell.Polygon) < 3 {
+			continue
+		}
+		bounds[i].Min, bounds[i].Max = geom.PolygonBounds(cell.Polygon)
+		clr := rockViewColor(cell, ViewShaded)
+		brightness := .30*float64(clr.R) + .59*float64(clr.G) + .11*float64(clr.B)
+		white, floor, contrast := 45.0, .85, .40
+		if cell.Raised {
+			white = 180
+			floor, contrast = .38, .97
+		}
+		// Keep recessed vines near their original muted palette brightness,
+		// with gentler cell contrast than the raised foreground vines.
+		shades[i] = float32(floor + contrast*geom.Smoothstep(0, white, brightness))
+	}
+	index := geom.NewBoundsIndex(bounds)
+	for _, mesh := range meshes {
+		for i := range mesh.Vertices {
+			v := &mesh.Vertices[i]
+			p := geom.V{X: float64(v.DstX) / RasterPixelsPerUnit, Y: float64(v.DstY)/RasterPixelsPerUnit + terrain.GenerationMinY}
+			index.Query(geom.Bounds{Min: p, Max: p}, func(cell int) bool {
+				if len(grid[cell].Polygon) < 3 || grid[cell].Color.A == 0 || !geom.InsidePolygon(p, grid[cell].Polygon) {
+					return true
+				}
+				shade := shades[cell]
+				v.ColorR = min(v.ColorR*shade, v.ColorA)
+				v.ColorG = min(v.ColorG*shade, v.ColorA)
+				v.ColorB = min(v.ColorB*shade, v.ColorA)
+				return false
+			})
+		}
 	}
 	return meshes
 }
@@ -56,8 +106,8 @@ var vineBands = [...]float64{-1, -.78, -.78, -.30, -.30, .78, .78, 1}
 
 // Sage and straw highlights sit over dusty bodies and tinted bark.
 var vineMaterials = [...][3]color.NRGBA{
-	{{48, 61, 47, 255}, {166, 185, 154, 255}, {103, 126, 91, 255}},
-	{{68, 57, 39, 255}, {213, 193, 138, 255}, {153, 130, 86, 255}},
+	{{46, 58, 45, 255}, {174, 194, 162, 255}, {108, 132, 96, 255}},
+	{{65, 55, 38, 255}, {220, 200, 145, 255}, {160, 136, 91, 255}},
 }
 
 var vineColors = expandVineMaterial(vineMaterials[0])
@@ -174,23 +224,27 @@ func vineJoinColor(vines []terrain.Vine, index int, p geom.V, own color.NRGBA) c
 }
 
 func PrepareForegroundVines(vines []terrain.Vine, orientation ...terrain.Orientation) []TriangleMesh {
-	shadowOffset := terrain.InternalPoint(terrain.OptionalOrientation(orientation), geom.V{X: 1, Y: 1.5})
+	return prepareForegroundVines(vines, nil, terrain.OptionalOrientation(orientation))
+}
+
+func prepareForegroundVines(vines []terrain.Vine, grid terrain.RockGrid, orientation terrain.Orientation) []TriangleMesh {
+	shadowOffset := terrain.InternalPoint(orientation, geom.V{X: 1, Y: 1.5})
 	if len(vines) == 0 {
 		return nil
 	}
-	stems := PrepareVines(vines)
-	meshes := make([]TriangleMesh, 0, len(stems)*2)
+	vineMeshes := prepareRockVines(vines, grid)
+	meshes := make([]TriangleMesh, 0, len(vineMeshes)*2)
 	// A small contact shadow seats the crisp ribbons on the raised surface.
 	// Draw all shadows first so they cannot darken a neighboring vine.
-	for _, stem := range stems {
-		vertices := append([]ebiten.Vertex(nil), stem.Vertices...)
+	for _, mesh := range vineMeshes {
+		vertices := append([]ebiten.Vertex(nil), mesh.Vertices...)
 		for i := range vertices {
 			v := &vertices[i]
 			v.DstX += float32(shadowOffset.X)
 			v.DstY += float32(shadowOffset.Y)
 			v.ColorR, v.ColorG, v.ColorB, v.ColorA = 0, 0, 0, .38
 		}
-		meshes = append(meshes, TriangleMesh{Vertices: vertices, Indices: stem.Indices, premultiplied: true})
+		meshes = append(meshes, TriangleMesh{Vertices: vertices, Indices: mesh.Indices, premultiplied: true})
 	}
-	return append(meshes, stems...)
+	return append(meshes, vineMeshes...)
 }
