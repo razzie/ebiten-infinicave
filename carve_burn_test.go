@@ -21,6 +21,14 @@ func checkDecorationBurnPixels(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer scene.Close()
+			warm := ebiten.NewImage(2, 2)
+			warm.Fill(color.RGBA{R: 61, G: 43, B: 27, A: 255})
+			beforeWarm := warm.At(0, 0)
+			scene.warmMaterials(warm)
+			if warm.At(0, 0) != beforeWarm {
+				t.Fatal("shader warmup changed visible pixels")
+			}
+			warm.Deallocate()
 			scene.world.close()
 			data := carvePixelFixture()
 			scene.world = &world{sections: make(map[int64]*worldSection), done: make(chan struct{}), pixels: 256, antialiasing: aa, disableBackground: true}

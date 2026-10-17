@@ -15,12 +15,21 @@ import (
 // Use generated terrain and an already populated query cache, as in the viewer.
 // Setup and section generation are excluded from the measured edit latency.
 func BenchmarkCarve(b *testing.B) {
+	benchmarkCarve(b, false)
+}
+
+func BenchmarkCarveTerrain(b *testing.B) {
+	benchmarkCarve(b, true)
+}
+
+func benchmarkCarve(b *testing.B, terrainOnly bool) {
 	data := make([]terrain.SectionData, 3)
 	for i := range data {
 		data[i] = terrain.BuildSection(42, int64(i))
 	}
 	for _, name := range []string{"circle", "segment", "overlap"} {
 		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
 			original := queryScene(data...)
 			original.collisionTolerance = 0
 			var center V
@@ -47,13 +56,17 @@ func BenchmarkCarve(b *testing.B) {
 				}
 				b.StartTimer()
 				start := time.Now()
-				var result CarveResult
-				var err error
-				if name == "circle" || name == "overlap" {
-					result, err = scene.CarveCircle(center, .05)
-				} else {
-					result, err = scene.CarveSegment(center.Sub(V{X: .2}), center.Add(V{X: .2}), .02)
+				carve := scene.Carve
+				if terrainOnly {
+					carve = scene.CarveTerrain
 				}
+				var hole Hole
+				if name == "circle" || name == "overlap" {
+					hole = Hole{Shape: HoleCircle, Center: center, Radius: .05}
+				} else {
+					hole = Hole{Shape: HoleSegment, Start: center.Sub(V{X: .2}), End: center.Add(V{X: .2}), Width: .02}
+				}
+				result, err := carve(hole)
 				elapsed := time.Since(start)
 				b.StopTimer()
 				durations = append(durations, elapsed)
@@ -64,6 +77,53 @@ func BenchmarkCarve(b *testing.B) {
 			sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
 			b.ReportMetric(float64(durations[len(durations)/2]), "median-ns")
 			b.ReportMetric(float64(durations[min(len(durations)-1, (len(durations)*95+99)/100-1)]), "p95-ns")
+		})
+	}
+}
+
+// Compare CPU replay and draw submission for the same generated rock and cuts.
+// GPU completion is excluded; rendered output is covered by the pixel tests.
+func BenchmarkCarveRockReplay(b *testing.B) {
+	data := terrain.BuildSection(42, 0)
+	mesh := render.PrepareSection(data, ViewShaded)
+	mesh.Geometry = terrain.PrepareTerrainGeometry(data, 0)
+	render.FinishSectionMesh(&mesh)
+	g, err := NewScene(Config{DisableBackground: true})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer g.Close()
+	g.SetRenderWidth(768)
+	g.world.startUpload(mesh)
+	for i := 0; i < 2000 && g.world.upload != nil; i++ {
+		g.world.receive(g)
+	}
+	if g.world.upload != nil {
+		b.Fatal("upload stalled")
+	}
+	for _, x := range []float64{.45, .5} {
+		if _, err := g.CarveCircle(V{X: x, Y: -.5}, .085); err != nil {
+			b.Fatal(err)
+		}
+		g.flushCarveImages()
+	}
+	s := *g.world.sections[0]
+	s.mesh = s.rockSource
+	if s.carveBase == nil {
+		b.Fatal("missing baked rock cache")
+	}
+	dirty := geom.Bounds{Min: V{X: .35, Y: -.6}, Max: V{X: .6, Y: -.4}}
+	for _, cached := range []bool{false, true} {
+		b.Run(fmt.Sprintf("cached=%v", cached), func(b *testing.B) {
+			section := s
+			if !cached {
+				section.carveBase = nil
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				g.replayGridRegion(&section, 0, dirty, false)
+			}
 		})
 	}
 }

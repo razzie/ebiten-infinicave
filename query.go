@@ -41,12 +41,14 @@ type QueryOptions struct {
 // When newly loaded geometry joins formations, previous IDs remain fetchable
 // as aliases while the joined formation stays cached.
 // Carving replaces affected formation IDs; CarveResult maps them to their
-// remaining parts. Unaffected formation and guide IDs stay valid.
+// remaining parts. Unaffected formation and guide IDs stay valid with Carve,
+// CarveCircle, and CarveSegment. CarveTerrain expires all IDs when geometry changes.
 type FormationID struct{ world, object uint64 }
 
 // GuideID is an opaque, comparable reference to a guide polyline. It belongs to
 // one Scene world and expires after Reset, Close, or eviction of all its copies.
-// It also expires when carving completely destroys its supporting formations.
+// It also expires when carving completely destroys its supporting formations,
+// or when CarveTerrain changes geometry anywhere in the scene.
 type GuideID struct{ world, object uint64 }
 
 // Hit describes a query intersection. Kind is TargetRock or TargetGuide; only

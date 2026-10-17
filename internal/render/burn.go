@@ -30,6 +30,21 @@ func NewBurnDissolve() (*BurnDissolve, error) {
 	return &BurnDissolve{shader: shader}, nil
 }
 
+// Warm submits a transparent draw so GPU shader compilation happens during
+// scene startup instead of the first weapon impact. It creates no burn patch.
+func (r *BurnDissolve) Warm(dst *ebiten.Image) {
+	blank := ebiten.NewImage(1, 1)
+	defer blank.Deallocate()
+	dst.DrawRectShader(1, 1, r.shader, &ebiten.DrawRectShaderOptions{
+		Images: [4]*ebiten.Image{blank},
+		Uniforms: map[string]any{
+			"Progress": float32(0),
+			"Origin":   []float32{0, 0},
+			"Pixels":   float32(1),
+		},
+	})
+}
+
 // Add takes ownership of an image at an internal world-space origin.
 func (r *BurnDissolve) Add(img *ebiten.Image, min geom.V, pixels int, grass bool) {
 	r.patches = append(r.patches, burnPatch{image: img, min: min, pixels: pixels, grass: grass})

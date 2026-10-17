@@ -22,6 +22,8 @@ type worldSection struct {
 	terrain, vines, mushrooms, foreground               *ebiten.Image
 	foregroundVines, spiderWebs                         *ebiten.Image
 	grass                                               *ebiten.Image
+	carveBase                                           *ebiten.Image
+	carveBaseCuts                                       int
 	geometry                                            *terrain.Geometry
 	vinesBounds, foregroundVinesBounds, mushroomsBounds image.Rectangle
 	spiderWebsBounds                                    image.Rectangle
@@ -563,7 +565,7 @@ func (s *worldSection) deallocate() {
 		s.plants[i].reveal.Clear()
 	}
 	s.grassReveal.Clear()
-	for _, img := range []*ebiten.Image{s.terrain, s.foreground, s.vines, s.foregroundVines, s.mushrooms, s.spiderWebs, s.grass} {
+	for _, img := range []*ebiten.Image{s.terrain, s.foreground, s.carveBase, s.vines, s.foregroundVines, s.mushrooms, s.spiderWebs, s.grass} {
 		if img != nil {
 			img.Deallocate()
 		}

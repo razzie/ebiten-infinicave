@@ -37,8 +37,9 @@ type FormationChange struct {
 // CarveResult describes immediate changes to cached foreground rock.
 // SectionIDs are the edited collision sections (0, -1, -2, ...). Refetch their
 // collision geometry after carving. Complete requires the cut's world area and
-// every affected formation to be loaded. Cuts also apply to future section
-// loads, whose changes cannot be included in this immediate result.
+// every affected formation to be loaded (CarveTerrain checks cut coverage only).
+// Cuts also apply to future section loads, whose changes cannot be included in
+// this immediate result.
 type CarveResult struct {
 	Changes    []FormationChange
 	SectionIDs []int64
@@ -74,6 +75,21 @@ func (g *Scene) CarveSegment(start, end V, width float64) (CarveResult, error) {
 // Carve applies a Hole in world coordinates. It is also the common entry point
 // for saved or externally supplied edits; SectionLoader uses local coordinates.
 func (g *Scene) Carve(hole Hole) (CarveResult, error) {
+	return g.carveHole(hole, true)
+}
+
+// CarveTerrain applies the same persistent cut and immediate collision updates
+// as Carve, without building formation split reports. Changes is always empty;
+// Complete describes loaded cut coverage only. A geometry change expires all
+// retained formation and guide IDs; a later Query rebuilds them lazily.
+// Source guides are retained rather than retired when their last fragment is
+// destroyed. Rendering and decoration removal use the usual carving path.
+// Use this for gameplay that consumes SectionIDs and owns its collision queries.
+func (g *Scene) CarveTerrain(hole Hole) (CarveResult, error) {
+	return g.carveHole(hole, false)
+}
+
+func (g *Scene) carveHole(hole Hole, reportFormations bool) (CarveResult, error) {
 	hole = terrain.MapHole(hole, func(point geom.V) geom.V {
 		return terrain.InternalPoint(g.orientation, point)
 	})
@@ -81,10 +97,10 @@ func (g *Scene) Carve(hole Hole) (CarveResult, error) {
 	if err != nil {
 		return CarveResult{}, err
 	}
-	return g.carve(cut, hole)
+	return g.carve(cut, hole, reportFormations)
 }
 
-func (g *Scene) carve(cut terrain.RockCut, hole Hole) (CarveResult, error) {
+func (g *Scene) carve(cut terrain.RockCut, hole Hole, reportFormations bool) (CarveResult, error) {
 	if g.closed || g.world == nil {
 		return CarveResult{}, fmt.Errorf("infinicave: cannot carve a closed scene")
 	}
@@ -92,7 +108,19 @@ func (g *Scene) carve(cut terrain.RockCut, hole Hole) (CarveResult, error) {
 		return CarveResult{Complete: true}, nil
 	}
 	w := g.world
-	q := w.queryIndex()
+	// Gameplay needs section coverage, not connected formation identities or
+	// their exact union boundaries. Avoid both eager query-index rebuilds.
+	q := &worldQueryIndex{}
+	if reportFormations {
+		q = w.queryIndex()
+	} else {
+		for id, section := range w.sections {
+			if section.geometry != nil {
+				q.sections = append(q.sections, id)
+			}
+		}
+		sort.Slice(q.sections, func(i, j int) bool { return q.sections[i] < q.sections[j] })
+	}
 	result := CarveResult{Complete: cut.Covered(q.sections)}
 	if !w.appendCut(hole, cut) {
 		return result, nil
@@ -115,6 +143,12 @@ func (g *Scene) carve(cut terrain.RockCut, hole Hole) (CarveResult, error) {
 			images.sections = append(images.sections, carveSectionImageEdit{
 				id: id, section: section, geometry: updated, removals: removals,
 			})
+		}
+		if !reportFormations {
+			if changed {
+				result.SectionIDs = append(result.SectionIDs, -id)
+			}
+			continue
 		}
 		if !changed {
 			if plantsChanged {
@@ -174,7 +208,7 @@ func (g *Scene) carve(cut terrain.RockCut, hole Hole) (CarveResult, error) {
 		}
 		updated, _, changed := cut.Geometry(id, geometry, g.collisionTolerance)
 		w.collision[id] = updated
-		if changed && w.sections[id] == nil {
+		if changed && (w.sections[id] == nil || w.sections[id].geometry == nil) {
 			result.SectionIDs = append(result.SectionIDs, -id)
 		}
 	}
@@ -184,6 +218,14 @@ func (g *Scene) carve(cut terrain.RockCut, hole Hole) (CarveResult, error) {
 	}
 	if len(result.SectionIDs) > 0 {
 		w.revision++
+		if !reportFormations {
+			// Discard identity metadata as well as boundaries: preserving old
+			// aliases could reconnect pieces separated by this cut.
+			w.queries = nil
+		}
+	}
+	if !reportFormations {
+		return result, nil
 	}
 	q = w.queryIndex()
 	remaining := make(map[uint64]map[uint64]bool)

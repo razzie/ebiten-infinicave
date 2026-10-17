@@ -148,6 +148,13 @@ cut masks; background rock and background vines remain intact. Removed attachmen
 edits replay only dirty image tiles, independently for each layer. Adjacent dirty
 tiles are coalesced into rectangles without filling gaps; surviving growth and
 wall recipes are batched in their original texture and blend order for replay.
+Each published structural rock image retains an immutable pixel copy for dirty
+region restoration, costing roughly `4 × renderWidth²` bytes per section before
+driver overhead. Removing a supported projected tooth wall discards that copy and
+reconstructs regions from filtered recipes until the next bake. Resize replaces
+the copy, and section eviction releases it. `CarveTerrain` skips formation
+reports and guide retirement, expiring query identities on geometry changes
+and rebuilding the index only when explicitly queried.
 Vine paths,
 leaves and material distances remain immutable; carving never splits their CPU
 geometry. Moss and ordinary rock walls use texture erasure without support checks.

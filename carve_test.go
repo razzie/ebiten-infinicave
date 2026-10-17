@@ -12,6 +12,128 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
+func TestCarveTerrainMatchesCollisionAcrossSeamsAndReload(t *testing.T) {
+	data := []terrain.SectionData{
+		{ID: 0, Foreground: RockGrid{terrainRect(.2, -.2, .6, .4)}},
+		{ID: 1, Foreground: RockGrid{terrainRect(.2, .8, .6, .4)}},
+	}
+	regular, fast := queryScene(data...), queryScene(data...)
+	holes := []Hole{
+		{Shape: HoleCircle, Center: V{X: .4, Y: -1}, Radius: .085},
+		{Shape: HoleSegment, Start: V{X: .5, Y: -1.3}, End: V{X: .5, Y: -.7}, Width: .079},
+		{Shape: HoleCircle, Center: V{X: .45, Y: -1.03}, Radius: .085},
+	}
+	for _, hole := range holes {
+		want, err := regular.Carve(hole)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := fast.CarveTerrain(hole)
+		if err != nil || !got.Complete || len(got.Changes) != 0 || !reflect.DeepEqual(got.SectionIDs, want.SectionIDs) {
+			t.Fatalf("terrain result: %+v / %v, regular %+v", got, err, want)
+		}
+		if fast.world.queries != nil {
+			t.Fatal("terrain cut built formation reports")
+		}
+		for _, id := range got.SectionIDs {
+			a, _ := regular.CollisionGeometry(id)
+			b, _ := fast.CollisionGeometry(id)
+			if !reflect.DeepEqual(a, b) {
+				t.Fatalf("different collision in section %d", id)
+			}
+		}
+	}
+	for _, d := range data {
+		mesh := render.SectionMesh{ID: d.ID, Geometry: terrain.PrepareTerrainGeometry(d, 0)}
+		fast.applyStoredCuts(&mesh)
+		got, _ := fast.CollisionGeometry(-d.ID)
+		if !reflect.DeepEqual(got, mesh.Geometry.Collision) {
+			t.Fatalf("stored terrain cuts changed after reloading section %d", d.ID)
+		}
+	}
+}
+
+func TestCarveTerrainLazilyRebuildsSplitQueries(t *testing.T) {
+	scene := queryScene(terrain.SectionData{Foreground: RockGrid{terrainRect(.1, .1, .8, .8)}})
+	before := rockAt(t, scene, V{X: .2, Y: -.5}).Hit.FormationID
+	hole := Hole{Shape: HoleSegment, Start: V{X: .5, Y: -.95}, End: V{X: .5, Y: -.05}, Width: .079}
+	if _, err := scene.CarveTerrain(hole); err != nil {
+		t.Fatal(err)
+	}
+	if scene.world.queries != nil {
+		t.Fatal("terrain cut rebuilt query index before a query")
+	}
+	if _, ok := scene.Formation(before); ok {
+		t.Fatal("old formation survived terrain edit")
+	}
+	left := rockAt(t, scene, V{X: .2, Y: -.5}).Hit.FormationID
+	right := rockAt(t, scene, V{X: .8, Y: -.5}).Hit.FormationID
+	if left == right || rockAt(t, scene, V{X: .5, Y: -.5}).Found {
+		t.Fatal("query rebuilt the wrong connectivity after a split")
+	}
+	queries, revision := scene.world.queries, scene.GeometryRevision()
+	for _, noop := range []Hole{hole, {Shape: HoleCircle, Center: V{X: .02, Y: -.5}, Radius: .01}} {
+		result, err := scene.CarveTerrain(noop)
+		if err != nil || len(result.SectionIDs) != 0 || scene.world.queries != queries || scene.GeometryRevision() != revision {
+			t.Fatalf("no-op invalidated terrain/query cache: %+v / %v", result, err)
+		}
+	}
+}
+
+func TestCarveTerrainUpdatesEarlyCollision(t *testing.T) {
+	geometry := terrain.PrepareTerrainGeometry(terrain.SectionData{Foreground: RockGrid{terrainRect(.2, .2, .6, .6)}}, 0)
+	for _, sectionExists := range []bool{false, true} {
+		scene := &Scene{world: &world{sections: make(map[int64]*worldSection), collision: map[int64]*terrain.Geometry{0: geometry}}}
+		if sectionExists {
+			// A sibling layer can publish before the foreground geometry.
+			scene.world.sections[0] = &worldSection{}
+		}
+		point := V{X: .5, Y: -.5}
+		result, err := scene.CarveTerrain(Hole{Shape: HoleCircle, Center: point, Radius: .085})
+		if err != nil || !reflect.DeepEqual(result.SectionIDs, []int64{0}) {
+			t.Fatalf("early collision result (section exists=%v): %+v / %v", sectionExists, result, err)
+		}
+		got, ready := scene.CollisionGeometry(0)
+		if !ready || got.Contains(point) || scene.world.queries != nil || scene.GeometryRevision() == 0 {
+			t.Fatal("early collision did not update immediately without formation reports")
+		}
+	}
+}
+
+func TestCarveTerrainExpiresIDsAndRetainsSourceGuides(t *testing.T) {
+	guide := terrain.SplineGuide([]V{{X: .2, Y: .3}, {X: .4, Y: .3}}, 1)
+	scene := queryScene(terrain.SectionData{Guides: []Guide{guide}, Foreground: RockGrid{
+		terrainRect(.1, .3, .4, .3), terrainRect(.7, .3, .2, .3),
+	}})
+	oldGuide := mustQuery(t, scene, Ray{Origin: V{X: .3, Y: -.7}}, QueryOptions{Targets: TargetGuide})
+	untouched := rockAt(t, scene, V{X: .8, Y: -.5}).Hit.FormationID
+	if !oldGuide.Found {
+		t.Fatal("fixture has no guide")
+	}
+	result, err := scene.CarveTerrain(Hole{Shape: HoleSegment, Start: V{X: .3, Y: -.8}, End: V{X: .3, Y: -.3}, Width: .5})
+	if err != nil || !result.Complete || len(result.Changes) != 0 {
+		t.Fatalf("terrain destruction: %+v / %v", result, err)
+	}
+	if len(scene.world.retiredGuides) != 0 || len(scene.world.sections[0].geometry.Guides) != 1 {
+		t.Fatal("terrain-only cut retired the destroyed formation's source guide")
+	}
+	if _, ok := scene.Guide(oldGuide.Hit.GuideID); ok {
+		t.Fatal("terrain edit retained an old guide ID")
+	}
+	if _, ok := scene.Formation(untouched); ok {
+		t.Fatal("terrain edit retained an unrelated formation ID")
+	}
+	if !mustQuery(t, scene, Ray{Origin: V{X: .3, Y: -.7}}, QueryOptions{Targets: TargetGuide}).Found {
+		t.Fatal("source guide disappeared after the lazy rebuild")
+	}
+	// Switching back to full reporting must use the newly allocated identities.
+	before := rockAt(t, scene, V{X: .8, Y: -.5}).Hit.FormationID
+	regular, err := scene.CarveCircle(V{X: .8, Y: -.5}, .02)
+	if err != nil || len(regular.Changes) != 1 || regular.Changes[0].Before != before {
+		t.Fatalf("full reporting after terrain edit: %+v / %v", regular, err)
+	}
+}
+
 func TestCarveCircleHoleAndIdentity(t *testing.T) {
 	scene := queryScene(terrain.SectionData{Foreground: RockGrid{
 		terrainRect(.1, .1, .6, .6), terrainRect(.8, .2, .1, .1),

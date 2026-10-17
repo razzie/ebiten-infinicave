@@ -147,8 +147,19 @@ func (g *Scene) editSectionImages(section *worldSection, id int64, cut terrain.R
 	if section.rockSource != nil {
 		rock, rockEdits := g.editLayerSource(*section.rockSource, render.ForegroundLayer, cut, removals)
 		section.rockSource = &rock
+		// The baked base contains projected tooth walls as well as rock faces.
+		// Removing their support must also remove pixels outside the cut. Once
+		// one dies, reconstruct from the filtered recipe until the next bake.
+		for _, i := range rockEdits.growth {
+			if a := rock.Foreground.Growth[i]; a.Kind == render.EdgeAttachment && a.Underlay && section.carveBase != nil {
+				section.carveBase.Deallocate()
+				section.carveBase, displayed.carveBase = nil, nil
+				section.carveBaseCuts, displayed.carveBaseCuts = 0, 0
+			}
+		}
 		displayedMesh := mesh
 		displayedMesh.Foreground = rock.Foreground
+		displayedMesh.VisualCuts = rock.VisualCuts
 		displayed.mesh = &displayedMesh
 		displayed.geometry = rock.Geometry
 		edits.growth, edits.rock = rockEdits.growth, rockEdits.rock
@@ -299,6 +310,13 @@ func (g *Scene) replayGridRegion(section *worldSection, id int64, dirty geom.Bou
 		return
 	}
 	target := dst.SubImage(rect).(*ebiten.Image)
+	if !grass && section.foregroundSplit && section.carveBase != nil {
+		op := &ebiten.DrawImageOptions{Blend: ebiten.BlendCopy}
+		op.GeoM.Translate(float64(rect.Min.X), float64(rect.Min.Y))
+		target.DrawImage(section.carveBase.SubImage(rect).(*ebiten.Image), op)
+		g.eraseCuts(target, bounds, top, section.mesh.VisualCuts[section.carveBaseCuts:], pixels)
+		return
+	}
 	target.Clear()
 	source := section.mesh.Foreground
 	reference := referenceRegion(rect, pixels, image.Pt(0, -pixels))

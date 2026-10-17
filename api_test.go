@@ -26,6 +26,28 @@ func TestPublicAntialiasingAndReadiness(t *testing.T) {
 	}
 }
 
+func TestPublicCarveTerrain(t *testing.T) {
+	scene, err := infinicave.NewScene(infinicave.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer scene.Close()
+	hole := infinicave.Hole{Shape: infinicave.HoleCircle, Center: infinicave.V{X: .5, Y: -.5}, Radius: .05}
+	result, err := scene.CarveTerrain(hole)
+	if err != nil || result.Complete || len(result.Changes) != 0 || len(result.SectionIDs) != 0 {
+		t.Fatalf("terrain cut before loading: %+v / %v", result, err)
+	}
+	hole.Radius = math.NaN()
+	if _, err := scene.CarveTerrain(hole); err == nil {
+		t.Fatal("terrain cut accepted an invalid radius")
+	}
+	hole.Radius = .05
+	scene.Close()
+	if _, err := scene.CarveTerrain(hole); err == nil {
+		t.Fatal("closed scene accepted a terrain cut")
+	}
+}
+
 func TestPublicStreamingConfiguration(t *testing.T) {
 	defaults := infinicave.DefaultConfig()
 	if defaults.RetainSections != 3 || defaults.LookaheadSections != 4 {

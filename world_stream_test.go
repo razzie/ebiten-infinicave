@@ -54,6 +54,10 @@ func TestGrassAndDecorationCachesPublishResizeAndCarveTogether(t *testing.T) {
 	if s == nil || s.grass == nil || s.mushrooms == nil || s.spiderWebs == nil {
 		t.Fatal("publication lost a decoration cache")
 	}
+	if s.carveBase == nil || s.carveBase == s.foreground || s.carveBase.Bounds() != s.foreground.Bounds() {
+		t.Fatal("publication did not retain independent baked rock pixels")
+	}
+	base := s.carveBase
 	before := s.grass
 	g.SetRenderWidth(501)
 	w.startUpload(*s.mesh)
@@ -61,6 +65,10 @@ func TestGrassAndDecorationCachesPublishResizeAndCarveTogether(t *testing.T) {
 	if s.grass == before || s.renderWidth() != 501 || s.vegetationWidth() != 501 || s.grass.Bounds().Dx() != 501 {
 		t.Fatal("resize retained obsolete grass caches")
 	}
+	if s.carveBase == base || s.carveBase.Bounds() != s.foreground.Bounds() {
+		t.Fatal("resize retained obsolete baked rock pixels")
+	}
+	base = s.carveBase
 	if s.mushrooms == nil || s.spiderWebs == nil || s.spiderWebsBounds.Min.Y < 501 || s.spiderWebsBounds.Max.Y > 1002 {
 		t.Fatal("resize lost decorations or web ownership")
 	}
@@ -68,6 +76,9 @@ func TestGrassAndDecorationCachesPublishResizeAndCarveTogether(t *testing.T) {
 		t.Fatal(err)
 	}
 	g.flushCarveImages()
+	if s.carveBase != base {
+		t.Fatal("impact allocated a replacement rock cache")
+	}
 	for _, list := range [][]render.Attachment{s.mesh.Foreground.Growth, s.mesh.Plants, s.mesh.Webs} {
 		for _, a := range list {
 			if a.Kind != render.SurfaceMoss && len(a.Anchors) > 0 && !a.Dead {

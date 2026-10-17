@@ -20,7 +20,7 @@ import (
 
 func TestCarveReturnsWithGeometryBeforeTextureReplay(t *testing.T) {
 	for _, orientation := range []Orientation{Vertical, Horizontal} {
-		for _, entry := range []string{"circle", "segment", "hole"} {
+		for _, entry := range []string{"circle", "segment", "hole", "terrain"} {
 			for _, flush := range []string{"update", "draw"} {
 				t.Run(strconv.Itoa(int(orientation))+"/"+entry+"/"+flush, func(t *testing.T) {
 					g := resolutionTestScene(t)
@@ -38,12 +38,21 @@ func TestCarveReturnsWithGeometryBeforeTextureReplay(t *testing.T) {
 							return g.CarveSegment(
 								terrain.WorldPoint(orientation, V{X: .46, Y: -.5}),
 								terrain.WorldPoint(orientation, V{X: .54, Y: -.5}), .16)
+						case "terrain":
+							return g.CarveTerrain(Hole{Shape: HoleCircle, Center: point, Radius: .08})
 						default:
 							return g.Carve(Hole{Shape: HoleCircle, Center: point, Radius: .08})
 						}
 					}
 					result, err := carve()
-					if err != nil || !result.Complete || len(result.Changes) != 1 || len(result.SectionIDs) != 1 {
+					changes := 1
+					if entry == "terrain" {
+						changes = 0
+						if w.queries != nil {
+							t.Fatal("terrain cut eagerly rebuilt the query index")
+						}
+					}
+					if err != nil || !result.Complete || len(result.Changes) != changes || len(result.SectionIDs) != 1 {
 						t.Fatalf("immediate carve result: %+v, %v", result, err)
 					}
 					collision, ok := g.CollisionGeometry(0)
@@ -324,6 +333,7 @@ func (g *carvePixelGame) Draw(*ebiten.Image) {
 	checkIndependentGrassPixels(g.t)
 	checkGrassEdgePixels(g.t)
 	checkGrowthCompositionPixels(g.t)
+	checkCarveCachedToothWallPixels(g.t)
 	scene, err := NewScene(Config{View: ViewShaded})
 	if err != nil {
 		g.t.Fatal(err)
@@ -422,6 +432,7 @@ func (g *carvePixelGame) Draw(*ebiten.Image) {
 			g.t.Fatalf("stage %d: grass samples are blank", stage)
 		}
 		before := s.foreground.At(217, 192)
+		basePixels := readPixels(s.carveBase)
 		// Repeated exact commands do not accumulate edge erasure or history.
 		count := len(scene.world.cuts)
 		if _, err := scene.CarveCircle(V{X: .45, Y: -.35}, .075); err != nil {
@@ -434,6 +445,9 @@ func (g *carvePixelGame) Draw(*ebiten.Image) {
 			g.t.Fatal(err)
 		}
 		scene.flushCarveImages()
+		if !bytes.Equal(basePixels, readPixels(s.carveBase)) {
+			g.t.Fatal("overlapping cuts modified the immutable rock cache")
+		}
 		if alpha(s.foreground, V{X: .45, Y: .65}, 256) != 0 || !reflect.DeepEqual(before, s.foreground.At(217, 192)) {
 			g.t.Fatalf("stage %d: overlapping tile replay changed untouched rock", stage)
 		}
@@ -503,6 +517,58 @@ func (g *carvePixelGame) Draw(*ebiten.Image) {
 			checkVines(reloaded, 384)
 			if !bytes.Equal(backgroundVines, readPixels(reloaded.vines)) {
 				g.t.Fatal("stored foreground cuts changed background vine pixels on reload")
+			}
+		}
+	}
+}
+
+func checkCarveCachedToothWallPixels(t *testing.T) {
+	t.Helper()
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		for _, aa := range []AntialiasingMode{AntialiasingFull, AntialiasingOff, AntialiasingFXAA} {
+			g, err := NewScene(Config{DisableBackground: true, Orientation: orientation, Antialiasing: aa})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer g.Close()
+			g.SetRenderWidth(256)
+			data := terrain.SectionData{Foreground: RockGrid{terrainRect(.2, .4, .6, .4)}}
+			mesh := render.PrepareForeground(data, ViewShaded)
+			mesh.Geometry = terrain.PrepareTerrainGeometry(data, 0)
+			// A projected tooth wall extends beyond both its support and the cut.
+			wall := render.TriangleMesh{Indices: []uint32{0, 1, 2, 0, 2, 3}}
+			for _, p := range []V{{X: .4, Y: .3}, {X: .5, Y: .3}, {X: .5, Y: .35}, {X: .4, Y: .35}} {
+				wall.Vertices = append(wall.Vertices, ebiten.Vertex{
+					DstX: float32(p.X * render.RasterPixelsPerUnit), DstY: float32((p.Y - terrain.GenerationMinY) * render.RasterPixelsPerUnit),
+					SrcX: .5, SrcY: .5, ColorR: 1, ColorA: 1,
+				})
+			}
+			mesh.Foreground.Growth = append(mesh.Foreground.Growth, render.Attachment{
+				Kind: render.EdgeAttachment, Underlay: true, Mesh: wall,
+				Min: V{X: .4, Y: .3}, Max: V{X: .5, Y: .35}, Anchors: []V{{X: .45, Y: .41}},
+			})
+			mesh.Foreground.GrowthIndex = render.AttachmentIndex(mesh.Foreground.Growth)
+			render.FinishSectionMesh(&mesh)
+			g.world.startUpload(mesh)
+			for i := 0; i < 1000 && g.world.upload != nil; i++ {
+				g.world.receive(g)
+			}
+			if g.world.upload != nil {
+				t.Fatal("tooth wall upload stalled")
+			}
+			s := g.world.sections[0]
+			alpha := func() uint8 { return color.RGBAModel.Convert(s.foreground.At(115, 82)).(color.RGBA).A }
+			if alpha() == 0 {
+				t.Fatal("fixture did not draw the projected wall")
+			}
+			for _, point := range []V{{X: .45, Y: -.59}, {X: .455, Y: -.59}} {
+				if _, err := g.CarveTerrain(Hole{Shape: HoleCircle, Center: terrain.WorldPoint(orientation, point), Radius: .01}); err != nil {
+					t.Fatal(err)
+				}
+				g.flushCarveImages()
+				if alpha() != 0 {
+					t.Fatalf("%v/AA=%v: cached replay restored an unsupported tooth wall outside the cut", orientation, aa)
+				}
 			}
 		}
 	}

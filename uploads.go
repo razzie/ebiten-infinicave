@@ -648,6 +648,9 @@ func (g *Scene) warmMaterials(dst *ebiten.Image) {
 		return
 	}
 	g.materialsWarm = true
+	if g.decorationBurn != nil {
+		g.decorationBurn.Warm(dst)
+	}
 	mesh := render.TriangleMesh{
 		Vertices: []ebiten.Vertex{{DstX: 0, DstY: 0}, {DstX: 1, DstY: 0}, {DstX: 0, DstY: 1}},
 		Indices:  []uint32{0, 1, 2},

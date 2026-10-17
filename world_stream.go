@@ -640,8 +640,20 @@ func (w *world) advanceUpload(g *Scene, u *sectionUpload, budget *uploadBudget) 
 			section.trim, u.trim = u.trim, nil
 			section.foregroundSplit = true
 			section.foreground, u.foreground = u.foreground, nil
+			if section.carveBase != nil {
+				section.carveBase.Deallocate()
+				section.carveBase = nil
+				section.carveBaseCuts = 0
+			}
 			source := render.StructuralSection(u.data)
 			section.rockSource = &source
+			// Keep immutable baked rock pixels while publishing, before any
+			// impact. Dirty cut regions can restore them with one GPU copy.
+			if section.foreground != nil {
+				section.carveBase = ebiten.NewImage(section.foreground.Bounds().Dx(), section.foreground.Bounds().Dy())
+				section.carveBase.DrawImage(section.foreground, nil)
+				section.carveBaseCuts = len(source.VisualCuts)
+			}
 			section.pixels = u.pixels
 			section.geometry = u.data.Geometry
 			w.updateSectionSource(u)

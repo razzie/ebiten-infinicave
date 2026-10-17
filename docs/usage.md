@@ -232,6 +232,17 @@ _ = result
 
 `CarveSegment(start, end, width)` makes a flat-ended cut; `Carve(Hole)` accepts the same descriptors as authored holes, using world coordinates. Inputs must be finite and sizes positive. Calls return as soon as collision, exact queries, formation IDs, and the result reflect the cut. Texture edits and decoration burn captures run on the next valid `Update` or `Draw`, before uploads or rendering use the edited images; carving calls do not perform texture replay or wait for GPU completion. Cuts persist through section eviction and are cleared by `Reset`.
 
+`CarveTerrain(Hole)` applies the same persistent cuts, collision updates,
+decoration removal, and texture edits without building formation reports.
+Use it when gameplay consumes collision snapshots and only needs `SectionIDs`
+to refresh them. `Changes` is empty and `Complete` describes loaded cut coverage
+only. A geometry change expires all retained formation and guide IDs; the next
+`Query`, `Formation`, or `Guide` call rebuilds the index lazily. Duplicate cuts
+and cuts that remove no rock preserve IDs. This path retains source guides
+instead of retiring them after their last supporting formation is destroyed.
+The existing carving methods retain their formation reporting and guide retirement
+behavior.
+
 Vine stems and leaves follow the brightness of their supporting rock cells: darker on dark rock and lighter on light rock, with background vines retaining their muted palette. Each vine layer draws all stems first, then leaves, so crossing stems do not cover the leaves. Foreground vines can start on and cross bright, top-facing rock; each family shares an allowance of six to nine top-facing cells, allowing longer runs over lit ridges. This shading stays fixed when carving or resizing.
 
 Foreground vines, their leaves, moss and rock surface details are carved by erasing their rendered textures. Background rock and background vines remain intact. Original geometry remains available for baking after resizing or reloading; vine paths returned by section generation are not split around holes. Mushroom groups disappear when any inset root support is cut, and webs disappear when any rock attachment support is cut. Cutting only a mushroom cap, stalk or free web strand retains the supported decoration. Grass and hanging growth are erased locally, with the whole tuft or instance removed when a support anchor is cut.
