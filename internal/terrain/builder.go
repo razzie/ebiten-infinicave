@@ -261,11 +261,11 @@ func (s *SectionBuild) Materialize(ctx context.Context) bool {
 	if ctx.Err() != nil {
 		return false
 	}
-	background := newBackgroundRockGrid(seeds, footprint)
+	background := newBackgroundRockGrid(s.seed, seeds, footprint)
 	if ctx.Err() != nil {
 		return false
 	}
-	// Route against the actual Voronoi silhouette, retaining its natural holes.
+	// Route stems and leaves against the actual silhouette, including padding holes.
 	footprint.background = newRockFootprint(background)
 	backgroundVines := backgroundPathVines(s.seed, s.data.ID, s.data.Orientation, footprint)
 	if ctx.Err() != nil {

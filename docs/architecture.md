@@ -193,6 +193,9 @@ surviving stems retain their complete geometry and baked materials.
 Background rock dilates the uncut
 foreground footprint, retaining its exact guides and branches beneath coarser
 Voronoi faces. Background border strips fill the extended cross-axis margins.
+World-keyed, irregular pockets remove whole rear cells from exposed padding and
+borders, while a conservative cell bound preserves backing beneath the uncut
+foreground.
 Complete cells meeting that footprint retain their original Voronoi edges,
 making the exposed silhouette jagged without contour clipping or shared-edge
 subdivision. Only exposed cells receive extra folded shading planes. A charcoal

@@ -45,8 +45,9 @@ func newRockGridInRange(seeds []geom.V, colorAt func(geom.V) color.NRGBA, minX, 
 // Keep complete Voronoi cells in the padded footprint. The exposed cell edges
 // make a broken, angular silhouette without clipping smooth curves through
 // faces or adding detail to any shared interior edge.
-func newBackgroundRockGrid(seeds []geom.V, footprint *rockFootprint) RockGrid {
+func newBackgroundRockGrid(seed int64, seeds []geom.V, footprint *rockFootprint) RockGrid {
 	cells := voronoiCellsInRange(seeds, BackgroundMinX, BackgroundMaxX)
+	holes := backgroundPaddingHoles(seed, footprint.worldTop)
 	grid := make(RockGrid, 0, len(seeds))
 	for i, p := range seeds {
 		keep := footprint.backgroundContains(p)
@@ -56,7 +57,7 @@ func newBackgroundRockGrid(seeds []geom.V, footprint *rockFootprint) RockGrid {
 			}
 			keep = footprint.backgroundContains(vertex)
 		}
-		if keep {
+		if keep && !footprint.backgroundHoleCell(p, cells[i], holes) {
 			grid = append(grid, RockCell{Center: p, Polygon: cells[i], Color: color.NRGBA{A: 255}})
 		}
 	}

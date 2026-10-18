@@ -56,10 +56,11 @@ func statsOf(s SectionData) sectionStats {
 // Upward-facing guide lips retain only subpixel silhouette irregularity.
 // Contour intersections follow the actual relief instead of linear heights.
 // Background copies the uncut footprint with coarser cells and steered vines.
+// World-keyed pockets remove complete rear cells in exposed padding.
 func TestSectionStatsStable(t *testing.T) {
 	want := map[int64]sectionStats{
-		1:  {6788, 1873, 85, .9509602572},
-		42: {6532, 1554, 93, .7789434915},
+		1:  {6521, 1873, 85, .9509602572},
+		42: {6279, 1554, 93, .7789434915},
 	}
 	for seed, w := range want {
 		got := statsOf(BuildSection(seed, 0))
@@ -100,7 +101,7 @@ func TestBackgroundCopiesUncutForegroundFootprint(t *testing.T) {
 				if visiblePadding < 25 {
 					t.Fatalf("insufficient visible padding coverage: %d faces", visiblePadding)
 				}
-				core, padding := 0, 0
+				core, padding, paddingHoles := 0, 0, 0
 				for y := .025; y < .98; y += .025 {
 					for x := .025; x < .98; x += .025 {
 						p := geom.V{X: x, Y: y}
@@ -114,7 +115,7 @@ func TestBackgroundCopiesUncutForegroundFootprint(t *testing.T) {
 						if d > .015 && d < backgroundRockPadding-.015 {
 							padding++
 							if back.distance(p) > 0 {
-								t.Fatalf("background lacks generous padding at %v", p)
+								paddingHoles++
 							}
 						}
 					}
@@ -122,12 +123,20 @@ func TestBackgroundCopiesUncutForegroundFootprint(t *testing.T) {
 				if core < 50 || padding < 100 {
 					t.Fatalf("insufficient formation coverage: core %d, padding %d", core, padding)
 				}
+				if paddingHoles == 0 || paddingHoles > padding/4 {
+					t.Fatalf("padding must retain broad coverage around its holes: %d/%d open samples", paddingHoles, padding)
+				}
+				border, borderHoles := 0, 0
 				for y := .025; y < 1; y += .05 {
 					for _, x := range []float64{BackgroundMinX + .005, -.25, 0, 1, 1.25, BackgroundMaxX - .005} {
+						border++
 						if back.distance(geom.V{X: x, Y: y}) > 0 {
-							t.Fatalf("border rock has a gap at %v/%v", x, y)
+							borderHoles++
 						}
 					}
+				}
+				if borderHoles == 0 || borderHoles > border/4 {
+					t.Fatalf("border must retain broad coverage around its holes: %d/%d open samples", borderHoles, border)
 				}
 			})
 		}

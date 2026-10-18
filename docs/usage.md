@@ -179,16 +179,20 @@ holes are cut. Its cells are slightly larger, keeping their original straight
 Voronoi edges. Whole cells meeting the padded footprint form a jagged outer
 silhouette; exposed cells also receive extra folded shading facets. An extra
 0.085 scene units of padding around each formation makes nearby rear formations
-overlap. Continuous rock fills the left and right borders
+overlap. Rock fills the left and right borders
 in portrait scenes, or the top and bottom borders in landscape scenes, and extends
-through the outer fade into blackness. All rear rock retains a charcoal floor
+through the outer fade into blackness. Randomly shaped holes break up these
+border strips and exposed formation padding, following the rock's angular cell
+edges. Their placement is fixed by the world seed, including across section
+boundaries; backing beneath the original foreground remains solid.
+All rear rock retains a charcoal floor
 so the padded guides and branches remain visible. Material noise varies the
 shading without hiding parts of the shared footprint in black patches.
 
 Background vine families grow in staggered lanes across the full border
 strips, including their outer margins. Long attached runners branch inward and
 seek exposed formation padding toward the middle. New families only start at
-the sides; all middle growth remains attached to them. Natural background holes
+the sides; all middle growth remains attached to them. Generated background holes
 remain open, and vines wrap around their edges. Stems and leaves avoid foreground
 rock with clearance for its chipped edges and projected walls. Background vines
 share the border fade. The layout is deterministic in both orientations and

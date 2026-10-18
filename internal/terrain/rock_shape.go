@@ -102,6 +102,57 @@ func (f *rockFootprint) backgroundContains(p geom.V) bool {
 	return p.X <= backgroundSolidBorderWidth || p.X >= generationWidth-backgroundSolidBorderWidth || f.backgroundBorderHeight(p) >= 0 || f.distance(p) <= backgroundRockPadding
 }
 
+type backgroundPaddingHole struct {
+	polygon []geom.V
+	bounds  geom.Bounds
+}
+
+// World-keyed, jittered pockets vary in size, angle, and outline. Each window
+// includes the neighboring rows so pockets crossing a section seam stay whole.
+func backgroundPaddingHoles(seed int64, top float64) []backgroundPaddingHole {
+	const stepX, stepY = .24, .28
+	seed ^= 0x72656172686f6c65
+	var holes []backgroundPaddingHole
+	for row := int64(math.Floor((top+GenerationMinY)/stepY)) - 1; float64(row)*stepY < top+generationMaxY+stepY; row++ {
+		for col := int64(math.Floor(BackgroundMinX / stepX)); float64(col)*stepX < BackgroundMaxX; col++ {
+			random := func(channel int64) float64 { return SiteRandom(seed, row, col, channel) }
+			if random(0) > .65 {
+				continue
+			}
+			center := geom.V{X: (float64(col) + .25 + .5*random(1)) * stepX, Y: (float64(row)+.25+.5*random(2))*stepY - top}
+			rx, ry := .035+.030*random(3), .040+.035*random(4)
+			rotation := 2 * math.Pi * random(5)
+			count := 9 + int(5*random(6))
+			poly := make([]geom.V, count)
+			for i := range poly {
+				angle := 2 * math.Pi * float64(i) / float64(count)
+				radius := .65 + .5*random(int64(7+i))
+				poly[i] = center.Add(geom.Rotate(geom.V{X: rx * radius * math.Cos(angle), Y: ry * radius * math.Sin(angle)}, rotation))
+			}
+			lo, hi := geom.PolygonBounds(poly)
+			holes = append(holes, backgroundPaddingHole{polygon: poly, bounds: geom.Bounds{Min: lo, Max: hi}})
+		}
+	}
+	return holes
+}
+
+// Remove complete cells for angular rims matching the rear silhouette. A
+// bounding disk protects the entire uncut foreground and a small backing lip,
+// including thin branches crossing a cell whose vertices all lie outside rock.
+func (f *rockFootprint) backgroundHoleCell(center geom.V, poly []geom.V, holes []backgroundPaddingHole) bool {
+	for _, hole := range holes {
+		if center.X < hole.bounds.Min.X || center.X > hole.bounds.Max.X || center.Y < hole.bounds.Min.Y || center.Y > hole.bounds.Max.Y || !geom.InsidePolygon(center, hole.polygon) {
+			continue
+		}
+		radius := 0.0
+		for _, p := range poly {
+			radius = max(radius, p.Sub(center).Len())
+		}
+		return center.X+radius+.012 < f.minX || center.X-radius-.012 > f.maxX || f.distance(center) > radius+.012
+	}
+	return false
+}
+
 // Closely spaced loop walls can introduce a run of almost collinear shared
 // junctions. Ear clipping cannot always resolve that run at its tolerance.
 // Remove redundant points only on affected faces, preserving their silhouette;

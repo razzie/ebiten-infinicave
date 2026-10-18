@@ -13,7 +13,7 @@ func TestBackgroundKeepsWholeVoronoiCellsAndExposedEdges(t *testing.T) {
 	noise := NewPerlin(rand.New(rand.NewSource(42)))
 	seeds := worldSeedsInRange(42, 0, noise, BackgroundMinX, BackgroundMaxX)
 	footprint := newRockFootprint(RockGrid{terrainRect(.3, .3, .4, .1)})
-	grid := newBackgroundRockGrid(seeds, footprint)
+	grid := newBackgroundRockGrid(42, seeds, footprint)
 	cells := voronoiCellsInRange(seeds, BackgroundMinX, BackgroundMaxX)
 	bySite := make(map[geom.V][]geom.V, len(seeds))
 	for i, p := range seeds {
@@ -43,6 +43,40 @@ func TestBackgroundKeepsWholeVoronoiCellsAndExposedEdges(t *testing.T) {
 	}
 	if !jagged {
 		t.Fatal("background silhouette does not follow exposed Voronoi edges")
+	}
+}
+
+func TestBackgroundPaddingHolesAreSeededGaps(t *testing.T) {
+	noise := NewPerlin(rand.New(rand.NewSource(42)))
+	seeds := worldSeedsInRange(42, 0, noise, BackgroundMinX, BackgroundMaxX)
+	footprint := newRockFootprint(nil)
+	a := newBackgroundRockGrid(42, seeds, footprint)
+	if !reflect.DeepEqual(a, newBackgroundRockGrid(42, seeds, footprint)) {
+		t.Fatal("padding holes changed on regeneration")
+	}
+	if reflect.DeepEqual(a, newBackgroundRockGrid(1, seeds, footprint)) {
+		t.Fatal("world seed did not change padding holes")
+	}
+	retained := make(map[geom.V]bool, len(a))
+	for _, cell := range a {
+		retained[cell.Center] = true
+	}
+	missing := [2]int{}
+	for _, p := range seeds {
+		if p.Y < .1 || p.Y > .9 || retained[p] {
+			continue
+		}
+		// Far inside the border strips every cell was solid before pockets
+		// were introduced. These gaps must be real geometry omissions.
+		if p.X > -.4 && p.X < -.1 {
+			missing[0]++
+		}
+		if p.X > 1.1 && p.X < 1.4 {
+			missing[1]++
+		}
+	}
+	if missing[0] < 5 || missing[1] < 5 {
+		t.Fatalf("both padding strips need visible holes, missing cells: %v", missing)
 	}
 }
 
