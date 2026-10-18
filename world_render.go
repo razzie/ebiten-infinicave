@@ -136,6 +136,28 @@ func (w *world) DrawBackground(dst *ebiten.Image, y, height float64, view render
 	}
 }
 
+// Lighting publishes with the background image, retaining its raster width
+// through resize. Vines receive the lighting of their supporting rear facet.
+func (w *world) DrawBackgroundLighting(dst *ebiten.Image, y, height float64, view render.RenderTransform) {
+	if w.disableBackground {
+		return
+	}
+	low, high := visibleSections(y, height)
+	for id := low; id <= high; id++ {
+		section := w.sections[id]
+		if section == nil || section.terrain == nil || section.backgroundLighting == nil {
+			continue
+		}
+		pixels := section.backgroundWidth()
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Translate(float64(render.BackgroundRasterBounds(pixels).Min.X), (terrain.SectionTop(id)-y)*float64(pixels))
+		scale := float64(view.Pixels) / float64(pixels)
+		op.GeoM.Scale(scale, scale)
+		op.GeoM.Translate(view.OffsetX, 0)
+		dst.DrawImage(section.backgroundLighting, op)
+	}
+}
+
 // Compose structural rocks and independent growth in their stable draw order.
 // Runtime cuts mask images and replay dirty tiles before the next draw.
 func (w *world) DrawForegroundRocks(dst *ebiten.Image, y, height, offsetX float64, view render.RenderTransform) {

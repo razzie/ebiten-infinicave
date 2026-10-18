@@ -63,6 +63,16 @@ that data and rendering settings; it never imports the root package or reaches
 into a Scene. The background pass receives a narrow drawing interface for the
 current cached terrain and foreground silhouette.
 
+Background uploads also bake the direct-light share from the rendered facet
+normals, using the same bounded face batches and antialiasing policy. This image
+publishes, resizes, and expires with its background. The dynamic shadow pass
+sweeps the current foreground alpha continuously downward by the scalar
+`ShadowOffset`. The renderer converts the downward direction into the section
+frame for either orientation and uses maximum-alpha doubling passes before
+softening. Both axes include upstream casters outside the viewport. The composite
+removes direct illumination while retaining ambient light and the original rear
+coverage.
+
 Generation and geometry edits stay together because rocks, guides, and plants
 share topology and placement rules. Cross-section identity, availability, and
 persistent runtime cuts belong to the root, where the world cache is owned.

@@ -48,6 +48,30 @@ func TestViewerStreamingFlags(t *testing.T) {
 	}
 }
 
+func TestViewerShadowOffsetFlag(t *testing.T) {
+	oldFlags, oldArgs := flag.CommandLine, os.Args
+	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })
+	for _, tc := range []struct {
+		args []string
+		want float64
+	}{
+		{nil, infinicave.DefaultConfig().ShadowOffset},
+		{[]string{"-shadow-offset", "0"}, 0},
+		{[]string{"-shadow-offset", "0.12"}, .12},
+		{[]string{"-mode", "landscape", "-shadow-offset", "1"}, 1},
+	} {
+		flag.CommandLine = flag.NewFlagSet("shadow-options", flag.ContinueOnError)
+		os.Args = append([]string{"infinicave"}, tc.args...)
+		options, err := parseOptions()
+		if err != nil || options.config.ShadowOffset != tc.want {
+			t.Fatalf("shadow offset: got %g, want %g, error %v", options.config.ShadowOffset, tc.want, err)
+		}
+		if flag.Lookup("shadow-x") != nil || flag.Lookup("shadow-y") != nil {
+			t.Fatal("viewer retained vector shadow flags")
+		}
+	}
+}
+
 func TestViewerModesAndWindowSizing(t *testing.T) {
 	for _, tc := range []struct {
 		name          string

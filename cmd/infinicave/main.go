@@ -85,8 +85,7 @@ func parseOptions() (viewerOptions, error) {
 	backgroundBlur := flag.Float64("background-blur", defaults.BackgroundBlur, "background rock and vine blur in scene units (0 disables it, range 0-0.05)")
 	shadowOpacity := flag.Float64("shadow-opacity", defaults.ShadowOpacity, "dynamic rock shadow opacity (0 disables it, range 0-1)")
 	shadowBlur := flag.Float64("shadow-blur", defaults.ShadowBlur, "dynamic rock shadow softness in scene units (range 0-0.05)")
-	shadowX := flag.Float64("shadow-x", defaults.ShadowOffset.X, "rock shadow horizontal offset in scene units (range -1 to 1)")
-	shadowY := flag.Float64("shadow-y", defaults.ShadowOffset.Y, "rock shadow vertical offset in scene units (positive is down, range -1 to 1)")
+	shadowOffset := flag.Float64("shadow-offset", defaults.ShadowOffset, "downward rock shadow reach in scene units (0 disables extension, range 0-1)")
 	fog := flag.Float64("fog", defaults.Fog, "moving fog strength between background and foreground layers (0 disables it, values above 1 increase density)")
 	batsPerMinute := flag.Float64("bats-per-minute", defaults.BatsPerMinute, "average bat arrivals per minute (0 disables them, interactive viewer only)")
 	decorationBurn := flag.Bool("decoration-burn", defaults.DecorationBurn, "burn dissolve decorations removed by carving")
@@ -124,7 +123,7 @@ func parseOptions() (viewerOptions, error) {
 	config.Seed, config.Texture = *seed, *texture
 	config.DisableBackground = *disableBackground
 	config.BackgroundBlur, config.ShadowOpacity, config.ShadowBlur = *backgroundBlur, *shadowOpacity, *shadowBlur
-	config.ShadowOffset = infinicave.V{X: *shadowX, Y: *shadowY}
+	config.ShadowOffset = *shadowOffset
 	config.Fog = *fog
 	config.BatsPerMinute = *batsPerMinute
 	config.DecorationBurn = *decorationBurn

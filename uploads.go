@@ -31,6 +31,18 @@ func (w *world) advanceBackground(g *Scene, u *sectionUpload, budget *uploadBudg
 			if !w.uploadFaces(g, cursor, u.img, u.raster.Background.Faces, top, true, budget) {
 				return
 			}
+		case uploadBackgroundLighting:
+			if g.background != nil {
+				if !budget.available() {
+					return
+				}
+				if u.backgroundLighting == nil {
+					u.backgroundLighting = render.NewBackgroundImageAt(u.pixels)
+				}
+				if !w.uploadFaces(g, cursor, u.backgroundLighting, u.raster.Background.Faces, top, false, budget) {
+					return
+				}
+			}
 		case uploadBackgroundOutlines:
 			if !w.uploadMeshes(cursor, u.img, u.raster.Background.Outlines, budget) {
 				return
@@ -55,6 +67,10 @@ func (w *world) advanceBackground(g *Scene, u *sectionUpload, budget *uploadBudg
 				section.terrain.Deallocate()
 			}
 			section.terrain, u.img = u.img, nil
+			if section.backgroundLighting != nil {
+				section.backgroundLighting.Deallocate()
+			}
+			section.backgroundLighting, u.backgroundLighting = u.backgroundLighting, nil
 			section.backgroundPixels = u.pixels
 			w.updateSectionSource(u)
 			u.needed &^= render.BackgroundLayer

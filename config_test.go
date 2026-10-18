@@ -16,6 +16,27 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
+func TestShadowOffsetPointsDown(t *testing.T) {
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		for _, offset := range []float64{0, .05, 1} {
+			scene, err := NewScene(Config{Orientation: orientation, ShadowOpacity: 1, ShadowOffset: offset})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, reset := range []bool{false, true} {
+				if reset {
+					scene.Reset(42)
+				}
+				worldOffset := terrain.WorldPoint(orientation, scene.background.Offset)
+				if worldOffset != (V{Y: offset}) {
+					t.Errorf("%s offset %g: shadow points %v", orientation, offset, worldOffset)
+				}
+			}
+			scene.Close()
+		}
+	}
+}
+
 func TestAntialiasingConfiguration(t *testing.T) {
 	if DefaultConfig().Antialiasing != AntialiasingFull || (Config{}).Antialiasing != AntialiasingFull {
 		t.Fatal("default geometry antialiasing changed")
@@ -396,7 +417,7 @@ func TestHorizontalBatPathsAndSceneLifecycle(t *testing.T) {
 		t.Fatal("horizontal draw advanced animation or used the wrong compositor dimensions")
 	}
 	scene.Reset(99)
-	if scene.Orientation() != Horizontal || scene.fog.Orientation != Horizontal || scene.background.Offset != terrain.InternalPoint(Horizontal, config.ShadowOffset) || scene.bats.Orientation != Horizontal || len(scene.bats.Bats) != 0 {
+	if scene.Orientation() != Horizontal || scene.fog.Orientation != Horizontal || scene.background.Offset != (V{X: config.ShadowOffset}) || scene.bats.Orientation != Horizontal || len(scene.bats.Bats) != 0 {
 		t.Fatal("reset lost orientation or effect settings")
 	}
 	scene.Close()

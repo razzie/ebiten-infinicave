@@ -93,13 +93,14 @@ func (u *sectionUpload) deallocate() {
 		u.backgroundCursor.surface.Deallocate()
 		u.backgroundCursor.surface = nil
 	}
-	for _, img := range []*ebiten.Image{u.img, u.foreground, u.vines, u.foregroundVines, u.mushrooms, u.spiderWebs, u.grass, u.surface} {
+	for _, img := range []*ebiten.Image{u.img, u.backgroundLighting, u.foreground, u.vines, u.foregroundVines, u.mushrooms, u.spiderWebs, u.grass, u.surface} {
 		if img != nil {
 			img.Deallocate()
 		}
 	}
 	u.img, u.foreground, u.vines, u.foregroundVines, u.mushrooms, u.spiderWebs, u.surface = nil, nil, nil, nil, nil, nil, nil
 	u.grass = nil
+	u.backgroundLighting = nil
 }
 
 // Resize/offscreen abandonment keeps CPU data and all published layers.
@@ -137,6 +138,7 @@ const (
 	uploadGrass
 	uploadForegroundPublish
 	uploadBackgroundFaces
+	uploadBackgroundLighting
 	uploadBackgroundOutlines
 	uploadBackgroundFade
 	uploadBackgroundPublish
@@ -158,6 +160,7 @@ type sectionUpload struct {
 	img, foreground, vines, foregroundVines, mushrooms *ebiten.Image
 	spiderWebs                                         *ebiten.Image
 	grass                                              *ebiten.Image
+	backgroundLighting                                 *ebiten.Image
 	uploadCursor
 	plants             [vegetationProducts]plantUpload
 	plantsInitialized  bool
@@ -739,7 +742,9 @@ func (w *world) uploadFaces(g *Scene, u *uploadCursor, dst *ebiten.Image, mesh r
 		}
 		chunk := mesh
 		chunk.Indices = mesh.Indices[u.faceNext:end]
-		if material {
+		if u.stage == uploadBackgroundLighting {
+			g.background.DrawLighting(dst, chunk, terrain.RockLightDirection(g.orientation))
+		} else if material {
 			g.drawGridFacesWithAA(dst, chunk, top, false)
 		} else {
 			chunk.DrawUnaliased(dst, w.white)
@@ -763,7 +768,9 @@ func (w *world) uploadFaces(g *Scene, u *uploadCursor, dst *ebiten.Image, mesh r
 			return false
 		}
 		chunk := render.SupersampledBatch(mesh, u.faceNext, end)
-		if material {
+		if u.stage == uploadBackgroundLighting {
+			g.background.DrawLighting(u.surface, chunk, terrain.RockLightDirection(g.orientation))
+		} else if material {
 			g.drawGridFacesWithAA(u.surface, chunk, top, false)
 		} else {
 			chunk.DrawUnaliased(u.surface, w.white)

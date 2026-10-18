@@ -369,6 +369,52 @@ func TestTerrainProductsKeepSeparateAAAccumulators(t *testing.T) {
 	}
 }
 
+func TestBackgroundLightingPublishesWithRock(t *testing.T) {
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		for _, aa := range []AntialiasingMode{AntialiasingOff, AntialiasingFull, AntialiasingFXAA} {
+			g := resolutionTestScene(t)
+			g.orientation = orientation
+			var err error
+			g.background, err = render.NewBackgroundRenderer(render.BackgroundConfig{ShadowOpacity: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := g.world
+			w.antialiasing = aa
+			mesh := resolutionTestMesh(0)
+			mesh.Layers = render.BackgroundLayer
+			for _, pixels := range []int{64, 96} {
+				s := w.sections[0]
+				oldRock, oldLighting, oldWidth := s.terrain, s.backgroundLighting, s.backgroundWidth()
+				u := &sectionUpload{data: mesh, pixels: pixels, needed: render.BackgroundLayer}
+				first := uploadBudget{start: time.Now().Add(time.Hour), quantumEnd: 1}
+				w.advanceBackground(g, u, &first)
+				if s.terrain != oldRock || s.backgroundLighting != oldLighting || s.backgroundWidth() != oldWidth {
+					t.Fatal("partial background upload replaced a published product")
+				}
+				for tick := 0; tick < 20 && u.needed != 0; tick++ {
+					budget := uploadBudget{start: time.Now().Add(time.Hour)}
+					w.advanceBackground(g, u, &budget)
+				}
+				if u.needed != 0 || s.terrain == oldRock || s.backgroundLighting == nil || s.backgroundLighting == oldLighting || s.backgroundWidth() != pixels {
+					t.Fatalf("%s/%s: background and lighting failed to publish at %d", orientation, aa, pixels)
+				}
+				if s.terrain.Bounds() != s.backgroundLighting.Bounds() || u.img != nil || u.backgroundLighting != nil || u.backgroundCursor.surface != nil {
+					t.Fatal("background publication retained private images or mismatched lighting size")
+				}
+			}
+			// Canceling a private replacement releases lighting alongside rock
+			// and its AA accumulator, preserving the displayed pair.
+			u := &sectionUpload{backgroundLighting: render.NewBackgroundImageAt(48)}
+			u.deallocate()
+			if u.backgroundLighting != nil {
+				t.Fatal("canceled background upload retained private lighting")
+			}
+			g.Close()
+		}
+	}
+}
+
 func TestGrassPublishesBeforeForeground(t *testing.T) {
 	g := resolutionTestScene(t)
 	w := g.world

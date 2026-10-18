@@ -112,8 +112,8 @@ func NewScene(config Config) (*Scene, error) {
 		}
 	}
 	if !g.disableBackground && g.view == ViewShaded && (config.BackgroundBlur > 0 || config.ShadowOpacity > 0) {
-		effects := render.BackgroundConfig{BackgroundBlur: config.BackgroundBlur, ShadowOpacity: config.ShadowOpacity, ShadowBlur: config.ShadowBlur}
-		effects.ShadowOffset = terrain.InternalPoint(g.orientation, config.ShadowOffset)
+		effects := render.BackgroundConfig{BackgroundBlur: config.BackgroundBlur, ShadowOpacity: config.ShadowOpacity,
+			ShadowBlur: config.ShadowBlur, ShadowOffset: config.ShadowOffset, Orientation: g.orientation}
 		g.background, err = render.NewBackgroundRenderer(effects)
 		if err != nil {
 			g.Close()

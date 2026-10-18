@@ -19,6 +19,12 @@ var BackgroundFadeShaderSource []byte
 //go:embed shaders/background.kage
 var backgroundShaderSource []byte
 
+//go:embed shaders/shadow_sweep.kage
+var shadowSweepShaderSource []byte
+
+//go:embed shaders/background_lighting.kage
+var backgroundLightingShaderSource []byte
+
 //go:embed shaders/fog.kage
 var fogShaderSource []byte
 

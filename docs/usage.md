@@ -105,9 +105,14 @@ The order is background and fog, `BehindRocks`, rear grass blades and hanging gr
 | `MossDensity` | Moss colony occurrence probability, from 0 (disabled) to 1 (all eligible colonies); default 0.72. |
 | `BackgroundBlur`, `ShadowBlur` | Softness in scene units, from 0 to 0.05. |
 | `DisableBackground` | Skip background rocks, vines, blur, shadows, and their GPU uploads. Defaults to false; fog remains controlled by `Fog`. |
-| `ShadowOpacity` | Dynamic background shadow opacity from 0 to 1. |
+| `ShadowOpacity` | Strength of foreground occlusion of direct background light, from 0 to 1; rear facet normals determine the response and ambient light remains. |
+| `ShadowOffset` | Downward reach of the continuous silhouette shadow in scene units, from 0 (no extension) to 1; default 0.05. Shadows face down in both orientations; cuts and grass update the silhouette. |
 | `CollisionTolerance` | Optional collision polygon simplification tolerance; zero keeps exact boundaries. |
 | `View` | `ViewShaded`, `ViewClay`, `ViewHeight`, `ViewNormals`, or `ViewShadows`. |
+
+Set `config.ShadowOffset = 0.05` to extend shadows downward by 0.05 scene units.
+This scalar replaces the former vector setting. The viewer uses
+`-shadow-offset 0.05` in place of `-shadow-x` and `-shadow-y`.
 
 Exposed side and underside contours break into broad angular edges with deep
 folds and strongly shaded facets. Fine chips remain along both halves.

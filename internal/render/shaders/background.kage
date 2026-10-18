@@ -7,8 +7,10 @@ func Fragment(dst vec4, src vec2, color vec4) vec4 {
 	background := imageSrc0At(src)
 	shadow := imageSrc1At(src).a
 	coverage := imageSrc2At(src).a
+	lighting := imageSrc3At(src)
+	direct := mix(1.0, lighting.r/max(lighting.a, .0001), lighting.a)
 	// Preserve original coverage so blur never fills missing terrain or leaks
 	// below the floor. Normalize color at transparent edges before shading.
 	rgb := background.rgb / max(background.a, .0001)
-	return vec4(rgb * (1.0-Opacity*shadow) * coverage, coverage)
+	return vec4(rgb * (1.0-Opacity*shadow*direct) * coverage, coverage)
 }

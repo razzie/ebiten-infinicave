@@ -244,8 +244,8 @@ func TestPublicSceneConfigurationAndLifecycle(t *testing.T) {
 		{ShadowBlur: -1}, {ShadowBlur: .051}, {ShadowBlur: math.NaN()}, {ShadowBlur: math.Inf(1)},
 		{ShadowOpacity: -1}, {ShadowOpacity: 1.01}, {ShadowOpacity: math.NaN()}, {ShadowOpacity: math.Inf(1)},
 		{Fog: -1}, {Fog: math.NaN()}, {Fog: math.Inf(1)}, {Fog: math.Inf(-1)},
-		{ShadowOffset: infinicave.V{X: 1.01}}, {ShadowOffset: infinicave.V{Y: -1.01}},
-		{ShadowOffset: infinicave.V{X: math.NaN()}}, {ShadowOffset: infinicave.V{Y: math.Inf(1)}},
+		{ShadowOffset: -0.01}, {ShadowOffset: 1.01},
+		{ShadowOffset: math.NaN()}, {ShadowOffset: math.Inf(1)}, {ShadowOffset: math.Inf(-1)},
 		{View: infinicave.View(-1)}, {View: infinicave.View(999)},
 		{CollisionTolerance: -1}, {CollisionTolerance: math.NaN()}, {CollisionTolerance: math.Inf(1)},
 		{MushroomDensity: -1}, {MushroomDensity: 1.01}, {MushroomDensity: math.NaN()}, {MushroomDensity: math.Inf(1)}, {MushroomDensity: math.Inf(-1)},
@@ -264,7 +264,7 @@ func TestPublicSceneConfigurationAndLifecycle(t *testing.T) {
 			t.Fatalf("generator accepted invalid configuration: %+v", config)
 		}
 	}
-	for _, config := range []infinicave.Config{{}, infinicave.DefaultConfig(), {View: infinicave.ViewNormals, Texture: 8}, {DisableBackground: true}} {
+	for _, config := range []infinicave.Config{{}, infinicave.DefaultConfig(), {ShadowOffset: 1}, {View: infinicave.ViewNormals, Texture: 8}, {DisableBackground: true}} {
 		scene, err := infinicave.NewScene(config)
 		if err != nil {
 			t.Fatal(err)

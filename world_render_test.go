@@ -77,7 +77,7 @@ func (g *compositorTestGame) Draw(*ebiten.Image) {
 		s.foregroundVinesBounds, s.mushroomsBounds = bounds, bounds
 		s.spiderWebsBounds = bounds
 		scene := &Scene{orientation: orientation, world: &world{sections: map[int64]*worldSection{0: s}}}
-		background, err := render.NewBackgroundRenderer(render.BackgroundConfig{BackgroundBlur: .002, ShadowOpacity: .5, ShadowBlur: .01, ShadowOffset: V{X: .02, Y: .02}})
+		background, err := render.NewBackgroundRenderer(render.BackgroundConfig{BackgroundBlur: .002, ShadowOpacity: .5, ShadowBlur: .01, ShadowOffset: .02, Orientation: orientation})
 		if err != nil {
 			g.t.Error(err)
 			return
