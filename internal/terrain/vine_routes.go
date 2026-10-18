@@ -522,14 +522,20 @@ func (s pathSupport) topCellAllowed(cell int) bool {
 // Count full ribbons against distinct rendered cells, including narrow facets
 // between samples and cells whose edges run parallel to a vine seam.
 func (s pathSupport) visitTopCells(a, b geom.V, radius float64, visit func(int) bool) {
-	pad := radius + vineTopCellClearance
-	s.topFaces.Query(geom.Bounds{Min: geom.V{X: min(a.X, b.X) - pad, Y: min(a.Y, b.Y) - pad}, Max: geom.V{X: max(a.X, b.X) + pad, Y: max(a.Y, b.Y) + pad}}, func(i int) bool {
-		poly := s.topCells[i].Polygon
+	visitRockCells(s.topCells, s.topFaces, a, b, radius+vineTopCellClearance, visit)
+}
+
+func visitRockCells(cells RockGrid, index *geom.BoundsIndex, a, b geom.V, pad float64, visit func(int) bool) {
+	index.Query(geom.Bounds{Min: geom.V{X: min(a.X, b.X) - pad, Y: min(a.Y, b.Y) - pad}, Max: geom.V{X: max(a.X, b.X) + pad, Y: max(a.Y, b.Y) + pad}}, func(i int) bool {
+		if len(cells[i].Polygon) < 3 || cells[i].Color.A == 0 {
+			return true
+		}
+		poly := cells[i].Polygon
 		if geom.InsidePolygon(a, poly) || geom.InsidePolygon(b, poly) {
 			return visit(i)
 		}
 		for j, p := range poly {
-			if geom.SegmentDistanceSquared(a, b, p, poly[(j+1)%len(poly)]) < pad*pad {
+			if geom.SegmentDistanceSquared(a, b, p, poly[(j+1)%len(poly)]) <= pad*pad {
 				return visit(i)
 			}
 		}

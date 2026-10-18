@@ -185,7 +185,12 @@ retain their full artwork; growth replay masks moss before drawing supported
 lichen, and grass replay draws supported colonies after masking legacy ground
 meshes. No blade, leaf, cap, stem, or silk intersection removes a supported group.
 Foreground vines use the generated branch graph to guide connected cell-edge
-routes; forks attach at facet junctions. Background rock dilates the uncut
+routes; forks attach at facet junctions. A generation-time pass reuses the rock
+support index to limit each cell to two stems, including their width and leaves.
+Cell centers assign section ownership so neighboring sections share that limit
+without runtime coordination. Rejected stems lose their descendants, while
+surviving stems retain their complete geometry and baked materials.
+Background rock dilates the uncut
 foreground footprint, retaining its exact guides and branches beneath coarser
 Voronoi faces. Background border strips fill the extended cross-axis margins.
 Complete cells meeting that footprint retain their original Voronoi edges,

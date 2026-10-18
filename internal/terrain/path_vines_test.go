@@ -24,6 +24,142 @@ func BenchmarkBackgroundPathVines(b *testing.B) {
 	}
 }
 
+func BenchmarkForegroundVineCellLimit(b *testing.B) {
+	data := NewSectionBuilder(42, nil).Build(0)
+	support := newPathSupport(data.ForegroundBake, data.Guides)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		limitVinesPerCell(data.ForegroundVines, &support)
+	}
+}
+
+func TestVineCellLimitCountsStemsAndPreservesAttachments(t *testing.T) {
+	support := newPathSupport(NewRockTopology(RockGrid{
+		terrainRect(.1, .1, .3, .3), terrainRect(.6, .1, .3, .3),
+	}), nil)
+	stem := func(x, y float64, parent int) Vine {
+		return Vine{Parent: parent, Foreground: true, Points: []VinePoint{
+			{P: geom.V{X: x, Y: y}, Radius: .001},
+			{P: geom.V{X: x + .02, Y: y + .02}, Radius: .001},
+			{P: geom.V{X: x, Y: y + .04}},
+		}}
+	}
+	vines := []Vine{
+		stem(.2, .2, -1), stem(.2, .2, 0), // Parent and fork fill the left cell.
+		stem(.7, .2, -1), // Rejected after visiting both cells; commits neither.
+		stem(.7, .2, 2),  // Descendant of the rejected stem.
+		stem(.7, .2, -1), stem(.7, .2, 4),
+	}
+	vines[2].Points = append(vines[2].Points, vines[0].Points[0])
+	vines[4].Along, vines[4].styleFamily, vines[4].styleSet = []float64{0, .03, .06}, 4, true
+	vines[5].styleFamily, vines[5].styleSet = 4, true
+	kept := limitVinesPerCell(vines, &support)
+	if len(kept) != 4 || kept[1].Parent != 0 || kept[2].Parent != -1 || kept[3].Parent != 2 {
+		t.Fatalf("limit damaged surviving attachments: %+v", kept)
+	}
+	if !reflect.DeepEqual(kept[2].Along, vines[4].Along) || VineStyleFamily(kept, 2) != 4 || VineStyleFamily(kept, 3) != 4 {
+		t.Fatal("limit changed baked material distances or identities")
+	}
+	if vines[5].Parent != 4 || !reflect.DeepEqual(kept, limitVinesPerCell(vines, &support)) {
+		t.Fatal("limit changed the input or was not deterministic")
+	}
+	for _, v := range kept {
+		if v.Parent >= 0 && v.Points[0].P != kept[v.Parent].Points[v.Joint].P {
+			t.Fatal("surviving fork is detached")
+		}
+	}
+}
+
+func TestVineCellLimitIncludesSparseRibbonsWidthAndLeaves(t *testing.T) {
+	support := newPathSupport(NewRockTopology(RockGrid{terrainRect(.4, .4, .1, .1)}), nil)
+	stem := func(a, b geom.V, radius float64) Vine {
+		return Vine{Parent: -1, Points: []VinePoint{{P: a, Radius: radius}, {P: b, Radius: radius}}}
+	}
+	base := stem(geom.V{X: .41, Y: .45}, geom.V{X: .49, Y: .45}, .001)
+	leaf := stem(geom.V{X: .3, Y: .45}, geom.V{X: .31, Y: .45}, .001)
+	leaf.Leaves = []VineLeaf{{Polygon: [4]geom.V{
+		{X: .3, Y: .45}, {X: .45, Y: .3}, {X: .6, Y: .45}, {X: .45, Y: .6},
+	}}}
+	for _, candidate := range []Vine{
+		stem(geom.V{X: .3, Y: .45}, geom.V{X: .6, Y: .45}, .001),
+		stem(geom.V{X: .3, Y: .398}, geom.V{X: .6, Y: .398}, .003),
+		leaf, // The leaf completely encloses the cell without crossing its edges.
+	} {
+		if got := limitVinesPerCell([]Vine{base, base, candidate}, &support); len(got) != 2 {
+			t.Fatal("third vine covered a cell between samples, with its width, or with a leaf")
+		}
+	}
+	// Transparent rock and nearby geometry must not consume a cell's slots.
+	support.grid[0].Color.A = 0
+	if got := limitVinesPerCell([]Vine{base, base, base}, &support); len(got) != 3 {
+		t.Fatal("transparent cell consumed coverage")
+	}
+}
+
+func TestVineCellLimitUsesCellOwnershipAtSeams(t *testing.T) {
+	// Each cell straddles a section edge. Only its center decides ownership;
+	// whole vines can still cross the seam within their owned cell.
+	support := newPathSupport(NewRockTopology(RockGrid{
+		terrainRect(.1, -.02, .2, .06), terrainRect(.5, -.04, .2, .06),
+	}), nil)
+	vine := Vine{Parent: -1, Points: []VinePoint{
+		{P: geom.V{X: .2, Y: -.01}, Radius: .001}, {P: geom.V{X: .2, Y: .02}},
+	}}
+	foreign := vine
+	foreign.Points = []VinePoint{{P: geom.V{X: .6, Y: .01}, Radius: .001}, {P: geom.V{X: .6, Y: -.02}}}
+	kept := limitVinesPerCell([]Vine{foreign, vine}, &support)
+	if len(kept) != 1 || !reflect.DeepEqual(kept[0], vine) {
+		t.Fatal("seam cell received a vine from another owner or lost its complete owned vine")
+	}
+}
+
+func TestForegroundVineCellCoverageAcrossSections(t *testing.T) {
+	for _, mode := range []Orientation{Vertical, Horizontal} {
+		for _, seed := range []int64{7, 42} {
+			builder := NewSectionBuilder(seed, nil, mode)
+			var sections []SectionData
+			for id := int64(0); id < 3; id++ {
+				sections = append(sections, builder.Build(id))
+			}
+			reloaded := NewSectionBuilder(seed, nil, mode).Build(1)
+			if !reflect.DeepEqual(sections[1].ForegroundVines, reloaded.ForegroundVines) {
+				t.Fatalf("mode %v seed %d: coverage changed on reload", mode, seed)
+			}
+			support := newPathSupport(sections[1].ForegroundBake, nil)
+			counts := make([]int, len(support.grid))
+			for _, section := range sections {
+				for _, v := range section.ForegroundVines {
+					v.Points = append([]VinePoint(nil), v.Points...)
+					v.Leaves = append([]VineLeaf(nil), v.Leaves...)
+					delta := geom.V{Y: SectionTop(section.ID) - SectionTop(sections[1].ID)}
+					for j := range v.Points {
+						v.Points[j].P = v.Points[j].P.Add(delta)
+					}
+					for j := range v.Leaves {
+						for k := range v.Leaves[j].Polygon {
+							v.Leaves[j].Polygon[k] = v.Leaves[j].Polygon[k].Add(delta)
+						}
+					}
+					seen := make(map[int]bool)
+					support.visitVineCells(v, func(cell int) bool {
+						if !seen[cell] {
+							seen[cell] = true
+							counts[cell]++
+						}
+						return true
+					})
+				}
+			}
+			for i, n := range counts {
+				if support.grid[i].Center.Y >= 0 && support.grid[i].Center.Y < SectionHeight && n > 2 {
+					t.Errorf("mode %v seed %d cell %v covered by %d vines", mode, seed, support.grid[i].Center, n)
+				}
+			}
+		}
+	}
+}
+
 func TestBackgroundVinesPreferExposedPadding(t *testing.T) {
 	// Seed 42's previous dense layout had these outer-padding lengths.
 	for _, tc := range []struct {

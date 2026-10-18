@@ -266,7 +266,98 @@ func foregroundPathVines(ctx context.Context, paths []BranchPath, topology *Rock
 			}
 		}
 	}
-	return alignPathVines(topology.Grid, vines, &support, seed^SectionSeed(id, 0x73757266616365))
+	vines = alignPathVines(topology.Grid, vines, &support, seed^SectionSeed(id, 0x73757266616365))
+	return limitVinesPerCell(vines, &support)
+}
+
+const maxVinesPerRockCell = 2
+
+// Count each finished stem (including offshoots and leaves) once per cell.
+// Reuse the support index and scratch arrays; there are no vine-pair scans or
+// per-sample allocations. Earlier trunks take priority over later offshoots.
+func limitVinesPerCell(vines []Vine, support *pathSupport) []Vine {
+	if len(vines) == 0 || support == nil {
+		return vines
+	}
+	counts := make([]uint8, len(support.grid))
+	seen := make([]int, len(support.grid))
+	remap := make([]int, len(vines))
+	kept := make([]Vine, 0, len(vines))
+	var cells []int
+	for i, v := range vines {
+		remap[i] = -1
+		if v.Parent >= 0 {
+			if remap[v.Parent] < 0 {
+				continue
+			}
+			v.Parent = remap[v.Parent]
+		}
+		cells = cells[:0]
+		if !support.visitVineCells(v, func(cell int) bool {
+			// The cell center assigns one deterministic section owner. Its
+			// polygon may straddle a seam, but a neighboring section cannot
+			// spend another two slots on the same rock after reload.
+			if y := support.grid[cell].Center.Y; y < 0 || y >= SectionHeight {
+				return false
+			}
+			if counts[cell] == maxVinesPerRockCell {
+				return false
+			}
+			if seen[cell] != i+1 {
+				seen[cell] = i + 1
+				cells = append(cells, cell)
+			}
+			return true
+		}) {
+			// Commit only complete vines; rejecting a stem must not reserve
+			// its other cells or leave any descendants detached.
+			continue
+		}
+		for _, cell := range cells {
+			counts[cell]++
+		}
+		remap[i] = len(kept)
+		// Retain baked material identities and distances when indices change.
+		kept = append(kept, v)
+	}
+	return kept
+}
+
+func (s pathSupport) visitVineCells(v Vine, visit func(int) bool) bool {
+	clear := true
+	segment := func(a, b geom.V, radius float64) {
+		visitRockCells(s.grid, s.faces, a, b, radius, func(cell int) bool {
+			clear = visit(cell)
+			return clear
+		})
+	}
+	for j := 1; clear && j < len(v.Points); j++ {
+		a, b := v.Points[j-1], v.Points[j]
+		segment(a.P, b.P, max(a.Radius, b.Radius))
+	}
+	for _, leaf := range v.Leaves {
+		if !clear {
+			break
+		}
+		for j, a := range leaf.Polygon {
+			segment(a, leaf.Polygon[(j+1)%len(leaf.Polygon)], .0002)
+			if !clear {
+				break
+			}
+		}
+		if clear {
+			// Edge tests miss a small cell enclosed entirely by a leaf.
+			lo, hi := geom.PolygonBounds(leaf.Polygon[:])
+			s.faces.Query(geom.Bounds{Min: lo, Max: hi}, func(cell int) bool {
+				c := s.grid[cell]
+				if len(c.Polygon) >= 3 && c.Color.A != 0 && geom.InsidePolygon(c.Polygon[0], leaf.Polygon[:]) {
+					clear = visit(cell)
+				}
+				return clear
+			})
+		}
+	}
+	return clear
 }
 
 // Background paths prefer the exposed padding, independently of cell colors.
