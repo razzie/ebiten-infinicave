@@ -172,13 +172,18 @@ meshes into page coordinates; each world incrementally uploads bounded GPU
 pages on the game goroutine. Section recipes retain stable
 attachment IDs, inset rock support anchors, visual bounds, and dead flags.
 Immutable support indexes contain individual anchors and share detection for
-paired grass and tooth records. Filtering returns newly dead records for dirty
-tiles and upload liveness, without repeating hit detection or rescaling meshes.
+grass colony members across drawing layers and paired tooth records. Filtering
+returns newly dead records for dirty tiles and upload liveness, without repeating
+hit detection or rescaling meshes.
 The terrain support query returns mushroom/web IDs directly to image editing;
 its index and original objects remain unchanged across deletions. Separate visual
 bounds select nearby surviving recipes in their original drawing order.
-Finished mushroom groups and web networks are removed only when a support is
-cut, without cap, stem or silk intersection checks or regeneration.
+Finished mushroom groups, grass colonies, hanging cave lichen, and web networks
+are removed only when a support is cut. Grass colony members share one anchor
+slice across foreground sod, blades, and rear tufts. Surviving grass and lichen
+retain their full artwork; growth replay masks moss before drawing supported
+lichen, and grass replay draws supported colonies after masking legacy ground
+meshes. No blade, leaf, cap, stem, or silk intersection removes a supported group.
 Foreground vines use the generated branch graph to guide connected cell-edge
 routes; forks attach at facet junctions. Background rock dilates the uncut
 foreground footprint, retaining its exact guides and branches beneath coarser

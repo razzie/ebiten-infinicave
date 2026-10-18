@@ -2,6 +2,7 @@ package render
 
 import (
 	"context"
+	"image"
 	"image/color"
 	"math"
 	"reflect"
@@ -433,20 +434,16 @@ func TestGrassColoniesUseRearBladesAndForegroundSod(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			filtered := FilterAttachments(all, []terrain.RockCut{cut}, 0)
-			dead, live := 0, 0
-			for j, a := range filtered {
-				if a.Dead != all[j].Hit(cut, 0) {
-					t.Fatal("colony support damage removed the wrong instance")
+			index := AttachmentIndex(all)
+			for _, source := range [][]Attachment{all, ScaleAttachments(all, 384, image.Point{})} {
+				for _, supportIndex := range []*AttachmentSupportIndex{nil, index} {
+					filtered := FilterAttachmentsIndexed(source, supportIndex, []terrain.RockCut{cut}, 0)
+					for j, a := range filtered {
+						if !a.Dead || source[j].Dead || &source[j].Anchors[0] != &source[0].Anchors[0] {
+							t.Fatal("support damage must remove the whole colony across layers without mutating its source")
+						}
+					}
 				}
-				if a.Dead {
-					dead++
-				} else {
-					live++
-				}
-			}
-			if dead == 0 || live == 0 {
-				t.Fatal("support damage must remove its tuft while retaining neighbors")
 			}
 		}
 		if rear == 0 || front == 0 || sparse == 0 || mixed == 0 || len(counts) != 2 {

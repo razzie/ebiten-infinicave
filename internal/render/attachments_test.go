@@ -56,3 +56,20 @@ func TestWebFreeNodesDoNotRemoveSupportedNetwork(t *testing.T) {
 		t.Fatal("support damage left a web alive")
 	}
 }
+
+func TestSharedColonySupportsSurviveLayerMasking(t *testing.T) {
+	anchors := []geom.V{{X: .4, Y: .5}, {X: .6, Y: .5}}
+	source := []Attachment{
+		{Kind: GrassAttachment, Anchors: anchors},
+		{Kind: BackgroundGrassAttachment, Underlay: true, Anchors: anchors},
+	}
+	grid := GridMesh{Growth: source, GrowthIndex: AttachmentIndex(source)}
+	cut, _ := terrain.CutFromHole(terrain.Hole{Shape: terrain.HoleCircle, Center: anchors[0], Radius: .001})
+	for _, span := range []ForegroundSpan{GrassSpan, UnderGrowthSpan} {
+		masked := MaskForeground(grid, span)
+		got, removed := FilterAttachmentsIndexedWithChanges(masked.Growth, masked.GrowthIndex, []terrain.RockCut{cut}, 0)
+		if len(removed) != 1 || !got[0].Dead || !got[1].Dead {
+			t.Fatal("layer masking hid a surviving colony member from its shared support index")
+		}
+	}
+}

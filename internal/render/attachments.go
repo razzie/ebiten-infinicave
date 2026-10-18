@@ -122,19 +122,25 @@ func prepareGrowthAttachments(grid terrain.RockGrid, boundary []terrain.RockEdge
 		if len(supports[i]) == 0 {
 			continue
 		}
+		first, firstBlade := len(out), len(blades)
+		var anchors []geom.V
 		for _, tuft := range prepareGrassColony(c, growth, supports[i]) {
 			patch, blade := tuft[0], tuft[1]
+			rear := rockGrowthRandom(c, patch.Anchor, 0x6772617373)(4) < .4
+			if !rear {
+				coverGrassTrim(&patch, trim)
+			}
+			anchors = append(anchors, patch.Anchors...)
 			if owned && !inTerrainBand(patch.Min, patch.Max) {
 				continue
 			}
 			// Each instance chooses depth independently of density and its
 			// neighbors. Rear blades grow behind the rock without sod.
-			if rockGrowthRandom(c, patch.Anchor, 0x6772617373)(4) < .4 {
+			if rear {
 				blade.Kind, blade.Underlay = BackgroundGrassAttachment, true
 				out = append(out, blade)
 				continue
 			}
-			coverGrassTrim(&patch, trim)
 			blade.Min = geom.V{X: min(blade.Min.X, patch.Min.X), Y: min(blade.Min.Y, patch.Min.Y)}
 			blade.Max = geom.V{X: max(blade.Max.X, patch.Max.X), Y: max(blade.Max.Y, patch.Max.Y)}
 			blade.Footprint = patch.Footprint
@@ -142,9 +148,23 @@ func prepareGrowthAttachments(grid terrain.RockGrid, boundary []terrain.RockEdge
 			out = append(out, patch)
 			blades = append(blades, blade)
 		}
+		// A colony is one supported entity, even when its tufts occupy
+		// different drawing layers. Share the complete support set.
+		for j := first; j < len(out); j++ {
+			out[j].Anchors = anchors
+		}
+		for j := firstBlade; j < len(blades); j++ {
+			blades[j].Anchors = anchors
+		}
 	}
 	out = append(out, blades...)
 	return out
+}
+
+// PreservesCutPixels identifies growth removed only by support damage.
+// Surviving grass and lichen keep their complete artwork across terrain cuts.
+func (a Attachment) PreservesCutPixels() bool {
+	return a.Kind == GrassAttachment || a.Kind == BackgroundGrassAttachment || a.Kind == HangingAttachment
 }
 
 func prepareMushroomAttachments(groups []terrain.MushroomGroup, topology *terrain.RockTopology, mode terrain.Orientation) []Attachment {
@@ -398,7 +418,13 @@ func FilterAttachmentsIndexedWithChanges(source []Attachment, index *AttachmentS
 		}
 		index.index.Query(geom.Bounds{Min: cut.Min.Sub(geom.V{Y: top}), Max: cut.Max.Sub(geom.V{Y: top})}, func(i int) bool {
 			p := index.points[i]
-			if current(p.owners[0]).Dead {
+			// Layer snapshots can mask some members of a shared colony.
+			// Its remaining members still respond to every colony anchor.
+			live := false
+			for _, owner := range p.owners {
+				live = live || !current(owner).Dead
+			}
+			if !live {
 				return true
 			}
 			point := p.point

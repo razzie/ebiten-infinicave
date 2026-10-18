@@ -5,6 +5,7 @@ import (
 	"image/color"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/razzie/ebiten-infinicave/internal/geom"
 	"github.com/razzie/ebiten-infinicave/internal/render"
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
@@ -129,8 +130,13 @@ func (w *world) advanceGrass(g *Scene, u *sectionUpload, budget *uploadBudget) {
 			return
 		}
 	}
-	bounds := image.Rect(0, u.pixels, u.pixels, 2*u.pixels)
-	g.eraseCuts(u.grass, bounds, terrain.SectionWindowTop(data.ID), data.VisualCuts, u.pixels)
+	if len(data.VisualCuts) > 0 && len(data.Foreground.Grass.Indices) > 0 {
+		var regions []geom.Bounds
+		for _, cut := range data.VisualCuts {
+			regions = append(regions, geom.Bounds{Min: cut.Min, Max: cut.Max})
+		}
+		g.replayGridRegions(&worldSection{grass: u.grass, mesh: data, pixels: u.pixels}, data.ID, regions, true)
+	}
 	s := w.sectionForUpload(u)
 	newGeometry := s.geometry == nil && u.data.Geometry != nil
 	if w.appearanceFade != nil && s.grass == nil && u.grass != nil && s.grassPixels == 0 {
@@ -241,8 +247,14 @@ func (w *world) advanceGrowth(g *Scene, u *sectionUpload, kind growthProduct, bu
 			return
 		}
 	}
-	bounds := image.Rect(0, u.pixels, u.pixels, 2*u.pixels)
-	g.eraseCuts(p.image, bounds, terrain.SectionWindowTop(data.ID), data.VisualCuts, u.pixels)
+	if len(data.VisualCuts) > 0 && p.image != nil {
+		var regions []geom.Bounds
+		for _, cut := range data.VisualCuts {
+			regions = append(regions, geom.Bounds{Min: cut.Min, Max: cut.Max})
+		}
+		grid := render.MaskForeground(data.Foreground, kind.span())
+		g.replayForegroundAttachments(p.image, grid, data.ID, u.pixels, regions, kind == underGrowth, data.VisualCuts, nil)
+	}
 	s := w.sectionForUpload(u)
 	published := &s.growth[kind]
 	if w.appearanceFade != nil && published.pixels == 0 && p.image != nil {

@@ -334,6 +334,7 @@ func (g *carvePixelGame) Draw(*ebiten.Image) {
 	checkGrassEdgePixels(g.t)
 	checkGrowthCompositionPixels(g.t)
 	checkCarveCachedToothWallPixels(g.t)
+	checkAnchorSupportedGrowthPixels(g.t)
 	scene, err := NewScene(Config{View: ViewShaded})
 	if err != nil {
 		g.t.Fatal(err)
@@ -569,6 +570,116 @@ func checkCarveCachedToothWallPixels(t *testing.T) {
 				if alpha() != 0 {
 					t.Fatalf("%v/AA=%v: cached replay restored an unsupported tooth wall outside the cut", orientation, aa)
 				}
+			}
+		}
+	}
+}
+
+func checkAnchorSupportedGrowthPixels(t *testing.T) {
+	t.Helper()
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		for _, aa := range []AntialiasingMode{AntialiasingFull, AntialiasingOff, AntialiasingFXAA} {
+			for _, duringUpload := range []bool{false, true} {
+				g, err := NewScene(Config{DisableBackground: true, DecorationBurn: true, Orientation: orientation, Antialiasing: aa})
+				if err != nil {
+					t.Fatal(err)
+				}
+				g.world.close()
+				w := &world{sections: make(map[int64]*worldSection), done: make(chan struct{}), pixels: 256, disableBackground: true, antialiasing: aa}
+				g.world = w
+				data := terrain.SectionData{Foreground: RockGrid{terrainRect(.05, .05, .9, .9)}}
+				mesh := render.PrepareForeground(data, ViewShaded, render.RockGrowthOptions{})
+				mesh.Geometry = terrain.PrepareTerrainGeometry(data, 0)
+				anchors := []V{{X: .18, Y: .45}, {X: .36, Y: .45}}
+				for i, kind := range []render.AttachmentKind{render.GrassAttachment, render.BackgroundGrassAttachment, render.HangingAttachment, render.HangingAttachment} {
+					x := .12 + .18*float64(i)
+					lo, hi := V{X: x, Y: .2}, V{X: x + .12, Y: .35}
+					supports := anchors
+					if kind == render.HangingAttachment {
+						supports = []V{{X: x + .06, Y: .45}}
+					}
+					m := render.TriangleMesh{Indices: []uint32{0, 1, 2, 0, 2, 3}}
+					for _, p := range []V{lo, {X: hi.X, Y: lo.Y}, hi, {X: lo.X, Y: hi.Y}} {
+						m.Vertices = append(m.Vertices, ebiten.Vertex{DstX: float32(p.X * render.RasterPixelsPerUnit), DstY: float32((p.Y - terrain.GenerationMinY) * render.RasterPixelsPerUnit), SrcX: .5, SrcY: .5, ColorR: .4, ColorG: .6, ColorB: .3, ColorA: 1})
+					}
+					mesh.Foreground.Growth = append(mesh.Foreground.Growth, render.Attachment{Kind: kind, Underlay: i == 1 || i == 2, Mesh: m, Min: lo, Max: hi, Anchors: supports})
+				}
+				mesh.Foreground.GrowthIndex = render.AttachmentIndex(mesh.Foreground.Growth)
+				finish := func() {
+					for tick := 0; tick < 1000 && w.upload != nil; tick++ {
+						receiveTestBudget(g)
+					}
+					if w.upload != nil {
+						t.Fatal("anchor fixture upload stalled")
+					}
+				}
+				carve := func(p V, radius float64) {
+					if _, err := g.CarveCircle(terrain.WorldPoint(orientation, p.Add(V{Y: terrain.SectionTop(0)})), radius); err != nil {
+						t.Fatal(err)
+					}
+					g.flushCarveImages()
+				}
+				check := func(grass, lichen bool) {
+					t.Helper()
+					s := w.sections[0]
+					for i, layer := range []*ebiten.Image{s.grass, s.growth[underGrowth].image, s.growth[underGrowth].image, s.growth[surfaceGrowth].image} {
+						want := grass
+						if i >= 2 {
+							want = lichen
+						}
+						visible := false
+						if layer != nil {
+							x, y := int((.18+.18*float64(i))*float64(w.pixels)), int(.25*float64(w.pixels))
+							visible = color.RGBAModel.Convert(layer.At(x, y)).(color.RGBA).A > 0
+						}
+						if visible != want {
+							t.Fatalf("%v/AA=%v/upload=%v/width=%d: growth %d visible=%v, want %v", orientation, aa, duringUpload, w.pixels, i, visible, want)
+						}
+					}
+				}
+				w.startUpload(mesh)
+				if !duringUpload {
+					finish()
+					check(true, true)
+				} else {
+					budget := uploadBudget{start: time.Now().Add(time.Hour), draws: uploadDrawsPerTick - 1}
+					w.receiveBudget(g, &budget)
+					if w.upload == nil {
+						t.Fatal("fixture finished before the pending-upload cut")
+					}
+				}
+				// Hit each plant's artwork while missing every support.
+				for i := 0; i < 4; i++ {
+					carve(V{X: .18 + .18*float64(i), Y: .25}, .025)
+				}
+				finish()
+				check(true, true)
+				burn := ebiten.NewImage(256, 256)
+				g.decorationBurn.Draw(burn, -1, render.RenderTransform{Pixels: 256}, false)
+				g.decorationBurn.Draw(burn, -1, render.RenderTransform{Pixels: 256}, true)
+				burnPixels := make([]byte, 4*256*256)
+				burn.ReadPixels(burnPixels)
+				burn.Deallocate()
+				for _, value := range burnPixels {
+					if value != 0 {
+						t.Fatal("an anchor miss burned supported growth")
+					}
+				}
+				g.SetRenderWidth(384)
+				w.startUpload(mesh)
+				finish()
+				check(true, true)
+				carve(anchors[0], .005)
+				check(false, true)
+				carve(V{X: .54, Y: .45}, .005)
+				carve(V{X: .72, Y: .45}, .005)
+				check(false, false)
+				w.sections[0].deallocate()
+				delete(w.sections, 0)
+				w.startUpload(mesh)
+				finish()
+				check(false, false)
+				g.Close()
 			}
 		}
 	}

@@ -40,7 +40,7 @@ func (g *Scene) captureDecorationBurns(s *worldSection, id int64, cut terrain.Ro
 		}
 		for _, i := range candidates {
 			a := mesh.Foreground.Growth[i]
-			if a.Kind != render.EdgeAttachment && (a.Kind == render.GrassAttachment) == grass {
+			if a.Kind != render.EdgeAttachment && !a.PreservesCutPixels() && (a.Kind == render.GrassAttachment) == grass {
 				partial = append(partial, a)
 			}
 		}
@@ -48,7 +48,7 @@ func (g *Scene) captureDecorationBurns(s *worldSection, id int64, cut terrain.Ro
 		if grass {
 			progress = min(progress, s.grassReveal.Progress())
 		}
-		g.burnAttachments(dst, whole, image.Rectangle{}, bounds, id, pixels, grass, progress, oldCuts, nil)
+		g.burnAttachments(dst, whole, image.Rectangle{}, bounds, id, pixels, grass, progress, nil, nil)
 		g.burnAttachments(dst, partial, image.Rectangle{}, bounds, id, pixels, grass, progress, oldCuts, &cut)
 	}
 	selected := func(source []render.Attachment, indices []int) []render.Attachment {

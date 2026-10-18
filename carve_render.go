@@ -222,7 +222,7 @@ func (g *Scene) editSectionImages(section *worldSection, id int64, cut terrain.R
 	if previous := section.foregroundReveal.Previous; previous != nil {
 		g.eraseCuts(previous, bounds, top, []terrain.RockCut{cut}, pixels)
 	}
-	g.editGrowthImages(section, id, cut, geometry, removals, dirty, overlap)
+	g.editGrowthImages(section, id, cut, geometry, removals, dirty)
 	if overlap || len(edits.rock) > 0 {
 		g.replayGridRegions(&displayed, id, append(edits.rock, dirty), false)
 	} else {
@@ -241,13 +241,8 @@ func (g *Scene) editSectionImages(section *worldSection, id int64, cut terrain.R
 		trim := render.MaskForeground(displayed.mesh.Foreground, render.StructuralTopSpan)
 		g.replayForegroundAttachments(section.trim, trim, id, pixels, append(edits.rock, dirty), false, displayed.mesh.VisualCuts, displayed.geometry)
 	}
-	if section.grass != nil {
-		grassPixels := section.grassWidth()
-		if len(grassEdits.grass) > 0 || overlap {
-			g.replayGridRegions(&grassDisplayed, id, append(grassEdits.grass, dirty), true)
-		} else {
-			g.eraseCuts(section.grass, image.Rect(0, grassPixels, grassPixels, 2*grassPixels), top, []terrain.RockCut{cut}, grassPixels)
-		}
+	if section.grass != nil && (len(grassEdits.grass) > 0 || len(grassDisplayed.mesh.Foreground.Grass.Indices) > 0) {
+		g.replayGridRegions(&grassDisplayed, id, append(grassEdits.grass, dirty), true)
 	}
 	if overlap {
 		g.replayForegroundVineRegion(section.foregroundVines, plantMesh.ForegroundVines, plantMesh.ForegroundVinesBounds, section.foregroundVinesBounds, id, section.plantWidth(foregroundVinesProduct), dirty, vineCuts)
@@ -337,12 +332,19 @@ func (g *Scene) replayGridRegion(section *worldSection, id int64, dirty geom.Bou
 	} else if len(source.Grass.Indices) > 0 {
 		g.drawGridFaces(target, render.ScaleRegionMesh(render.RegionMesh(source.Grass, reference), pixels, image.Pt(0, -pixels)), top)
 	}
+	if grass {
+		// Legacy ground meshes follow terrain cuts; supported colonies draw
+		// afterward and keep their artwork until an anchor is removed.
+		g.eraseCuts(target, bounds, top, section.mesh.VisualCuts, pixels)
+	}
 	if grass || !section.foregroundSplit {
 		for _, m := range render.AttachmentRegionBatches(source.Growth, candidates, reference, grass, false) {
 			g.drawAttachmentMesh(target, render.ScaleRegionMesh(m, pixels, image.Pt(0, -pixels)))
 		}
 	}
-	g.eraseCuts(target, bounds, top, section.mesh.VisualCuts, pixels)
+	if !grass {
+		g.eraseCuts(target, bounds, top, section.mesh.VisualCuts, pixels)
+	}
 	if !grass && !section.foregroundSplit {
 		g.drawShapeRims(target, section.geometry, pixels, rect)
 	}
@@ -657,17 +659,28 @@ func (g *Scene) replayForegroundAttachments(dst *ebiten.Image, source render.Gri
 		reference := referenceRegion(rect, pixels, image.Pt(0, -pixels))
 		region := geom.Bounds{Min: V{X: float64(rect.Min.X) / float64(pixels), Y: float64(rect.Min.Y) / float64(pixels)}, Max: V{X: float64(rect.Max.X) / float64(pixels), Y: float64(rect.Max.Y) / float64(pixels)}}
 		candidates := render.AttachmentCandidates(source.Growth, source.GrowthIndex, region)
-		for _, m := range render.AttachmentRegionBatches(source.Growth, candidates, reference, false, underlay) {
+		var masked, anchored []int
+		for _, i := range candidates {
+			if source.Growth[i].PreservesCutPixels() {
+				anchored = append(anchored, i)
+			} else {
+				masked = append(masked, i)
+			}
+		}
+		for _, m := range render.AttachmentRegionBatches(source.Growth, masked, reference, false, underlay) {
 			g.drawAttachmentMesh(target, render.ScaleRegionMesh(m, pixels, image.Pt(0, -pixels)))
 		}
 		g.eraseCuts(target, bounds, top, cuts, pixels)
+		for _, m := range render.AttachmentRegionBatches(source.Growth, anchored, reference, false, underlay) {
+			g.drawAttachmentMesh(target, render.ScaleRegionMesh(m, pixels, image.Pt(0, -pixels)))
+		}
 		if rims != nil {
 			g.drawShapeRims(target, rims, pixels, rect)
 		}
 	}
 }
 
-func (g *Scene) editGrowthImages(s *worldSection, id int64, cut terrain.RockCut, geometry *terrain.Geometry, removals terrain.DecorationChanges, dirty geom.Bounds, overlap bool) {
+func (g *Scene) editGrowthImages(s *worldSection, id int64, cut terrain.RockCut, geometry *terrain.Geometry, removals terrain.DecorationChanges, dirty geom.Bounds) {
 	for kind := growthProduct(0); kind < growthProducts; kind++ {
 		p := &s.growth[kind]
 		if p.source == nil {
@@ -682,12 +695,7 @@ func (g *Scene) editGrowthImages(s *worldSection, id int64, cut terrain.RockCut,
 		if p.image == nil {
 			continue
 		}
-		bounds := image.Rect(0, p.pixels, p.pixels, 2*p.pixels)
-		if overlap || len(edits.rock) > 0 {
-			g.replayForegroundAttachments(p.image, source.Foreground, id, p.pixels, append(edits.rock, dirty), kind == underGrowth, source.VisualCuts, nil)
-		} else {
-			g.eraseCuts(p.image, bounds, terrain.SectionWindowTop(id), []terrain.RockCut{cut}, p.pixels)
-		}
+		g.replayForegroundAttachments(p.image, source.Foreground, id, p.pixels, append(edits.rock, dirty), kind == underGrowth, source.VisualCuts, nil)
 	}
 }
 
@@ -703,11 +711,13 @@ func (g *Scene) captureGrowthBurn(s *worldSection, kind growthProduct, id int64,
 		whole = append(whole, source.Growth[i])
 	}
 	for _, i := range render.AttachmentCandidates(source.Growth, source.GrowthIndex, local) {
-		partial = append(partial, source.Growth[i])
+		if !source.Growth[i].PreservesCutPixels() {
+			partial = append(partial, source.Growth[i])
+		}
 	}
 	bounds := image.Rect(0, p.pixels, p.pixels, 2*p.pixels)
 	progress := p.reveal.Progress() * s.foregroundReveal.Progress()
-	g.burnAttachments(p.image, whole, image.Rectangle{}, bounds, id, p.pixels, false, progress, oldCuts, nil)
+	g.burnAttachments(p.image, whole, image.Rectangle{}, bounds, id, p.pixels, false, progress, nil, nil)
 	g.burnAttachments(p.image, partial, image.Rectangle{}, bounds, id, p.pixels, false, progress, oldCuts, &cut)
 }
 
