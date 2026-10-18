@@ -53,6 +53,62 @@ func TestCellMeshHasOneContinuousShadingPlane(t *testing.T) {
 	}
 }
 
+func TestBackgroundBoundaryCellAddsFacetsWithoutChangingFootprint(t *testing.T) {
+	poly := []geom.V{{X: .1, Y: .1}, {X: .15, Y: .09}, {X: .2, Y: .1}, {X: .19, Y: .15}, {X: .2, Y: .2}, {X: .15, Y: .19}, {X: .1, Y: .2}}
+	cell := terrainRock(poly)
+	cell.Raised, cell.Normal = false, geom.V3{Z: 1}
+	vertices, indices := appendBackgroundCellMesh(nil, nil, cell, color.NRGBA{R: 30, G: 30, B: 30, A: 255})
+	normals := make(map[[2]float32]bool)
+	area := 0.0
+	for i := 0; i < len(indices); i += 3 {
+		var points [3]geom.V
+		for k := range points {
+			v := vertices[indices[i+k]]
+			points[k] = geom.V{X: float64(v.DstX) / RasterPixelsPerUnit, Y: float64(v.DstY)/RasterPixelsPerUnit + terrain.GenerationMinY}
+			normals[[2]float32{v.Custom2, v.Custom3}] = true
+		}
+		mid := points[0].Add(points[1]).Add(points[2]).Mul(1.0 / 3)
+		if !geom.InsidePolygon(mid, poly) {
+			t.Fatal("extra background facet extends outside the jagged cell")
+		}
+		area += geom.PolygonArea(points[:])
+	}
+	if len(normals) < 2 || math.Abs(area-geom.PolygonArea(poly)) > 1e-8 {
+		t.Fatal("background facets did not add distinct planes covering the original cell")
+	}
+}
+
+func TestBackgroundInteriorKeepsOneShadingPlane(t *testing.T) {
+	var grid terrain.RockGrid
+	for y := 0; y < 3; y++ {
+		for x := 0; x < 3; x++ {
+			cell := terrainRect(.2+float64(x)*.1, .2+float64(y)*.1, .1, .1)
+			cell.Raised, cell.Normal = false, geom.V3{Z: 1}
+			cell.Color = color.NRGBA{R: 30, G: 30, B: 30, A: 255}
+			grid = append(grid, cell)
+		}
+	}
+	mesh := prepareGrid(grid, ViewClay).Faces
+	planes := [2]map[[2]float32]bool{make(map[[2]float32]bool), make(map[[2]float32]bool)}
+	for i := 0; i < len(mesh.Indices); i += 3 {
+		mid := geom.V{}
+		for k := range 3 {
+			v := mesh.Vertices[mesh.Indices[i+k]]
+			mid = mid.Add(geom.V{X: float64(v.DstX) / RasterPixelsPerUnit, Y: float64(v.DstY)/RasterPixelsPerUnit + terrain.GenerationMinY})
+		}
+		mid = mid.Mul(1.0 / 3)
+		for slot, cell := range []int{4, 0} {
+			if geom.InsidePolygon(mid, grid[cell].Polygon) {
+				v := mesh.Vertices[mesh.Indices[i]]
+				planes[slot][[2]float32{v.Custom2, v.Custom3}] = true
+			}
+		}
+	}
+	if len(planes[0]) != 1 || len(planes[1]) != 2 {
+		t.Fatalf("interior/boundary shading planes: %d/%d, want 1/2", len(planes[0]), len(planes[1]))
+	}
+}
+
 func TestRockCrevicesDistinguishValleysFromFlatAndConvexJoins(t *testing.T) {
 	grid := terrain.RockGrid{terrainRect(.4, .4, .04, .04), terrainRect(.44, .4, .04, .02)}
 	for i := range grid {

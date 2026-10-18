@@ -496,14 +496,16 @@ func cellColor(v float64) color.NRGBA {
 	return color.NRGBA{221, 215, 200, 255}
 }
 
-// The underlying tessellation has no guide influence. Low Perlin values map
-// to exact black; the remaining cells stay within the charcoal palette.
+// Occupancy already follows the padded foreground footprint. Noise varies the
+// charcoal material without erasing that silhouette with unrelated black patches;
+// the renderer fades the outer cross-axis margins into blackness.
 func backgroundCellColor(p geom.V, noise *Perlin) color.NRGBA {
 	return backgroundSurfaceColor(p, noise, geom.V3{Z: 1})
 }
 
 func backgroundSurfaceColor(p geom.V, noise *Perlin, normal geom.V3, orientation ...Orientation) color.NRGBA {
-	return cellColor(.38 * geom.Smoothstep(.43, .59, fbm(noise, p)) * (.28 + .72*SurfaceLight(normal, orientation...)))
+	material := geom.Lerp(.65, 1, geom.Smoothstep(.43, .59, fbm(noise, p)))
+	return cellColor(.38 * material * (.28 + .72*SurfaceLight(normal, orientation...)))
 }
 
 // Rock occupancy follows relief, independently of light. Every existing face

@@ -1,6 +1,7 @@
 package terrain
 
 import (
+	"context"
 	"math"
 	"math/rand"
 	"reflect"
@@ -9,12 +10,241 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
 
+func BenchmarkBackgroundPathVines(b *testing.B) {
+	build := NewSectionBuilder(42, nil).Begin(context.Background(), 0)
+	if !build.Materialize(context.Background()) {
+		b.Fatal("materialization failed")
+	}
+	footprint := newRockFootprint(build.raw)
+	footprint.background = newRockFootprint(build.data.Background)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		backgroundPathVines(42, 0, Vertical, footprint)
+	}
+}
+
+func TestBackgroundVinesPreferExposedPadding(t *testing.T) {
+	// Seed 42's previous dense layout had these outer-padding lengths.
+	for _, tc := range []struct {
+		mode          Orientation
+		previousOuter float64
+	}{{Vertical, 60.39}, {Horizontal, 54.74}} {
+		mode := tc.mode
+		build := NewSectionBuilder(42, nil, mode).Begin(context.Background(), 0)
+		if !build.Materialize(context.Background()) {
+			t.Fatal("materialization failed")
+		}
+		footprint := newRockFootprint(build.raw)
+		footprint.background = newRockFootprint(build.data.Background)
+		vines := build.data.Vines
+		if !reflect.DeepEqual(vines, backgroundPathVines(42, 0, mode, footprint)) {
+			t.Fatal("padding steering changed on reload")
+		}
+		outer, middle, connected := 0.0, 0.0, 0
+		lanes := [2][3]float64{}
+		for i, v := range vines {
+			family := VineFamily(vines, i)
+			root := vines[family].Points[0].P
+			fromPadding := root.X <= backgroundSolidBorderWidth || root.X >= generationWidth-backgroundSolidBorderWidth
+			if !fromPadding {
+				t.Fatalf("%s: vine family spawned in the middle at %v", mode, root)
+			}
+			reachesMiddle := false
+			for j := 1; j < len(v.Points); j++ {
+				a, b := v.Points[j-1], v.Points[j]
+				mid := geom.LerpVector(a.P, b.P, .5)
+				length := b.P.Sub(a.P).Len()
+				if mid.X < 0 || mid.X > generationWidth {
+					outer += length
+					x, side := mid.X, 0
+					if x > generationWidth {
+						x, side = generationWidth-x, 1
+					}
+					lane := min(2, int(-x/.15))
+					lanes[side][lane] += length
+				}
+				if mid.X > .18 && mid.X < .82 {
+					middle += length
+					reachesMiddle = true
+				}
+				// Independently check the exact footprint, not the optimized
+				// signed edge query used by the planner itself.
+				pad := max(a.Radius, b.Radius) + backgroundVineRockClearance
+				if footprint.background.distance(a.P) >= -a.Radius-.010 || footprint.background.distance(b.P) >= -b.Radius-.010 {
+					t.Fatal("vine left the actual background cells")
+				}
+				if footprint.distance(a.P) <= pad || footprint.distance(b.P) <= pad {
+					t.Fatal("optimized vine routing placed a ribbon inside foreground rock")
+				}
+			}
+			if fromPadding && v.Parent >= 0 && reachesMiddle {
+				connected++
+			}
+			for _, leaf := range v.Leaves {
+				for _, p := range leaf.Polygon {
+					if footprint.distance(p) <= backgroundVineRockClearance {
+						t.Fatal("optimized leaf fitting placed a leaf inside foreground rock")
+					}
+				}
+			}
+		}
+		t.Logf("%s: outer length %.2f, middle length %.2f, inward branches %d, lane coverage %v", mode, outer, middle, connected, lanes)
+		if fraction := outer / tc.previousOuter; fraction < .30 || fraction > .40 {
+			t.Fatalf("padding density is %.1f%% of the previous layout, want 30–40%%", fraction*100)
+		}
+		if middle < 2 || connected < 3 {
+			t.Fatal("padding vines did not branch into the middle")
+		}
+		for _, side := range lanes {
+			for _, length := range side {
+				if length < 1 {
+					t.Fatal("a substantial padding strip still has no vines")
+				}
+			}
+		}
+		visibleFraction := func(vines []Vine, check bool) (float64, float64) {
+			visible, borders, total := 0.0, 0.0, 0.0
+			for i, v := range vines {
+				if len(v.Points) < 2 {
+					t.Fatal("padding steering produced an empty vine")
+				}
+				if v.Parent >= 0 && (v.Parent >= i || v.Points[0].P != vines[v.Parent].Points[v.Joint].P) {
+					t.Fatal("padding steering detached a fork")
+				}
+				for j := 1; j < len(v.Points); j++ {
+					a, b := v.Points[j-1].P, v.Points[j].P
+					length := b.Sub(a).Len()
+					d := footprint.distance(geom.LerpVector(a, b, .5))
+					if check && !footprint.backgroundFits(a, b, max(v.Points[j-1].Radius, v.Points[j].Radius)) {
+						t.Fatalf("%s: background ribbon is hidden by foreground rock", mode)
+					}
+					total += length
+					mid := geom.LerpVector(a, b, .5)
+					if mid.X < .18 || mid.X > .82 {
+						borders += length
+					}
+					if d > .008 && d < backgroundRockPadding-.008 {
+						visible += length
+					}
+				}
+				if check {
+					for _, leaf := range v.Leaves {
+						for j, a := range leaf.Polygon {
+							if !footprint.backgroundFits(a, leaf.Polygon[(j+1)%len(leaf.Polygon)], .0002) {
+								t.Fatal("background leaf is hidden by foreground rock")
+							}
+						}
+					}
+				}
+			}
+			return visible / total, borders / total
+		}
+		guided, borders := visibleFraction(vines, true)
+		t.Logf("%s: formation padding fraction %.3f, border fraction %.3f", mode, guided, borders)
+		if guided < .25 || borders < .55 || borders > .95 {
+			t.Fatal("background vines must mostly cover borders and also reach the middle")
+		}
+	}
+}
+
+func TestBackgroundVinesWrapPaddingHoles(t *testing.T) {
+	// A hole inside an otherwise continuous outer strip, far from foreground.
+	rear := newRockFootprint(RockGrid{
+		terrainRect(-.5, -.5, .20, 2), terrainRect(-.2, -.5, 1.7, 2),
+		terrainRect(-.3, -.5, .1, .8), terrainRect(-.3, .45, .1, 1.05),
+	})
+	f := newRockFootprint(nil)
+	f.background = rear
+	root := geom.V{X: -.25, Y: .7}
+	if f.paddingSegment(geom.V{X: -.25, Y: .55}, geom.V{X: -.25, Y: .2}, .003) || f.backgroundFits(geom.V{X: -.25, Y: .55}, geom.V{X: -.25, Y: .2}, .003) {
+		t.Fatal("padding shortcut bridged a rear hole")
+	}
+	if f.backgroundFits(geom.V{X: -.25, Y: .38}, geom.V{X: -.25, Y: .38}, .003) {
+		t.Fatal("vine root fits in unsupported padding")
+	}
+	v := freePathInPadding(root, geom.V{Y: -1}, .8, .003, 0, -1, 0, f)
+	if len(v.Points) < 20 || v.Points[len(v.Points)-1].P.Y > .25 {
+		t.Fatalf("vine stopped instead of wrapping the hole: %v", v.Points)
+	}
+	for i := 1; i < len(v.Points); i++ {
+		a, b := v.Points[i-1], v.Points[i]
+		margin := max(a.Radius, b.Radius) + .010
+		for _, e := range rear.edges {
+			if geom.SegmentDistanceSquared(a.P, b.P, e.A, e.B) <= margin*margin {
+				t.Fatal("vine ribbon crossed the hole rim")
+			}
+		}
+	}
+}
+
+func TestBackgroundVinesRejectThinPaddingHoles(t *testing.T) {
+	// Endpoints and midpoint are supported, but a tiny hole lies between them.
+	f := newRockFootprint(nil)
+	f.background = newRockFootprint(RockGrid{
+		terrainRect(-.5, -.5, .24, 2), terrainRect(-.258, -.5, 1.758, 2),
+		terrainRect(-.26, -.5, .002, .7), terrainRect(-.26, .21, .002, 1.29),
+	})
+	a, b := geom.V{X: -.4, Y: .205}, geom.V{X: -.05, Y: .205}
+	for _, p := range []geom.V{a, b, geom.LerpVector(a, b, .5)} {
+		if !f.backgroundFits(p, p, .0002) {
+			t.Fatal("fixture samples are unsupported")
+		}
+	}
+	if f.backgroundFits(a, b, .0002) {
+		t.Fatal("vine bridged a thin padding hole between supported samples")
+	}
+}
+
+func TestBackgroundVineDistanceMatchesExactBoundaryBand(t *testing.T) {
+	f := newRockFootprint(RockGrid{terrainRect(.25, .25, .3, .10), terrainRect(.25, .35, .10, .35), terrainRect(.7, .25, .10, .4)})
+	for y := .12; y < .85; y += .013 {
+		for x := .12; x < .92; x += .013 {
+			p := geom.V{X: x, Y: y}
+			want := f.distance(p)
+			if math.Abs(want) < backgroundRockPadding+.035 {
+				if got := f.vineDistance(p); math.Abs(got-want) > 1e-10 {
+					t.Fatalf("capped edge distance differs at %v: %g / %g", p, got, want)
+				}
+			}
+		}
+	}
+}
+
+func TestBackgroundPaddingFastPathUsesActualForegroundBounds(t *testing.T) {
+	f := newRockFootprint(RockGrid{terrainRect(.2, .2, .6, .6)})
+	a, b := geom.V{X: -.4, Y: .3}, geom.V{X: -.05, Y: .8}
+	if !f.paddingSegment(a, b, .004) || !f.backgroundFits(a, b, .004) {
+		t.Fatal("clear padding did not use the analytic path")
+	}
+	if f.paddingSegment(a, geom.V{X: .4, Y: .4}, .004) || f.backgroundFits(a, geom.V{X: .4, Y: .4}, .004) {
+		t.Fatal("padding shortcut allowed an inward branch to pass through rock")
+	}
+	f = newRockFootprint(RockGrid{terrainRect(-.25, .2, .1, .6)})
+	if f.paddingSegment(a, b, .004) || f.backgroundFits(a, b, .004) {
+		t.Fatal("padding shortcut ignored a foreground obstacle outside the usual cave bounds")
+	}
+}
+
+func TestBackgroundVinesRejectRockBetweenClearSamples(t *testing.T) {
+	f := newRockFootprint(RockGrid{terrainRect(.04, -.005, .002, .01)})
+	a, b := geom.V{X: -.08}, geom.V{X: .12}
+	for _, p := range []geom.V{a, b, geom.LerpVector(a, b, .5)} {
+		if !f.backgroundFits(p, p, .0002) {
+			t.Fatal("fixture samples do not have enough clearance")
+		}
+	}
+	if f.backgroundFits(a, b, .0002) {
+		t.Fatal("background ribbon crossed a thin foreground rock between samples")
+	}
+}
+
 func TestBackgroundVinesIncludeHorizontalRunners(t *testing.T) {
 	for _, mode := range []Orientation{Vertical, Horizontal} {
 		for _, seed := range []int64{7, 42, 123} {
 			for _, id := range []int64{0, 1, 2} {
-				vines := backgroundPathVines(seed, id, mode)
-				if !reflect.DeepEqual(vines, backgroundPathVines(seed, id, mode)) {
+				vines := backgroundPathVines(seed, id, mode, nil)
+				if !reflect.DeepEqual(vines, backgroundPathVines(seed, id, mode, nil)) {
 					t.Fatalf("mode %v seed %d section %d: background vines changed on reload", mode, seed, id)
 				}
 				roots, horizontal := 0, 0

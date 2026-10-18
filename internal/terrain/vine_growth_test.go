@@ -90,7 +90,7 @@ func TestCenterVinesOccasionallyFollowGuidesAndRarelyCoverTheirLength(t *testing
 				none++
 				continue
 			}
-			decoratePathVines(vines, &support, seed)
+			decoratePathVines(vines, &support, seed, nil)
 			lo, hi := math.Inf(1), math.Inf(-1)
 			for _, v := range vines[1:] {
 				if v.Route != GuideVineRoute || v.Parent != 0 || v.Points[0].P != stem.Points[v.Joint].P || v.Points[0].Radius > stem.Points[v.Joint].Radius || v.Points[len(v.Points)-1].Radius != 0 {

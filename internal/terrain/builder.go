@@ -2,7 +2,6 @@ package terrain
 
 import (
 	"context"
-	"image/color"
 	"math/rand"
 	"time"
 
@@ -244,31 +243,37 @@ func (s *SectionBuild) Materialize(ctx context.Context) bool {
 	start := time.Now()
 	defer func() { s.timings.Material = time.Since(start) }()
 	noise := NewPerlin(rand.New(rand.NewSource(s.seed ^ 0x62617365)))
-	backgroundVines := backgroundPathVines(s.seed, s.data.ID, s.data.Orientation)
+	// The uncut snapshot contains the foreground's exact guides and branches.
+	// Authored holes and later carving only remove the front layer.
+	footprint := newRockFootprint(s.raw)
+	footprint.worldTop = SectionTop(s.data.ID)
 	noise.OffsetY = SectionTop(s.data.ID)
 	seeds := worldSeedsInRange(s.seed^0x62617365, noise.OffsetY, noise, BackgroundMinX, BackgroundMaxX)
+	// A world-keyed subset gives rear formations slightly larger cells without
+	// changing their silhouette or introducing section-local sampling seams.
+	coarse := seeds[:0]
+	for _, p := range seeds {
+		if SiteRandom(cellSeed(s.seed^0x636f61727365, p, noise.OffsetY), 0, 0, 0) >= .30 {
+			coarse = append(coarse, p)
+		}
+	}
+	seeds = coarse
 	if ctx.Err() != nil {
 		return false
 	}
-	background := newRockGridInRange(seeds, func(geom.V) color.NRGBA { return color.NRGBA{A: 255} }, BackgroundMinX, BackgroundMaxX)
+	background := newBackgroundRockGrid(seeds, footprint)
+	if ctx.Err() != nil {
+		return false
+	}
+	// Route against the actual Voronoi silhouette, retaining its natural holes.
+	footprint.background = newRockFootprint(background)
+	backgroundVines := backgroundPathVines(s.seed, s.data.ID, s.data.Orientation, footprint)
 	if ctx.Err() != nil {
 		return false
 	}
 	neighbors := shapeRockGrid(background, nil, noise)
 	foreground := append(RockGrid(nil), s.raw...)
 	shadeRockGrids(background, foreground, noise, s.data.Orientation)
-	var supportVines []Vine
-	for owner := s.data.ID - 2; owner <= s.data.ID+2; owner++ {
-		vines := backgroundPathVines(s.seed, owner, s.data.Orientation)
-		dy := SectionTop(owner) - SectionTop(s.data.ID)
-		for i := range vines {
-			for j := range vines[i].Points {
-				vines[i].Points[j].P.Y += dy
-			}
-		}
-		supportVines = append(supportVines, vines...)
-	}
-	supportBackgroundVines(background, supportVines)
 	if ctx.Err() != nil {
 		return false
 	}

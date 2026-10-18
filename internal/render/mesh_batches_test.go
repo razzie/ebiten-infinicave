@@ -55,6 +55,21 @@ func TestVegetationCropPreservesWorldPositionsAndPadding(t *testing.T) {
 	}
 }
 
+func TestBackgroundVineCropIncludesFadingSideMargins(t *testing.T) {
+	mesh := TriangleMesh{Vertices: []ebiten.Vertex{{DstX: -200, DstY: 1040}, {DstX: 1200, DstY: 1050}, {DstX: -100, DstY: 1060}}, Indices: []uint32{0, 1, 2}}
+	original := append([]ebiten.Vertex(nil), mesh.Vertices...)
+	section := SectionMesh{Vines: []TriangleMesh{mesh}}
+	FinishSectionMesh(&section)
+	if section.VinesBounds.Min.X != -203 || section.VinesBounds.Max.X != 1203 {
+		t.Fatal("background vine crop discarded the fading border regions")
+	}
+	for i, v := range section.Vines[0].Vertices {
+		if v.DstX+float32(section.VinesBounds.Min.X) != original[i].DstX || v.DstY+float32(section.VinesBounds.Min.Y) != original[i].DstY {
+			t.Fatal("border vine crop changed its world coordinates")
+		}
+	}
+}
+
 func TestAttachmentRegionBatchesPreserveBlendOrderAndTextures(t *testing.T) {
 	attachment := func(id float32, texture AtlasKind) Attachment {
 		return Attachment{Mesh: TriangleMesh{Texture: texture, Indices: []uint32{0, 1, 2}, Vertices: []ebiten.Vertex{

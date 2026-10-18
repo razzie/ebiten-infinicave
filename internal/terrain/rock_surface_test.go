@@ -283,20 +283,23 @@ func TestRockLightingPreservesOccupancyAndDarkFlanks(t *testing.T) {
 	}
 }
 
-func TestBackgroundContainsBlackAndDarkCells(t *testing.T) {
+func TestBackgroundMaterialKeepsPaddedFormationsVisible(t *testing.T) {
 	noise := NewPerlin(rand.New(rand.NewSource(42)))
 	tones := make(map[color.NRGBA]bool)
 	for y := float64(GenerationMinY); y < generationMaxY; y += 0.02 {
-		for x := 0.0; x < generationWidth; x += 0.02 {
+		for x := float64(BackgroundMinX); x < BackgroundMaxX; x += 0.02 {
 			clr := backgroundCellColor(geom.V{X: x, Y: y}, noise)
 			if clr.A != 255 || clr.R > 50 || clr.G > 51 || clr.B > 49 {
 				t.Fatalf("background must stay opaque and dark: %v", clr)
 			}
+			if clr.R < 10 || clr.G < 10 || clr.B < 9 {
+				t.Fatalf("noise hides the padded formation at %v: %v", geom.V{X: x, Y: y}, clr)
+			}
 			tones[clr] = true
 		}
 	}
-	if !tones[color.NRGBA{A: 255}] || len(tones) < 10 {
-		t.Fatalf("expected exact black and varied charcoal cells, got %d tones", len(tones))
+	if len(tones) < 10 {
+		t.Fatalf("expected varied charcoal cells, got %d tones", len(tones))
 	}
 	for y := float64(GenerationMinY); y < generationMaxY; y += 0.02 {
 		for x := 0.0; x < generationWidth; x += 0.02 {

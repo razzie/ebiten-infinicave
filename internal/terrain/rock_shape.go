@@ -9,6 +9,99 @@ import (
 
 const rockContourHeight = .008
 
+// Widen the shared formation footprint by several cells so neighboring rear
+// formations overlap, while leaving a visible band around the foreground.
+const backgroundRockPadding = .085
+
+const backgroundBorderWidth = .14
+const backgroundSolidBorderWidth = backgroundBorderWidth - .025 - .012
+
+// rockFootprint measures the original, uncut formations. Reusing their actual
+// contours preserves every guide and branch without growing a second skeleton.
+type rockFootprint struct {
+	grid            RockGrid
+	faces, boundary *geom.BoundsIndex
+	edges           []RockEdge
+	worldTop        float64
+	minX, maxX      float64
+	background      *rockFootprint // Actual rear cells, including gaps between formations.
+}
+
+func newRockFootprint(grid RockGrid) *rockFootprint {
+	f := &rockFootprint{grid: grid, edges: ExposedRockEdges(grid), minX: math.Inf(1), maxX: math.Inf(-1)}
+	if len(grid) > 0 {
+		f.worldTop = grid[0].worldTop
+	}
+	bounds := make([]geom.Bounds, len(grid))
+	for i, c := range grid {
+		lo, hi := geom.PolygonBounds(c.Polygon)
+		bounds[i] = geom.Bounds{Min: lo, Max: hi}
+		f.minX, f.maxX = min(f.minX, lo.X), max(f.maxX, hi.X)
+	}
+	f.faces = geom.NewBoundsIndex(bounds)
+	bounds = make([]geom.Bounds, len(f.edges))
+	for i, e := range f.edges {
+		bounds[i] = geom.Bounds{Min: geom.V{X: min(e.A.X, e.B.X), Y: min(e.A.Y, e.B.Y)}, Max: geom.V{X: max(e.A.X, e.B.X), Y: max(e.A.Y, e.B.Y)}}
+	}
+	f.boundary = geom.NewBoundsIndex(bounds)
+	return f
+}
+
+// Negative distances are inside rock. With no foreground, infinity omits
+// formation padding while the independent background border strips remain.
+func (f *rockFootprint) distance(p geom.V) float64 {
+	d2 := f.boundary.Nearest(p, math.Inf(1), func(i int, best float64) float64 {
+		e := f.edges[i]
+		return min(best, geom.SegmentDistanceSquared(p, p, e.A, e.B))
+	})
+	d := math.Sqrt(d2)
+	if f.contains(p) {
+		d = -d
+	}
+	return d
+}
+
+func (f *rockFootprint) contains(p geom.V) bool {
+	inside := false
+	const epsilon = 1e-10
+	f.faces.Query(geom.Bounds{Min: p.Sub(geom.V{X: epsilon, Y: epsilon}), Max: p.Add(geom.V{X: epsilon, Y: epsilon})}, func(i int) bool {
+		poly := f.grid[i].Polygon
+		inside = geom.InsidePolygon(p, poly)
+		if !inside {
+			for j, a := range poly {
+				if geom.SegmentDistanceSquared(p, p, a, poly[(j+1)%len(poly)]) < epsilon*epsilon {
+					inside = true
+					break
+				}
+			}
+		}
+		if inside {
+			return false
+		}
+		return true
+	})
+	return inside
+}
+
+func (f *rockFootprint) backgroundHeight(p geom.V) float64 {
+	return rockContourHeight + max(backgroundRockPadding-f.distance(p), f.backgroundBorderHeight(p))
+}
+
+func (f *rockFootprint) backgroundBorderHeight(p geom.V) float64 {
+	// Continuous border rock reaches the outer fade in either orientation.
+	// Unequal waves keep the inner edges from forming straight parallel rails.
+	y := p.Y + f.worldTop
+	left := backgroundBorderWidth + .025*math.Sin(y*11) + .012*math.Sin(y*29+1)
+	right := backgroundBorderWidth + .025*math.Sin(y*13+2) + .012*math.Sin(y*31)
+	return max(left-p.X, right-(generationWidth-p.X))
+}
+
+func (f *rockFootprint) backgroundContains(p geom.V) bool {
+	// Most cells are in solid border strips. They need neither a foreground
+	// lookup nor the wavy inner-border calculation to establish occupancy.
+	return p.X <= backgroundSolidBorderWidth || p.X >= generationWidth-backgroundSolidBorderWidth || f.backgroundBorderHeight(p) >= 0 || f.distance(p) <= backgroundRockPadding
+}
+
 // Closely spaced loop walls can introduce a run of almost collinear shared
 // junctions. Ear clipping cannot always resolve that run at its tolerance.
 // Remove redundant points only on affected faces, preserving their silhouette;

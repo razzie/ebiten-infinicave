@@ -3,12 +3,39 @@ package render
 import (
 	"image"
 	"image/color"
+	"math"
 	"reflect"
 	"testing"
+
+	"github.com/hajimehoshi/ebiten/v2"
 
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
+
+func BenchmarkPrepareBackgroundVines(b *testing.B) {
+	data := terrain.BuildSection(42, 0)
+	grid := terrain.ShadeRockFaces(data.Background, nil)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		prepareRockVines(data.Vines, grid)
+	}
+}
+
+func TestBackgroundVinesFadeWithBorderRock(t *testing.T) {
+	vines := []terrain.Vine{{Parent: -1, Points: []terrain.VinePoint{{P: geom.V{X: -.25, Y: .2}, Radius: .001}, {P: geom.V{X: -.25, Y: .4}, Radius: .001}}}}
+	base, faded := PrepareVines(vines), prepareRockVines(vines, nil)
+	for i, mesh := range faded {
+		for j, v := range mesh.Vertices {
+			fade := float32(horizontalFade(float64(v.DstX) / RasterPixelsPerUnit))
+			old := base[i].Vertices[j]
+			if math.Abs(float64(v.ColorA-old.ColorA*fade)) > 1e-6 || math.Abs(float64(v.ColorR-old.ColorR*fade)) > 1e-6 {
+				t.Fatal("background vine alpha or material ignores the border fade")
+			}
+		}
+	}
+}
 
 func TestVinesFollowLocalRockBrightness(t *testing.T) {
 	for _, orientation := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
@@ -21,38 +48,49 @@ func TestVinesFollowLocalRockBrightness(t *testing.T) {
 				t.Run(name, func(t *testing.T) {
 					vine := terrain.Vine{Parent: -1, Foreground: foreground}
 					var grid terrain.RockGrid
-					for i, tone := range []uint8{0, 30, 255} {
-						cell := terrainRect(float64(i)*.3, .1, .3, .6)
+					// Repeat black, gray, and white cells in the left padding,
+					// middle, and right padding; exercise stems and leaves.
+					for i, tone := range []uint8{0, 10, 255, 0, 10, 255, 0, 10, 255} {
+						x := -.45 + .75*float64(i/3) + .1*float64(i%3)
+						cell := terrainRect(x, .1, .1, .6)
 						cell.Raised = foreground
 						cell.Color = color.NRGBA{R: tone, G: tone, B: tone, A: 255}
 						cell.Normal = geom.V3{Z: 1}
 						grid = append(grid, terrain.WithRockOrientation(cell, orientation))
-						p := geom.V{X: .15 + float64(i)*.3, Y: .4}
+						p := geom.V{X: x + .05, Y: .4}
 						vine.Points = append(vine.Points, terrain.VinePoint{P: p, Radius: .003})
 						vine.Leaves = append(vine.Leaves, terrain.VineLeaf{Anchor: p, Polygon: [4]geom.V{p, p.Add(geom.V{X: .01, Y: .01}), p.Add(geom.V{X: .02, Y: .04}), p.Add(geom.V{X: -.01, Y: .02})}})
 					}
 					vines := []terrain.Vine{vine}
-					plain := PrepareVines(vines)
+					plain := prepareRockVines(vines, nil)
 					lit := prepareRockVines(vines, grid)
 					for pass := range 2 {
-						stride := len(vineBands)
-						if pass == 1 {
-							stride = 6 // Each leaf has two triangles.
-						}
-						for i := range 3 {
-							v, base := lit[pass].Vertices[i*stride], plain[pass].Vertices[i*stride]
-							if i == 0 && (v.ColorR >= base.ColorR || v.ColorG >= base.ColorG || v.ColorB >= base.ColorB) {
-								t.Fatal("dark rock did not darken the vine")
+						previousShade := 0.0
+						for i, point := range vine.Points {
+							p := point.P.Add(geom.V{Y: .001})
+							if pass == 1 {
+								leaf := vine.Leaves[i].Polygon
+								p = leaf[0].Add(leaf[1]).Add(leaf[2]).Mul(1.0 / 3)
 							}
-							if i == 2 && (v.ColorR <= base.ColorR || v.ColorG <= base.ColorG || v.ColorB <= base.ColorB) {
+							v, base := sampleVineMesh(t, lit[pass], p), sampleVineMesh(t, plain[pass], p)
+							shade := float64(v.ColorG / base.ColorG)
+							black := .38
+							if !foreground {
+								black = 0
+							}
+							if i%3 == 0 && math.Abs(shade-black) > 1e-5 {
+								t.Fatal("black rock did not darken the vine")
+							}
+							if i%3 == 2 && shade <= 1 {
 								t.Fatal("light rock did not lighten the vine")
 							}
-							if i > 0 && v.ColorG <= lit[pass].Vertices[(i-1)*stride].ColorG {
+							if i%3 > 0 && shade <= previousShade {
 								t.Fatal("vine brightness does not follow the rock cells")
 							}
-							if v.ColorA != base.ColorA || v.DstX != base.DstX || v.DstY != base.DstY {
-								t.Fatal("rock shading changed the vine geometry or opacity")
+							if math.Abs(float64(v.ColorA-base.ColorA)) > 1e-5 {
+								t.Fatal("rock shading changed vine opacity")
 							}
+							previousShade = shade
 						}
 					}
 					if !reflect.DeepEqual(prepareRockVines(vines, nil), plain) || !reflect.DeepEqual(prepareRockVines(vines, grid), lit) {
@@ -94,6 +132,118 @@ func TestVinesFollowLocalRockBrightness(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+// Sample rendered triangles, including newly inserted cell-boundary vertices.
+func sampleVineMesh(t *testing.T, mesh TriangleMesh, p geom.V) ebiten.Vertex {
+	t.Helper()
+	p = geom.V{X: p.X * RasterPixelsPerUnit, Y: (p.Y - terrain.GenerationMinY) * RasterPixelsPerUnit}
+	for i := 0; i < len(mesh.Indices); i += 3 {
+		a, b, c := mesh.Vertices[mesh.Indices[i]], mesh.Vertices[mesh.Indices[i+1]], mesh.Vertices[mesh.Indices[i+2]]
+		pa, pb, pc := geom.V{X: float64(a.DstX), Y: float64(a.DstY)}, geom.V{X: float64(b.DstX), Y: float64(b.DstY)}, geom.V{X: float64(c.DstX), Y: float64(c.DstY)}
+		area := geom.Cross(pb.Sub(pa), pc.Sub(pa))
+		if math.Abs(area) < 1e-9 {
+			continue
+		}
+		u, v := geom.Cross(pb.Sub(p), pc.Sub(p))/area, geom.Cross(pc.Sub(p), pa.Sub(p))/area
+		w := 1 - u - v
+		if min(u, v, w) < -1e-5 {
+			continue
+		}
+		mix := func(x, y, z float32) float32 { return float32(u*float64(x) + v*float64(y) + w*float64(z)) }
+		return ebiten.Vertex{ColorR: mix(a.ColorR, b.ColorR, c.ColorR), ColorG: mix(a.ColorG, b.ColorG, c.ColorG), ColorB: mix(a.ColorB, b.ColorB, c.ColorB), ColorA: mix(a.ColorA, b.ColorA, c.ColorA)}
+	}
+	t.Fatalf("vine mesh does not cover %v", p)
+	return ebiten.Vertex{}
+}
+
+func TestBackgroundVinesShadeCellsBetweenSamples(t *testing.T) {
+	for _, orientation := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
+		var grid terrain.RockGrid
+		for i, tone := range []uint8{20, 0, 20} {
+			c := terrainRect(-.45+.2*float64(i), .1, .2, .7)
+			c.Raised = false
+			c.Color = color.NRGBA{R: tone, G: tone, B: tone, A: 255}
+			grid = append(grid, terrain.WithRockOrientation(c, orientation))
+		}
+		// Both stem endpoints are on light cells. The leaf also bridges all
+		// three cells, so sampling just its corners would miss the dark band.
+		vine := terrain.Vine{Parent: -1, Points: []terrain.VinePoint{
+			{P: geom.V{X: -.4, Y: .4}, Radius: .003}, {P: geom.V{X: .1, Y: .4}, Radius: .003},
+		}, Leaves: []terrain.VineLeaf{{Polygon: [4]geom.V{{X: -.4, Y: .5}, {X: -.15, Y: .7}, {X: .1, Y: .5}, {X: -.15, Y: .45}}}}}
+		vines := []terrain.Vine{vine}
+		plain, lit := prepareRockVines(vines, nil), prepareRockVines(vines, grid)
+		for pass, y := range []float64{.401, .51} {
+			for _, x := range []float64{-.3, -.251, -.249, -.15, -.051, -.049, 0} {
+				p := geom.V{X: x, Y: y}
+				v, base := sampleVineMesh(t, lit[pass], p), sampleVineMesh(t, plain[pass], p)
+				if x > -.25 && x < -.05 {
+					if v.ColorR != 0 || v.ColorG != 0 || v.ColorB != 0 {
+						t.Fatal("vine bridges a black cell between growth samples")
+					}
+				} else if v.ColorG < base.ColorG {
+					t.Fatal("vine on a lit cell was globally darkened")
+				}
+				if math.Abs(float64(v.ColorA-base.ColorA)) > 1e-5 {
+					t.Fatal("cell clipping changed border fade")
+				}
+			}
+		}
+		// Cell boundaries must not change covered area or introduce cracks.
+		area := func(mesh TriangleMesh) float64 {
+			sum := 0.0
+			for i := 0; i < len(mesh.Indices); i += 3 {
+				a, b, c := mesh.Vertices[mesh.Indices[i]], mesh.Vertices[mesh.Indices[i+1]], mesh.Vertices[mesh.Indices[i+2]]
+				sum += math.Abs(float64(b.DstX-a.DstX)*float64(c.DstY-a.DstY)-float64(b.DstY-a.DstY)*float64(c.DstX-a.DstX)) * .5
+			}
+			return sum
+		}
+		for i := range lit {
+			if math.Abs(area(lit[i])/area(plain[i])-1) > 1e-5 {
+				t.Fatal("clipping changed vine coverage")
+			}
+		}
+	}
+}
+
+func TestBackgroundVinesGeneratedCellContrast(t *testing.T) {
+	for _, orientation := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
+		data := terrain.NewSectionBuilder(42, nil, orientation).Build(0)
+		grid := terrain.ShadeRockFaces(data.Background, nil)
+		var cells [2]terrain.RockCell
+		levels := [2]float64{math.Inf(1), 0}
+		for _, c := range grid {
+			if c.Center.X < -.35 || c.Center.X > 1.35 || c.Center.Y < .1 || c.Center.Y > .9 {
+				continue
+			}
+			clr := rockViewColor(c, ViewShaded)
+			level := .30*float64(clr.R) + .59*float64(clr.G) + .11*float64(clr.B)
+			if level < levels[0] {
+				cells[0], levels[0] = c, level
+			}
+			if level > levels[1] {
+				cells[1], levels[1] = c, level
+			}
+		}
+		var vines []terrain.Vine
+		for _, c := range cells {
+			if len(c.Polygon) == 0 {
+				t.Fatal("generated contrast fixture lacks dark or lit cells")
+			}
+			vines = append(vines, terrain.Vine{Parent: -1, Points: []terrain.VinePoint{{P: c.Center.Sub(geom.V{X: .0002}), Radius: .0001}, {P: c.Center.Add(geom.V{X: .0002}), Radius: .0001}}})
+		}
+		plain, lit := prepareRockVines(vines, nil), prepareRockVines(vines, grid)
+		var shades [2]float64
+		for i, c := range cells {
+			p := c.Center
+			v, base := sampleVineMesh(t, lit[i], p), sampleVineMesh(t, plain[i], p)
+			shades[i] = float64(v.ColorG / base.ColorG)
+		}
+		t.Logf("%s: generated cell levels %v, vine multipliers %v", orientation, levels, shades)
+		if shades[0] <= 0 || shades[1] < .9 || shades[0] > shades[1]*.8 {
+			t.Fatal("real background cell colors collapse into nearly uniform vine lighting")
+		}
 	}
 }
 

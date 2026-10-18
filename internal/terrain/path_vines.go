@@ -269,11 +269,16 @@ func foregroundPathVines(ctx context.Context, paths []BranchPath, topology *Rock
 	return alignPathVines(topology.Grid, vines, &support, seed^SectionSeed(id, 0x73757266616365))
 }
 
-// Background paths are independent of cell colors and owned by their roots.
-func backgroundPathVines(seed, id int64, mode Orientation) []Vine {
+// Background paths prefer the exposed padding, independently of cell colors.
+// Each root still owns its complete family across neighboring sections.
+func backgroundPathVines(seed, id int64, mode Orientation, footprint *rockFootprint) []Vine {
+	if footprint != nil {
+		return backgroundPaddingVines(seed, id, footprint)
+	}
 	rng := rand.New(rand.NewSource(SectionSeed(seed^0x76696e6573, id)))
 	var vines []Vine
-	for family := 0; family < 7; family++ {
+	families := 7
+	for family := 0; family < families; family++ {
 		root := geom.V{X: .08 + float64(family)*.17 + (.5-rng.Float64())*.05, Y: .08 + rng.Float64()*.84}
 		heading := InternalPoint(mode, geom.V{Y: -1})
 		radius := .0042
@@ -290,7 +295,10 @@ func backgroundPathVines(seed, id int64, mode Orientation) []Vine {
 			radius = .0034
 		}
 		phase := rng.Float64() * 2 * math.Pi
-		v := freePath(root, heading, .62+rng.Float64()*.34, radius, phase, -1, 0)
+		v := freePathInPadding(root, heading, .62+rng.Float64()*.34, radius, phase, -1, 0, footprint)
+		if len(v.Points) < 3 {
+			continue
+		}
 		parent := len(vines)
 		vines = append(vines, v)
 		for fork := 0; fork < 2; fork++ {
@@ -299,7 +307,7 @@ func backgroundPathVines(seed, id int64, mode Orientation) []Vine {
 				continue
 			}
 			d := v.Points[joint+1].P.Sub(v.Points[joint-1].P).Norm()
-			branch := freePath(v.Points[joint].P, geom.Rotate(d, float64(2*fork-1)*.7), .18+rng.Float64()*.16, .0026, phase+float64(fork), parent, joint)
+			branch := freePathInPadding(v.Points[joint].P, geom.Rotate(d, float64(2*fork-1)*.7), .18+rng.Float64()*.16, .0026, phase+float64(fork), parent, joint, footprint)
 			branch.Depth = 1
 			if len(branch.Points) >= 3 {
 				vines = append(vines, branch)
@@ -317,24 +325,172 @@ func backgroundPathVines(seed, id int64, mode Orientation) []Vine {
 		joint := len(stem.Points) * 3 / 5
 		p := stem.Points[joint]
 		d := stem.Points[joint+1].P.Sub(stem.Points[joint-1].P).Norm()
-		twig := freePath(p.P, geom.Rotate(d, (rng.Float64()-.5)*1.5), .09+.08*rng.Float64(), p.Radius*.55, rng.Float64()*math.Pi*2, parent, joint)
+		twig := freePathInPadding(p.P, geom.Rotate(d, (rng.Float64()-.5)*1.5), .09+.08*rng.Float64(), p.Radius*.55, rng.Float64()*math.Pi*2, parent, joint, footprint)
 		twig.Depth = 2
 		if len(twig.Points) > 3 {
 			vines = append(vines, twig)
 		}
 	}
-	vines = addFreeVineBranches(vines, nil, rng)
-	decoratePathVines(vines, nil, SectionSeed(seed, id))
+	vines = addFreeVineBranches(vines, nil, rng, footprint)
+	decoratePathVines(vines, nil, SectionSeed(seed, id), footprint)
 	return vines
 }
 
 func freePath(root, heading geom.V, reach, radius, phase float64, parent, joint int) Vine {
+	return freePathInPadding(root, heading, reach, radius, phase, parent, joint, nil)
+}
+
+// Prefer the middle of the rear band, leaving room for stems and leaves on
+// either side. Hidden foreground and unsupported empty space cost more.
+func (f *rockFootprint) vinePenalty(p geom.V) float64 {
+	cost := 0.0
+	if p.X > 0 && p.X < generationWidth {
+		band := math.Abs(f.vineDistance(p) - backgroundRockPadding*.48)
+		border := min(math.Abs(p.X-.055), math.Abs(p.X-.945))
+		cost = min(band, border*.65)
+	}
+	if rear := f.background; rear != nil {
+		// Look ahead near exposed rear edges, so paths turn before their
+		// ribbons reach a gap. Distant padding skips containment entirely.
+		const reach = .045
+		d2 := rear.boundary.Nearest(p, reach*reach, func(i int, best float64) float64 {
+			e := rear.edges[i]
+			return min(best, geom.SegmentDistanceSquared(p, p, e.A, e.B))
+		})
+		if d2 < reach*reach {
+			d := math.Sqrt(d2)
+			if !rear.contains(p) {
+				d = -d
+			}
+			cost += 2 * (reach - d)
+		}
+	}
+	return cost
+}
+
+const backgroundVineRockClearance = .018 // includes foreground chips and projected side walls
+
+// Prove the ribbon is outside the foreground's actual bounds. Rear support
+// is checked separately: even the outer margins can contain background holes.
+func (f *rockFootprint) paddingClearOfForeground(a, b geom.V, radius float64) bool {
+	lo, hi := min(a.X, b.X), max(a.X, b.X)
+	pad := radius + backgroundVineRockClearance
+	return hi <= backgroundSolidBorderWidth-radius-.010 && hi+pad < f.minX || lo >= generationWidth-backgroundSolidBorderWidth+radius+.010 && lo-pad > f.maxX
+}
+
+// A supported start and no exposed edge touching the capsule prove the entire
+// segment stays on rear rock, including across narrow holes between samples.
+func (f *rockFootprint) backgroundSupported(a, b geom.V, margin float64) bool {
+	rear := f.background
+	if rear == nil {
+		return true
+	}
+	if !rear.contains(a) {
+		return false
+	}
+	clear := true
+	rear.boundary.Query(geom.Bounds{Min: geom.V{X: min(a.X, b.X) - margin, Y: min(a.Y, b.Y) - margin}, Max: geom.V{X: max(a.X, b.X) + margin, Y: max(a.Y, b.Y) + margin}}, func(i int) bool {
+		e := rear.edges[i]
+		clear = geom.SegmentDistanceSquared(a, b, e.A, e.B) > margin*margin
+		return clear
+	})
+	return clear
+}
+
+func (f *rockFootprint) paddingSegment(a, b geom.V, radius float64) bool {
+	// Keep the direct path away from nearby holes so steering can begin
+	// before the next step would touch their rim.
+	return f.paddingClearOfForeground(a, b, radius) && f.backgroundSupported(a, b, radius+.045)
+}
+
+// Middle runners only need the narrow band beside exposed rock edges. Capping
+// the nearest query discards distant faces and rooms. A projection onto an edge
+// gives its solid side directly; ambiguous corners use the exact footprint.
+func (f *rockFootprint) vineDistance(p geom.V) float64 {
+	const reach = backgroundRockPadding + .04
+	edge, along := -1, 0.0
+	var nearest geom.V
+	d2 := f.boundary.Nearest(p, reach*reach, func(i int, best float64) float64 {
+		e := f.edges[i]
+		d := e.B.Sub(e.A)
+		t := geom.Clamp(p.Sub(e.A).Dot(d)/d.Len2(), 0, 1)
+		q := e.A.Add(d.Mul(t))
+		if distance := p.Sub(q).Len2(); distance < best || distance == best && (edge < 0 || i < edge) {
+			edge, along, nearest = i, t, q
+			return distance
+		}
+		return best
+	})
+	if edge < 0 {
+		return math.Inf(1)
+	}
+	if along < 1e-7 || along > 1-1e-7 {
+		return f.distance(p)
+	}
+	distance := math.Sqrt(d2)
+	e := f.edges[edge]
+	if geom.Cross(e.B.Sub(e.A), p.Sub(nearest)) > 0 {
+		distance = -distance
+	}
+	return distance
+}
+
+// Test the entire ribbon against rock edges, not only growth samples. The
+// original uncut silhouette is conservative after authored or runtime carving.
+func (f *rockFootprint) backgroundFits(a, b geom.V, radius float64) bool {
+	if min(a.X, b.X) < BackgroundMinX+.025 || max(a.X, b.X) > BackgroundMaxX-.025 || min(a.Y, b.Y) < GenerationMinY+.02 || max(a.Y, b.Y) > generationMaxY-.02 {
+		return false
+	}
+	if !f.backgroundSupported(a, b, radius+.010) {
+		return false
+	}
+	if f.paddingClearOfForeground(a, b, radius) {
+		return true
+	}
+	pad := radius + backgroundVineRockClearance
+	supported := func(p geom.V) bool {
+		d := f.vineDistance(p)
+		if math.IsInf(d, 1) && !(p.X+pad < f.minX || p.X-pad > f.maxX) {
+			return false
+		}
+		if f.background != nil {
+			return d > pad
+		}
+		margin := radius + .010
+		return d > pad && (p.X <= backgroundSolidBorderWidth-margin || p.X >= generationWidth-backgroundSolidBorderWidth+margin || f.backgroundBorderHeight(p) >= margin || backgroundRockPadding-d >= margin)
+	}
+	if !supported(a) || a != b && !supported(b) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	if b.Sub(a).Len2() > .025*.025 {
+		if !supported(geom.LerpVector(a, b, .5)) {
+			return false
+		}
+	}
+	clear := true
+	f.boundary.Query(geom.Bounds{Min: geom.V{X: min(a.X, b.X) - pad, Y: min(a.Y, b.Y) - pad}, Max: geom.V{X: max(a.X, b.X) + pad, Y: max(a.Y, b.Y) + pad}}, func(i int) bool {
+		e := f.edges[i]
+		clear = geom.SegmentDistanceSquared(a, b, e.A, e.B) > pad*pad
+		return clear
+	})
+	return clear
+}
+
+func freePathInPadding(root, heading geom.V, reach, radius, phase float64, parent, joint int, footprint *rockFootprint) Vine {
 	v := Vine{Parent: parent, Joint: joint}
 	p := root
-	steps := max(2, int(math.Ceil(reach/.012)))
+	previous := heading
+	step := .012
+	if footprint != nil && footprint.paddingSegment(root, root, radius) {
+		step = .020 // Clear margins need fewer samples along their broad curves.
+	}
+	steps := max(2, int(math.Ceil(reach/step)))
 	for i := 0; i <= steps; i++ {
 		t := float64(i) / float64(steps)
-		if p.X < .02 || p.X > .98 || p.Y < GenerationMinY+.02 || p.Y > generationMaxY-.02 {
+		if (footprint == nil && (p.X < .02 || p.X > .98)) || p.Y < GenerationMinY+.02 || p.Y > generationMaxY-.02 || (footprint != nil && i == 0 && !footprint.backgroundFits(p, p, radius)) {
 			break
 		}
 		r := radius * math.Pow(1-t, .8)
@@ -343,6 +499,33 @@ func freePath(root, heading geom.V, reach, radius, phase float64, parent, joint 
 		}
 		v.Points = append(v.Points, VinePoint{P: p, Radius: r})
 		d := geom.Rotate(heading, .45*math.Sin(t*4+phase)+1.2*geom.Smoothstep(.65, 1, t))
+		if footprint != nil {
+			// Bounded turns preserve flowing paths while following the padding
+			// around bends, branch tips, and overlapping rear formations.
+			preferred := previous.Mul(.8).Add(d.Mul(.2)).Norm()
+			if next := p.Add(preferred.Mul(reach / float64(steps))); footprint.paddingSegment(p, next, radius) && next.X >= BackgroundMinX+.025 && next.X <= BackgroundMaxX-.025 {
+				d, previous = preferred, preferred
+				p = next
+				continue
+			}
+			best, score := preferred, math.Inf(1)
+			for _, angle := range [...]float64{0, -.28, .28, -.56, .56, -.9, .9, -1.3, 1.3} {
+				candidate := geom.Rotate(preferred, angle)
+				next := p.Add(candidate.Mul(reach / float64(steps)))
+				if !footprint.backgroundFits(p, next, radius) {
+					continue
+				}
+				q := p.Add(candidate.Mul(.028))
+				cost := footprint.vinePenalty(q) + .006*math.Abs(angle)
+				if cost < score {
+					best, score = candidate, cost
+				}
+			}
+			if math.IsInf(score, 1) {
+				break
+			}
+			d, previous = best, best
+		}
 		p = p.Add(d.Mul(reach / float64(steps)))
 	}
 	if len(v.Points) > 0 {
@@ -351,7 +534,7 @@ func freePath(root, heading geom.V, reach, radius, phase float64, parent, joint 
 	return v
 }
 
-func decoratePathVines(vines []Vine, support *pathSupport, seed int64) {
+func decoratePathVines(vines []Vine, support *pathSupport, seed int64, footprint *rockFootprint) {
 	for i := range vines {
 		v := &vines[i]
 		leafSupport := support
@@ -397,7 +580,7 @@ func decoratePathVines(vines []Vine, support *pathSupport, seed int64) {
 			fits := true
 			for k, a := range leaf.Polygon {
 				b := leaf.Polygon[(k+1)%4]
-				if a.X < .02 || a.X > .98 || a.Y < GenerationMinY+.02 || a.Y > generationMaxY-.02 || (leafSupport != nil && !leafSupport.fits(a, b, .0002)) {
+				if (footprint == nil && (a.X < .02 || a.X > .98)) || a.Y < GenerationMinY+.02 || a.Y > generationMaxY-.02 || (leafSupport != nil && !leafSupport.fits(a, b, .0002)) || (footprint != nil && !footprint.backgroundFits(a, b, .0002)) {
 					fits = false
 					break
 				}
@@ -411,42 +594,21 @@ func decoratePathVines(vines []Vine, support *pathSupport, seed int64) {
 					return fits
 				})
 			}
+			if fits && footprint != nil && footprint.background != nil {
+				// Edge checks alone can miss a small hole enclosed by a leaf.
+				rear := footprint.background
+				lo, hi := geom.PolygonBounds(leaf.Polygon[:])
+				rear.boundary.Query(geom.Bounds{Min: lo, Max: hi}, func(i int) bool {
+					if geom.InsidePolygon(rear.edges[i].A, leaf.Polygon[:]) {
+						fits = false
+					}
+					return fits
+				})
+			}
 			if fits {
 				v.Leaves = append(v.Leaves, leaf)
 			}
 		}
-	}
-}
-
-func supportBackgroundVines(grid RockGrid, vines []Vine) {
-	var edges []RockEdge
-	for _, v := range vines {
-		for j := 1; j < len(v.Points); j++ {
-			edges = append(edges, RockEdge{A: v.Points[j-1].P, B: v.Points[j].P})
-		}
-	}
-	index := geom.NewBoundsIndex(edgeBounds(edges, .05))
-	for i := range grid {
-		c := &grid[i]
-		if c.Color.A == 0 {
-			continue
-		}
-		p := c.Center
-		nearest := .05 * .05
-		index.Query(geom.Bounds{Min: p, Max: p}, func(j int) bool {
-			e := edges[j]
-			nearest = min(nearest, geom.SegmentDistanceSquared(p, p, e.A, e.B))
-			return true
-		})
-		if nearest >= .05*.05 {
-			continue
-		}
-		blend := .65 * (1 - geom.Smoothstep(.012, .05, math.Sqrt(nearest)))
-		// Keep alpha, height and normals, and retain the original tonal range.
-		variation := .75 + .25*geom.Clamp(c.Normal.Z, 0, 1)
-		c.Color.R = uint8(math.Round(geom.Lerp(float64(c.Color.R), 18*variation, blend)))
-		c.Color.G = uint8(math.Round(geom.Lerp(float64(c.Color.G), 22*variation, blend)))
-		c.Color.B = uint8(math.Round(geom.Lerp(float64(c.Color.B), 19*variation, blend)))
 	}
 }
 

@@ -48,7 +48,7 @@ func TestWorldCancelsObsoleteGenerationAndResumes(t *testing.T) {
 	w.request(100)
 	select {
 	case mesh := <-w.results:
-		if mesh.ID != 100 || len(mesh.Background.Faces.Indices) == 0 {
+		if mesh.ID != 100 || mesh.Geometry == nil || len(mesh.Background.Faces.Indices) == 0 {
 			t.Fatal("worker did not resume at the new viewport")
 		}
 	case <-time.After(20 * time.Second):

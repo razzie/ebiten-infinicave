@@ -8,6 +8,33 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
 
+func TestBackgroundFootprintPadsAndJoinsSharedFormations(t *testing.T) {
+	// The second rectangle is a branch; the third is a neighboring formation.
+	grid := RockGrid{terrainRect(.2, .2, .3, .1), terrainRect(.4, .3, .1, .25), terrainRect(.63, .2, .1, .35)}
+	f := newRockFootprint(grid)
+	for _, p := range []geom.V{{X: .3, Y: .25}, {X: .45, Y: .5}, {X: .3, Y: .15}, {X: .565, Y: .4}} {
+		if f.backgroundHeight(p) <= rockContourHeight {
+			t.Fatalf("rear footprint lost shared rock, padding, or overlap at %v", p)
+		}
+	}
+	for _, p := range []geom.V{{X: .3, Y: .6}, {X: .5, Y: .8}} {
+		if f.backgroundHeight(p) >= rockContourHeight {
+			t.Fatalf("rear footprint added unrelated rock at %v", p)
+		}
+	}
+	for _, p := range []geom.V{{X: -.49, Y: .25}, {X: .05, Y: .25}, {X: .95, Y: .4}, {X: 1.49, Y: .4}} {
+		if f.backgroundHeight(p) <= rockContourHeight {
+			t.Fatalf("border padding is missing at %v", p)
+		}
+	}
+	if d := f.distance(geom.V{X: .45, Y: .3}); math.Abs(d+.05) > 1e-10 {
+		t.Fatalf("internal cell join became a formation boundary: distance %g", d)
+	}
+	if !math.IsInf(newRockFootprint(nil).distance(geom.V{}), 1) {
+		t.Fatal("empty foreground acquired a background formation")
+	}
+}
+
 func TestRockContourTrimsFacesWithoutLightWedges(t *testing.T) {
 	poly := []geom.V{{X: 0.1, Y: 0.1}, {X: 0.2, Y: 0.1}, {X: 0.2, Y: 0.2}, {X: 0.1, Y: 0.2}}
 	c := RockCell{Center: geom.V{X: 0.15, Y: 0.15}, Polygon: poly, Z: 0.03, Raised: true, Normal: (geom.V3{X: .3, Y: -.5, Z: 1}).Norm()}

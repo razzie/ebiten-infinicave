@@ -218,8 +218,8 @@ func alignPathVines(grid RockGrid, source []Vine, support *pathSupport, seed int
 	vines = smoothVineRoutes(vines, support, pins)
 	vines = removeShortSurfaceVines(vines)
 	vines = addGuideVineBranches(vines, support, rng)
-	vines = addFreeVineBranches(vines, support, rng)
-	decoratePathVines(vines, support, seed)
+	vines = addFreeVineBranches(vines, support, rng, nil)
+	decoratePathVines(vines, support, seed, nil)
 	return vines
 }
 

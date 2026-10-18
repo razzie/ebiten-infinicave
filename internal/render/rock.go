@@ -80,6 +80,15 @@ type rockFaceSplit struct {
 	start, count  int
 }
 
+// Exposed background cells have the same broken shading planes as foreground
+// undersides. The split preserves their complete Voronoi outline.
+func appendBackgroundCellMesh(vertices []ebiten.Vertex, indices []uint32, c terrain.RockCell, clr color.NRGBA) ([]ebiten.Vertex, []uint32) {
+	random := rockGrowthRandom(c, c.Center, 0x6261636b66616365)
+	angle := random(0) * 2 * math.Pi
+	n := geom.V{X: math.Cos(angle), Y: math.Sin(angle)}
+	return appendSplitRockCellMesh(vertices, indices, c, clr, rockFaceSplit{point: c.Center, normal: n})
+}
+
 // Replace a sampled air contour with two broad angular edges. Shared joins and
 // upward-facing cells stay fixed; the copy belongs only to the render recipe.
 func foldRockEdges(grid terrain.RockGrid, boundary []terrain.RockEdge, shape terrain.ShapeOptions) (terrain.RockGrid, []terrain.RockEdge, map[int]rockFaceSplit) {

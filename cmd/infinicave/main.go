@@ -91,7 +91,6 @@ func parseOptions() (viewerOptions, error) {
 	batsPerMinute := flag.Float64("bats-per-minute", defaults.BatsPerMinute, "average bat arrivals per minute (0 disables them, interactive viewer only)")
 	decorationBurn := flag.Bool("decoration-burn", defaults.DecorationBurn, "burn dissolve decorations removed by carving")
 	appearanceFade := flag.Bool("appearance-fade", defaults.AppearanceFade, "fade in arriving rocks and vegetation (interactive viewer only)")
-	flag.BoolVar(appearanceFade, "appearance-burn", defaults.AppearanceFade, "deprecated alias for -appearance-fade")
 	mushroomDensity := flag.Float64("mushroom-density", defaults.MushroomDensity, "mushroom cluster occurrence probability (0 disables mushrooms, range 0-1)")
 	mossDensity := flag.Float64("moss-density", defaults.MossDensity, "moss colony occurrence probability (0 disables moss, 1 keeps all eligible colonies)")
 	grassDensity := flag.Float64("grass-density", defaults.GrassDensity, "yellow or green grass colony occurrence beside guides on upward-facing rocks (0 disables grass, range 0-1)")

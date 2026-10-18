@@ -83,8 +83,8 @@ func TestLoadedGuidesAllowEmptySectionsAndSkipInvalidPolylines(t *testing.T) {
 		}
 	}
 	data := NewSectionBuilder(42, func(int64) SectionContent { return SectionContent{} }).Build(0)
-	if len(data.Guides) != 0 || len(data.Foreground) != 0 || len(data.Background) == 0 {
-		t.Fatal("empty loader did not override procedural foreground generation")
+	if len(data.Guides)+len(data.Foreground) != 0 || len(data.Background) == 0 || len(data.Vines) == 0 {
+		t.Fatal("empty loader must retain only the background borders and their vines")
 	}
 }
 

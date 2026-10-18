@@ -150,7 +150,7 @@ func TestVineRouteSelectionIncludesParallelFamiliesAndFreeBranches(t *testing.T)
 	// A free twig can leave a straight stem at an arbitrary sample, regardless
 	// of cell geometry, with a tapered tip and a substantial sideways span.
 	stem := freePath(geom.V{X: .4, Y: .3}, geom.V{Y: 1}, .4, .0025, 0, -1, 0)
-	branches := addFreeVineBranches([]Vine{stem}, nil, rand.New(rand.NewSource(42)))
+	branches := addFreeVineBranches([]Vine{stem}, nil, rand.New(rand.NewSource(42)), nil)
 	if len(branches) < 3 {
 		t.Fatal("straight stem generated too few free branches")
 	}

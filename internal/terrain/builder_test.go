@@ -55,15 +55,110 @@ func statsOf(s SectionData) sectionStats {
 // Branch thickness varies within its bounds; negative points open shoulders.
 // Upward-facing guide lips retain only subpixel silhouette irregularity.
 // Contour intersections follow the actual relief instead of linear heights.
+// Background copies the uncut footprint with coarser cells and steered vines.
 func TestSectionStatsStable(t *testing.T) {
 	want := map[int64]sectionStats{
-		1:  {9710, 1873, 110, .9509602572},
-		42: {9651, 1554, 102, .7789434915},
+		1:  {6788, 1873, 85, .9509602572},
+		42: {6532, 1554, 93, .7789434915},
 	}
 	for seed, w := range want {
 		got := statsOf(BuildSection(seed, 0))
 		if got.bg != w.bg || got.fg != w.fg || got.vines != w.vines || math.Abs(got.area-w.area) > w.area*1e-4 {
 			t.Errorf("seed %d: got %+v, want %+v", seed, got, w)
+		}
+	}
+}
+
+func TestBackgroundCopiesUncutForegroundFootprint(t *testing.T) {
+	for _, mode := range []Orientation{Vertical, Horizontal} {
+		for _, strategy := range []BranchingStrategy{BranchingSimple, BranchingRecursive, BranchingLoops} {
+			t.Run(mode.String()+"/"+strategy.String(), func(t *testing.T) {
+				builder := NewSectionBuilder(42, nil, mode)
+				builder.Shape.BranchingStrategy = strategy
+				builder.ForceGuidesUp = true
+				build := builder.Begin(context.Background(), 0)
+				front := newRockFootprint(build.raw)
+				if !build.Materialize(context.Background()) {
+					t.Fatal("materialization failed")
+				}
+				back := newRockFootprint(build.data.Background)
+				visiblePadding := 0
+				for _, cell := range ShadeRockFaces(build.data.Background, nil, build.data.BackgroundNeighbors) {
+					p := cell.Center
+					if p.X < .2 || p.X > .8 || p.Y < 0 || p.Y >= 1 {
+						continue
+					}
+					d := front.distance(p)
+					if d <= .005 || d >= backgroundRockPadding {
+						continue
+					}
+					visiblePadding++
+					if cell.Color.R < 5 || cell.Color.G < 5 || cell.Color.B < 4 {
+						t.Fatalf("shading hides rear guide or branch padding at %v: %v", p, cell.Color)
+					}
+				}
+				if visiblePadding < 25 {
+					t.Fatalf("insufficient visible padding coverage: %d faces", visiblePadding)
+				}
+				core, padding := 0, 0
+				for y := .025; y < .98; y += .025 {
+					for x := .025; x < .98; x += .025 {
+						p := geom.V{X: x, Y: y}
+						d := front.distance(p)
+						if d < -.005 {
+							core++
+							if back.distance(p) > 0 {
+								t.Fatalf("background lost a guide or branch at %v", p)
+							}
+						}
+						if d > .015 && d < backgroundRockPadding-.015 {
+							padding++
+							if back.distance(p) > 0 {
+								t.Fatalf("background lacks generous padding at %v", p)
+							}
+						}
+					}
+				}
+				if core < 50 || padding < 100 {
+					t.Fatalf("insufficient formation coverage: core %d, padding %d", core, padding)
+				}
+				for y := .025; y < 1; y += .05 {
+					for _, x := range []float64{BackgroundMinX + .005, -.25, 0, 1, 1.25, BackgroundMaxX - .005} {
+						if back.distance(geom.V{X: x, Y: y}) > 0 {
+							t.Fatalf("border rock has a gap at %v/%v", x, y)
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestAuthoredHolesLeaveBackgroundIntact(t *testing.T) {
+	for _, mode := range []Orientation{Vertical, Horizontal} {
+		generate := func(hole bool) SectionData {
+			builder := NewSectionBuilder(42, func(id int64) SectionContent {
+				if id != 0 {
+					return SectionContent{}
+				}
+				content := testCurlSection(id)
+				if hole {
+					content.Holes = []Hole{{Shape: HoleCircle, Center: geom.V{X: .45, Y: .45}, Radius: .1}}
+				}
+				return content
+			}, mode)
+			build := builder.Begin(context.Background(), 0)
+			if !build.Materialize(context.Background()) {
+				t.Fatal("materialization failed")
+			}
+			return build.Data()
+		}
+		whole, cut := generate(false), generate(true)
+		if reflect.DeepEqual(whole.ForegroundTopology.Grid, cut.ForegroundTopology.Grid) {
+			t.Fatal("fixture hole missed the foreground")
+		}
+		if !reflect.DeepEqual(whole.Background, cut.Background) || !reflect.DeepEqual(whole.Vines, cut.Vines) {
+			t.Fatal("authored hole changed background rock or padding vines")
 		}
 	}
 }
@@ -186,11 +281,15 @@ func TestHorizontalRandomSectionBorderCutoffs(t *testing.T) {
 			}
 		}
 	}
-	for _, vines := range [][]Vine{data.Vines, data.ForegroundVines} {
+	for layer, vines := range [][]Vine{data.Vines, data.ForegroundVines} {
+		minY, maxY := 0.0, 1.0
+		if layer == 0 {
+			minY, maxY = BackgroundMinX, BackgroundMaxX
+		}
 		for i, v := range vines {
 			for _, point := range v.Points {
 				p := Horizontal.local(point.P)
-				if p.Y < 0 || p.Y > 1 {
+				if p.Y < minY || p.Y > maxY {
 					t.Fatalf("horizontal vine escapes top/bottom bounds: %v", p)
 				}
 			}

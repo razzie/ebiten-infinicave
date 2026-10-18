@@ -164,7 +164,8 @@ func checkSectionUnits(t *testing.T, section infinicave.Section) {
 	if infinicave.Width != 1 || infinicave.SectionHeight != 1 {
 		t.Fatal("sections must be unit squares")
 	}
-	lo, hi := infinicave.V{X: math.Inf(1), Y: math.Inf(1)}, infinicave.V{X: math.Inf(-1), Y: math.Inf(-1)}
+	// Padding limits the generation window; the shared formations need not
+	// fill its entire extent, especially with an authored section loader.
 	for layer, grid := range []infinicave.RockGrid{section.Background, section.Foreground} {
 		minX, maxX := 0.0, 1.0
 		if layer == 0 {
@@ -178,13 +179,8 @@ func checkSectionUnits(t *testing.T, section infinicave.Section) {
 				if p.X < minX-1e-9 || p.X > maxX+1e-9 || p.Y < -1-1e-9 || p.Y > 2+1e-9 {
 					t.Fatalf("rock vertex is outside the padded unit section: %v", p)
 				}
-				lo.X, lo.Y = min(lo.X, p.X), min(lo.Y, p.Y)
-				hi.X, hi.Y = max(hi.X, p.X), max(hi.Y, p.Y)
 			}
 		}
-	}
-	if lo != (infinicave.V{X: -.5, Y: -1}) || hi != (infinicave.V{X: 1.5, Y: 2}) {
-		t.Fatalf("incorrect padding bounds: %v to %v", lo, hi)
 	}
 	for _, guide := range section.Guides {
 		length := 0.0
@@ -195,10 +191,14 @@ func checkSectionUnits(t *testing.T, section infinicave.Section) {
 			}
 		}
 	}
-	for _, vines := range [][]infinicave.Vine{section.Vines, section.ForegroundVines} {
+	for layer, vines := range [][]infinicave.Vine{section.Vines, section.ForegroundVines} {
+		minX, maxX := 0.0, 1.0
+		if layer == 0 {
+			minX, maxX = -.5, 1.5
+		}
 		for _, vine := range vines {
 			for _, point := range vine.Points {
-				if point.Radius < 0 || point.Radius > .01 || point.P.X < 0 || point.P.X > 1 {
+				if point.Radius < 0 || point.Radius > .01 || point.P.X < minX || point.P.X > maxX {
 					t.Fatalf("vine point uses incorrect scene units: %+v", point)
 				}
 			}

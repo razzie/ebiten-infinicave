@@ -43,6 +43,10 @@ func batchTriangleMeshes(meshes []TriangleMesh) []TriangleMesh {
 // Bounds live in the original padded-window pixels. Integer origins preserve
 // raster alignment, and padding leaves room for antialiasing at the edges.
 func triangleMeshesBounds(meshes []TriangleMesh) image.Rectangle {
+	return triangleMeshesBoundsInRange(meshes, 0, terrain.Width)
+}
+
+func triangleMeshesBoundsInRange(meshes []TriangleMesh, minX, maxX float64) image.Rectangle {
 	loX, loY, hiX, hiY := math.Inf(1), math.Inf(1), math.Inf(-1), math.Inf(-1)
 	for _, mesh := range meshes {
 		for _, index := range mesh.Indices {
@@ -57,7 +61,7 @@ func triangleMeshesBounds(meshes []TriangleMesh) image.Rectangle {
 	const padding = 3
 	return image.Rect(int(math.Floor(loX))-padding, int(math.Floor(loY))-padding,
 		int(math.Ceil(hiX))+padding, int(math.Ceil(hiY))+padding).
-		Intersect(image.Rect(0, 0, RasterPixelsPerUnit, terrain.GenerationHeight*RasterPixelsPerUnit))
+		Intersect(image.Rect(int(minX*RasterPixelsPerUnit), 0, int(maxX*RasterPixelsPerUnit), terrain.GenerationHeight*RasterPixelsPerUnit))
 }
 
 func translateTriangleMeshes(meshes []TriangleMesh, origin image.Point) {
@@ -72,7 +76,7 @@ func translateTriangleMeshes(meshes []TriangleMesh, origin image.Point) {
 // Called only on freshly prepared worker-owned meshes. Once cropped, the
 // meshes and their bounds move together to the game thread.
 func FinishSectionMesh(mesh *SectionMesh) {
-	mesh.VinesBounds = triangleMeshesBounds(mesh.Vines)
+	mesh.VinesBounds = triangleMeshesBoundsInRange(mesh.Vines, terrain.BackgroundMinX, terrain.BackgroundMaxX)
 	mesh.ForegroundVinesBounds = triangleMeshesBounds(mesh.ForegroundVines)
 	// Webs use the same owned band as the rock image, so neighboring padded
 	// snapshots cannot draw the same translucent thread twice.

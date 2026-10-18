@@ -174,6 +174,30 @@ With `LookaheadSections > 0`, prefetching includes GPU uploads for rocks, vines,
 
 Set `config.DisableBackground = true` to draw the foreground over your own background. This leaves generation and collision/query geometry unchanged. Set `config.Fog = 0` too if you want to disable mist.
 
+Background rock reuses the foreground's exact guide and branch footprint before
+holes are cut. Its cells are slightly larger, keeping their original straight
+Voronoi edges. Whole cells meeting the padded footprint form a jagged outer
+silhouette; exposed cells also receive extra folded shading facets. An extra
+0.085 scene units of padding around each formation makes nearby rear formations
+overlap. Continuous rock fills the left and right borders
+in portrait scenes, or the top and bottom borders in landscape scenes, and extends
+through the outer fade into blackness. All rear rock retains a charcoal floor
+so the padded guides and branches remain visible. Material noise varies the
+shading without hiding parts of the shared footprint in black patches.
+
+Background vine families grow in staggered lanes across the full border
+strips, including their outer margins. Long attached runners branch inward and
+seek exposed formation padding toward the middle. New families only start at
+the sides; all middle growth remains attached to them. Natural background holes
+remain open, and vines wrap around their edges. Stems and leaves avoid foreground
+rock with clearance for its chipped edges and projected walls. Background vines
+share the border fade. The layout is deterministic in both orientations and
+survives section reloads and resizing.
+Background vines retain a muted palette and follow the shading of the rock
+cells beneath them, including in the outer padding. Shading changes at cell
+boundaries, and black cells also make their vines black. Clear padding uses
+simpler paths to keep generation inexpensive.
+
 ## Authored Sections
 
 Set `Config.LoadSection` before creating the scene to supply guides and holes. The callback receives section IDs, which may be requested repeatedly and in any order; return consistent content for each ID.
@@ -195,7 +219,7 @@ config.LoadSection = func(id int64) infinicave.SectionContent {
 }
 ```
 
-Points use section-local coordinates in the owned unit square. Generation copies callback slices and recomputes guide lengths and bounds. Invalid guides and holes are ignored. Holes may cross section boundaries, but their bounds must stay within one section of padding along the scrolling axis; split longer authored cuts across sections. A nil loader uses procedural guides, while empty content produces no foreground rock for that section. Neighbor sections are loaded for seamless padding. Scene loader calls run on a background worker and must be safe for concurrent calls across reset; synchronous generation calls the loader directly.
+Points use section-local coordinates in the owned unit square. Generation copies callback slices and recomputes guide lengths and bounds. Invalid guides and holes are ignored. Holes may cross section boundaries, but their bounds must stay within one section of padding along the scrolling axis; split longer authored cuts across sections. A nil loader uses procedural guides, while empty content adds no foreground or matching rear formations; the background border strips and their vines remain. Neighbor sections are loaded for seamless padding. Scene loader calls run on a background worker and must be safe for concurrent calls across reset; synchronous generation calls the loader directly.
 
 ## Queries and Collision
 

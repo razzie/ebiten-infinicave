@@ -13,7 +13,7 @@ import (
 // Padding spans local Y = -1 to 2 in Vertical scenes or local X = -1 to 2 in
 // Horizontal scenes. Min/Max describe the owned world square; WindowOrigin
 // starts the padded window. Vegetation may extend into padding and should be
-// drawn once per owning section. Background cells extend from -0.5 to 1.5
+// drawn once per owning section. Background cells and vines stay within -0.5 to 1.5
 // across the bounded axis. Top and WindowTop are legacy Vertical metadata.
 //
 // Each generated Section owns its slices; callers may modify them. Rock grids

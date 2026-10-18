@@ -227,6 +227,16 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 	}
 	var trim []Attachment
 	var splits map[int]rockFaceSplit
+	var backgroundBoundaryCells map[int]bool
+	if !raised && (view == ViewShaded || view == ViewClay) {
+		if neighbors == nil {
+			neighbors = terrain.RockNeighbors(grid)
+		}
+		backgroundBoundaryCells = make(map[int]bool)
+		for _, edge := range terrain.RockBoundaryEdges(grid, neighbors, false) {
+			backgroundBoundaryCells[edge.Cell] = true
+		}
+	}
 	if raised && (view == ViewShaded || view == ViewClay) {
 		grid, boundary, splits = foldRockEdges(grid, boundary, density.Shape)
 		grid, boundary, trim = visualBoundaryGrid(grid, boundary, density, owned, view)
@@ -253,6 +263,8 @@ func prepareGridBand(grid terrain.RockGrid, view View, topology *terrain.RockTop
 		}
 		if split, ok := splits[cellIndex]; ok {
 			vertices, indices = appendSplitRockCellMesh(vertices, indices, cell, clr, split)
+		} else if backgroundBoundaryCells[cellIndex] {
+			vertices, indices = appendBackgroundCellMesh(vertices, indices, cell, clr)
 		} else {
 			vertices, indices = appendCellMesh(vertices, indices, poly, s, clr, cell.Normal)
 		}

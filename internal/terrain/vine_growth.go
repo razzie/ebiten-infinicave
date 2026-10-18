@@ -247,7 +247,7 @@ func traceGuideVine(stem Vine, joint int, g *Guide, start, end, phase float64, s
 
 // Add short curved growth between graph junctions as well as at them. Each
 // offshoot keeps an exact parent sample and stops before leaving its support.
-func addFreeVineBranches(vines []Vine, support *pathSupport, rng *rand.Rand) []Vine {
+func addFreeVineBranches(vines []Vine, support *pathSupport, rng *rand.Rand, footprint *rockFootprint) []Vine {
 	occupied := make(vineTwigOccupancy)
 	for _, v := range vines {
 		occupied.add(v)
@@ -289,12 +289,15 @@ func addFreeVineBranches(vines []Vine, support *pathSupport, rng *rand.Rand) []V
 					maxRadius *= foregroundVineWidthScale
 				}
 				radius := min(maxRadius, base.Radius*.55)
-				v := freePath(base.P, heading, reach, radius, rng.Float64()*2*math.Pi, parent, joint)
+				v := freePathInPadding(base.P, heading, reach, radius, rng.Float64()*2*math.Pi, parent, joint, footprint)
 				v.Depth, v.Foreground = stem.Depth+1, stem.Foreground
 				v.topCellLimit, v.allowedTopCells = stem.topCellLimit, stem.allowedTopCells
 				for j := 1; j < len(v.Points); j++ {
 					a, b := v.Points[j-1], v.Points[j]
 					clear := routes.fits(a.P, b.P, max(a.Radius, b.Radius))
+					if footprint != nil {
+						clear = footprint.backgroundFits(a.P, b.P, max(a.Radius, b.Radius))
+					}
 					// Allow the connector to leave the parent, then reserve space
 					// from every existing stem, including earlier offshoots.
 					for k := 1; clear && k <= 4; k++ {

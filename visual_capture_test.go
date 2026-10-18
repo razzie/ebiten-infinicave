@@ -64,6 +64,15 @@ func TestVisualCapture(t *testing.T) {
 		g.viewport = Viewport{X: 0, Width: 2.4}
 		g.w, g.h = g.h, g.w
 	}
+	if os.Getenv("INFINICAVE_CAPTURE_PADDING") == "1" {
+		// A wide cross-axis target exposes the complete fading side margins.
+		g.viewport = Viewport{Y: -1.4, Height: 1}
+		g.w, g.h = width*2, width
+		if config.Orientation == Horizontal {
+			g.viewport = Viewport{X: .4, Width: 1}
+			g.w, g.h = width, width*2
+		}
+	}
 	ebiten.SetWindowSize(640, 480)
 	ebiten.SetRunnableOnUnfocused(true)
 	scene.SetRenderWidth(width)

@@ -59,7 +59,26 @@ func PrepareVines(vines []terrain.Vine) []TriangleMesh {
 // and resizing all retain the same shading without sampling cached images.
 func prepareRockVines(vines []terrain.Vine, grid terrain.RockGrid) []TriangleMesh {
 	meshes := PrepareVines(vines)
-	if len(vines) == 0 || len(grid) == 0 {
+	if len(vines) == 0 {
+		return meshes
+	}
+	background := !vines[0].Foreground
+	if background {
+		for meshIndex, mesh := range meshes {
+			for i := range mesh.Vertices {
+				v := &mesh.Vertices[i]
+				fade := float32(horizontalFade(float64(v.DstX) / RasterPixelsPerUnit))
+				v.ColorR *= fade
+				v.ColorG *= fade
+				v.ColorB *= fade
+				v.ColorA *= fade
+				if fade < 1 {
+					meshes[meshIndex].premultiplied = true
+				}
+			}
+		}
+	}
+	if len(grid) == 0 {
 		return meshes
 	}
 	bounds := make([]geom.Bounds, len(grid))
@@ -71,16 +90,18 @@ func prepareRockVines(vines []terrain.Vine, grid terrain.RockGrid) []TriangleMes
 		bounds[i].Min, bounds[i].Max = geom.PolygonBounds(cell.Polygon)
 		clr := rockViewColor(cell, ViewShaded)
 		brightness := .30*float64(clr.R) + .59*float64(clr.G) + .11*float64(clr.B)
-		white, floor, contrast := 45.0, .85, .40
-		if cell.Raised {
-			white = 180
-			floor, contrast = .38, .97
+		if background {
+			// Rear charcoal reaches roughly 16 after palette grading. Preserve
+			// its contrast; explicitly black input cells also keep black vines.
+			shades[i] = float32(1.35 * geom.Clamp(brightness/16, 0, 1))
+		} else {
+			shades[i] = float32(.38 + .97*geom.Smoothstep(0, 180, brightness))
 		}
-		// Keep recessed vines near their original muted palette brightness,
-		// with gentler cell contrast than the raised foreground vines.
-		shades[i] = float32(floor + contrast*geom.Smoothstep(0, white, brightness))
 	}
 	index := geom.NewBoundsIndex(bounds)
+	if background {
+		return shadeBackgroundVines(meshes, grid, shades, index)
+	}
 	for _, mesh := range meshes {
 		for i := range mesh.Vertices {
 			v := &mesh.Vertices[i]
@@ -98,6 +119,92 @@ func prepareRockVines(vines []terrain.Vine, grid terrain.RockGrid) []TriangleMes
 		}
 	}
 	return meshes
+}
+
+// Split rear ribbons and leaves at actual Voronoi boundaries. Interpolating
+// lighting between growth samples would bridge narrow black cells and turn
+// cell-sized changes into long gradients. Reuse clipping scratch across the
+// whole batch; only overlapping cells are visited through the bounds index.
+func shadeBackgroundVines(meshes []TriangleMesh, grid terrain.RockGrid, shades []float32, index *geom.BoundsIndex) []TriangleMesh {
+	var scratch [2][32]ebiten.Vertex
+	for m, mesh := range meshes {
+		out := mesh
+		out.Vertices = make([]ebiten.Vertex, 0, len(mesh.Vertices))
+		out.Indices = make([]uint32, 0, len(mesh.Indices))
+		for i := 0; i < len(mesh.Indices); i += 3 {
+			tri := [3]ebiten.Vertex{mesh.Vertices[mesh.Indices[i]], mesh.Vertices[mesh.Indices[i+1]], mesh.Vertices[mesh.Indices[i+2]]}
+			lo := geom.V{X: math.Inf(1), Y: math.Inf(1)}
+			hi := geom.V{X: math.Inf(-1), Y: math.Inf(-1)}
+			for _, v := range tri {
+				p := geom.V{X: float64(v.DstX) / RasterPixelsPerUnit, Y: float64(v.DstY)/RasterPixelsPerUnit + terrain.GenerationMinY}
+				lo = geom.V{X: min(lo.X, p.X), Y: min(lo.Y, p.Y)}
+				hi = geom.V{X: max(hi.X, p.X), Y: max(hi.Y, p.Y)}
+			}
+			index.Query(geom.Bounds{Min: lo, Max: hi}, func(cell int) bool {
+				c := grid[cell]
+				if c.Color.A == 0 || len(c.Polygon) < 3 {
+					return true
+				}
+				poly := append(scratch[0][:0], tri[:]...)
+				buffer := scratch[1][:0]
+				for j, a := range c.Polygon {
+					b := c.Polygon[(j+1)%len(c.Polygon)]
+					poly, buffer = clipVineCell(poly, buffer, a, b), poly[:0]
+					if len(poly) < 3 {
+						return true
+					}
+				}
+				first := uint32(len(out.Vertices))
+				for _, v := range poly {
+					v.ColorR = min(v.ColorR*shades[cell], v.ColorA)
+					v.ColorG = min(v.ColorG*shades[cell], v.ColorA)
+					v.ColorB = min(v.ColorB*shades[cell], v.ColorA)
+					out.Vertices = append(out.Vertices, v)
+				}
+				for j := 1; j+1 < len(poly); j++ {
+					out.Indices = append(out.Indices, first, first+uint32(j), first+uint32(j+1))
+				}
+				return true
+			})
+		}
+		meshes[m] = out
+	}
+	return meshes
+}
+
+// Background Voronoi cells are convex and counterclockwise. Interpolate the
+// original material at new vertices before applying one constant cell shade.
+func clipVineCell(poly, out []ebiten.Vertex, a, b geom.V) []ebiten.Vertex {
+	if len(poly) == 0 {
+		return out[:0]
+	}
+	edge := b.Sub(a)
+	distance := func(v ebiten.Vertex) float64 {
+		p := geom.V{X: float64(v.DstX) / RasterPixelsPerUnit, Y: float64(v.DstY)/RasterPixelsPerUnit + terrain.GenerationMinY}
+		return geom.Cross(edge, p.Sub(a))
+	}
+	previous := poly[len(poly)-1]
+	da := distance(previous)
+	out = out[:0]
+	for _, v := range poly {
+		db := distance(v)
+		if (da >= 0) != (db >= 0) {
+			t := float32(da / (da - db))
+			p := previous
+			p.DstX += (v.DstX - p.DstX) * t
+			p.DstY += (v.DstY - p.DstY) * t
+			p.ColorR += (v.ColorR - p.ColorR) * t
+			p.ColorG += (v.ColorG - p.ColorG) * t
+			p.ColorB += (v.ColorB - p.ColorB) * t
+			p.ColorA += (v.ColorA - p.ColorA) * t
+			out = append(out, p)
+		}
+		if db >= 0 {
+			out = append(out, v)
+		}
+		previous, da = v, db
+	}
+	return out
 }
 
 // Paired vertices share positions at each tonal boundary, keeping the bands

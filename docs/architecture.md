@@ -30,7 +30,7 @@ Within `internal/terrain/`, start with these owners:
 | Branch strategies and guide geometry | `branching.go`, `guide.go`, `guide_layout.go`, `guide_cells.go` |
 | Rock construction and appearance | `rock_grid.go`, `rock_shape.go`, `rock_surface.go` |
 | Topology, support identities, collision, and cuts | `topology.go`, `geometry.go`, `collision.go`, `carve.go`, `shape_difference.go` |
-| Vine generation | `vines.go`, `path_vines.go`, `vine_fields.go`, `vine_graph.go`, `vine_routes.go`, `vine_growth.go`, `vine_style.go` |
+| Vine generation | `vines.go`, `path_vines.go`, `background_vines.go`, `vine_fields.go`, `vine_graph.go`, `vine_routes.go`, `vine_growth.go`, `vine_style.go` |
 | Supported decorations | `decorations.go`, `mushrooms.go`, `spider_webs.go`, `web_network.go` |
 | Numeric kernels | `noise.go`, `raster_scalar.go`, `kernels_default.go`, `kernels_simd.go` |
 
@@ -180,9 +180,33 @@ bounds select nearby surviving recipes in their original drawing order.
 Finished mushroom groups and web networks are removed only when a support is
 cut, without cap, stem or silk intersection checks or regeneration.
 Foreground vines use the generated branch graph to guide connected cell-edge
-routes; forks attach at facet junctions. Background routes branch twice and use
-sparse seam graphs near their seeded paths. Background paths precede
-their supporting material. Scene builders allocate no dense vine fields.
+routes; forks attach at facet junctions. Background rock dilates the uncut
+foreground footprint, retaining its exact guides and branches beneath coarser
+Voronoi faces. Background border strips fill the extended cross-axis margins.
+Complete cells meeting that footprint retain their original Voronoi edges,
+making the exposed silhouette jagged without contour clipping or shared-edge
+subdivision. Only exposed cells receive extra folded shading planes. A charcoal
+material floor keeps the shared footprint visible beneath noise and facet shading;
+only the outer cross-axis fade takes it into blackness. An indexed
+signed distance to the foreground steers background roots, stems, and twigs into
+exposed padding. `background_vines.go` spreads six staggered roots across each
+side and adds long inward forks. All middle growth branches from these side
+families, following exposed foreground edges without independent middle roots.
+Exact segment clearance keeps whole ribbons and leaves outside foreground rock,
+including room for rendered chips and side walls. Background vine crops include
+the side margins and retain the same cross-axis fade as rock. Whole vine families
+retain their owning section and attached forks across seams. Routing indexes
+both the uncut foreground and the generated background cells. Whole ribbons and
+leaves stay on rear rock, bending around its holes. Away from exposed rear edges,
+clear margins bypass steering and foreground queries and use fewer curve samples.
+Middle queries cap their range to the exposed-edge band and use edge
+orientation for the solid side, falling back to exact containment at corners.
+Background ribbon and leaf triangles split at Voronoi boundaries, retaining
+one lighting multiplier per cell across the full grid, including the margins.
+Their shading follows the actual dark rear palette with no brightness floor;
+texture grain fades with luminance so black cells keep their vines black.
+Background cell selection also skips distance queries in the solid margins.
+Scene builders allocate no dense vine fields.
 
 `Scene.DrawWithPasses` inserts optional drawing after fog (`BehindRocks`) and
 after foreground rocks, mushrooms, webs, and foreground vines (`AboveRocks`).

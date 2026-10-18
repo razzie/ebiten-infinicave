@@ -9,6 +9,43 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/geom"
 )
 
+func TestBackgroundKeepsWholeVoronoiCellsAndExposedEdges(t *testing.T) {
+	noise := NewPerlin(rand.New(rand.NewSource(42)))
+	seeds := worldSeedsInRange(42, 0, noise, BackgroundMinX, BackgroundMaxX)
+	footprint := newRockFootprint(RockGrid{terrainRect(.3, .3, .4, .1)})
+	grid := newBackgroundRockGrid(seeds, footprint)
+	cells := voronoiCellsInRange(seeds, BackgroundMinX, BackgroundMaxX)
+	bySite := make(map[geom.V][]geom.V, len(seeds))
+	for i, p := range seeds {
+		bySite[p] = cells[i]
+	}
+	if len(grid) == 0 || len(grid) == len(seeds) {
+		t.Fatal("background must retain formations and borders with open space between them")
+	}
+	for _, cell := range grid {
+		if !reflect.DeepEqual(cell.Polygon, bySite[cell.Center]) {
+			t.Fatal("background changed a Voronoi cell's edges or inserted contour vertices")
+		}
+	}
+	// Whole boundary cells protrude beyond the smooth selection field.
+	// Clipping them to that field would recreate the smooth silhouette.
+	jagged := false
+	for _, edge := range ExposedRockEdges(grid) {
+		if edge.A.X < .2 || edge.A.X > .8 {
+			continue
+		}
+		a := footprint.backgroundHeight(edge.A) - rockContourHeight
+		b := footprint.backgroundHeight(edge.B) - rockContourHeight
+		if a < -.005 && b < -.005 {
+			jagged = true
+			break
+		}
+	}
+	if !jagged {
+		t.Fatal("background silhouette does not follow exposed Voronoi edges")
+	}
+}
+
 func TestForegroundGridStaysInsideHorizontalScreenInset(t *testing.T) {
 	grid := RockGrid{
 		{Center: geom.V{X: 0.01, Y: 0.05}, Polygon: []geom.V{{X: 0, Y: 0}, {X: 0.04, Y: 0}, {X: 0.04, Y: 0.1}, {X: 0, Y: 0.1}}, Raised: true},
