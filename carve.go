@@ -59,6 +59,8 @@ type CarveResult struct {
 // and their procedural branches.
 // Collision, exact queries, and the result are ready when the call returns.
 // Texture edits run on the next valid Update or Draw, before rendering.
+// Cuts also hit flying bats, which fall briefly and then burn away, including
+// over unloaded terrain and when the same terrain cut is repeated.
 // Call on the game goroutine after Update. Closed scenes return an error.
 func (g *Scene) CarveCircle(center V, radius float64) (CarveResult, error) {
 	return g.Carve(Hole{Shape: HoleCircle, Center: center, Radius: radius})
@@ -103,6 +105,9 @@ func (g *Scene) carveHole(hole Hole, reportFormations bool) (CarveResult, error)
 func (g *Scene) carve(cut terrain.RockCut, hole Hole, reportFormations bool) (CarveResult, error) {
 	if g.closed || g.world == nil {
 		return CarveResult{}, fmt.Errorf("infinicave: cannot carve a closed scene")
+	}
+	if g.bats != nil {
+		g.bats.Carve(cut)
 	}
 	if cut.Max.X <= 0 || cut.Min.X >= Width || cut.Min.Y >= 0 {
 		return CarveResult{Complete: true}, nil

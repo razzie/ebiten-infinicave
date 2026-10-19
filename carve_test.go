@@ -12,6 +12,56 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
+func TestCarveHitsBatsWithoutTerrainChanges(t *testing.T) {
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		for _, entry := range []string{"circle", "segment", "hole", "terrain"} {
+			t.Run(orientation.String()+"/"+entry, func(t *testing.T) {
+				scene, err := NewScene(Config{BatsPerMinute: 7.5, Orientation: orientation})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(scene.Close)
+				flock := scene.bats
+				flock.Step(render.Viewport{Y: -2, Height: 1}, 6)
+				flying := flock.Bats[0]
+				point := terrain.WorldPoint(orientation, V{X: .5, Y: -1.5})
+				// Cover the full flight route over unloaded terrain.
+				hole := Hole{Shape: HoleCircle, Center: point, Radius: 2}
+				carve := func() error {
+					var err error
+					switch entry {
+					case "circle":
+						_, err = scene.CarveCircle(hole.Center, hole.Radius)
+					case "segment":
+						_, err = scene.CarveSegment(hole.Center.Sub(V{X: 2}), hole.Center.Add(V{X: 2}), 4)
+					case "terrain":
+						_, err = scene.CarveTerrain(hole)
+					default:
+						_, err = scene.Carve(hole)
+					}
+					return err
+				}
+				for attempt := 0; attempt < 2; attempt++ {
+					flock.Bats = []render.Bat{flying}
+					if err := carve(); err != nil {
+						t.Fatal(err)
+					}
+					if reflect.DeepEqual(flock.Bats[0], flying) {
+						t.Fatal("carve missed a bat over unloaded terrain or a repeated cut")
+					}
+				}
+				if len(scene.world.sections) != 0 || len(scene.world.cuts) != 1 {
+					t.Fatal("bat hit unexpectedly loaded terrain or duplicated the persistent cut")
+				}
+				scene.Reset(42)
+				if len(scene.bats.Bats) != 0 {
+					t.Fatal("reset retained a falling bat")
+				}
+			})
+		}
+	}
+}
+
 func TestCarveTerrainMatchesCollisionAcrossSeamsAndReload(t *testing.T) {
 	data := []terrain.SectionData{
 		{ID: 0, Foreground: RockGrid{terrainRect(.2, -.2, .6, .4)}},

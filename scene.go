@@ -127,6 +127,10 @@ func NewScene(config Config) (*Scene, error) {
 	g.world.retainSections, g.world.lookaheadSections = g.retainSections, g.lookaheadSections
 	if config.BatsPerMinute > 0 && g.view == ViewShaded {
 		g.bats = render.NewBatFlock(config.Seed, config.BatsPerMinute, g.orientation)
+		if err := g.bats.PrepareBurn(); err != nil {
+			g.Close()
+			return nil, fmt.Errorf("infinicave: compile bat burn shader: %w", err)
+		}
 	}
 	return g, nil
 }
@@ -300,7 +304,7 @@ func (g *Scene) Reset(seed int64) {
 	g.world.retainSections, g.world.lookaheadSections = g.retainSections, g.lookaheadSections
 	g.world.pixels = pixels
 	if g.bats != nil {
-		g.bats = render.NewBatFlock(seed, g.bats.PerMinute, g.orientation)
+		g.bats.Reset(seed)
 	}
 }
 
@@ -313,7 +317,10 @@ func (g *Scene) Close() {
 	}
 	g.geometryRevisionBase = g.GeometryRevision() + 1
 	g.closed = true
-	g.bats = nil
+	if g.bats != nil {
+		g.bats.Close()
+		g.bats = nil
+	}
 	if g.appearanceFade != nil {
 		g.appearanceFade.Close()
 		g.appearanceFade = nil

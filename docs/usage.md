@@ -282,6 +282,8 @@ Foreground vines, their leaves, moss and rock surface details are carved by eras
 
 Set `config.DecorationBurn = true` (viewer: `-decoration-burn`) to let removed mushrooms, webs, grass, hanging growth, moss, and foreground vine pixels dissolve with a glowing ember edge over about 0.7 seconds. `DefaultConfig()` enables it; a zero `Config` and diagnostic views disable it. Collision and queries update immediately. Only already published decorations animate; authored holes and stored cuts applied during loading do not start an effect. Call `Update` to advance the animation; `Reset` and `Close` release its snapshots.
 
+Runtime cuts also hit the current silhouettes of flying bats, including their wings. A hit bat stops flapping, tumbles downward by 0.16 scene units over 0.65 seconds, then disappears using the burn shader over 0.7 seconds. This happens in both orientations, independently of `DecorationBurn`, even over unloaded terrain or when repeating a previous cut. Stored cuts do not affect future bats. `Update` advances the fall and burn; `Reset` clears hit bats.
+
 `CarveResult.Changes` maps affected formation IDs to the remaining formations: no IDs means destroyed, one means reshaped, and multiple means split. Reports can be provisional when a cut reaches unloaded terrain. `SectionIDs` identifies collision sections to refresh. Previously returned geometry remains an independent snapshot.
 
 When a formation is completely destroyed, its guides are released and their guide IDs expire once no other supported fragment or unloaded continuation remains. Compact source identities persist with the edits, so reloaded sections skip those guides and their procedural branches. `Reset` clears these exclusions too.

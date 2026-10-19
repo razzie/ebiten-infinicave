@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/razzie/ebiten-infinicave/internal/geom"
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
@@ -121,6 +122,95 @@ func TestBatArrivalsWithinOneUpdate(t *testing.T) {
 	for _, b := range flock.Bats {
 		if b.Age < 0 || b.Age > 1 {
 			t.Fatalf("incorrect bat age after arrival: %g", b.Age)
+		}
+	}
+}
+
+func TestBatCarvingHitsSilhouette(t *testing.T) {
+	for _, orientation := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
+		for _, test := range []struct {
+			name  string
+			point geom.V // In the bat's unrotated silhouette, in multiples of Size.
+			hit   bool
+		}{
+			{"body", geom.V{}, true},
+			{"wing", geom.V{X: .75, Y: .08}, true},
+			{"air between ear and wing", geom.V{X: .75, Y: -.5}, false},
+			{"distant", geom.V{X: 3}, false},
+		} {
+			t.Run(orientation.String()+"/"+test.name, func(t *testing.T) {
+				for _, shape := range []terrain.HoleShape{terrain.HoleCircle, terrain.HoleSegment} {
+					point := geom.V{X: .5, Y: -.5}
+					flock := NewBatFlock(42, 7.5, orientation)
+					flock.Bats = []Bat{{Start: point, End: point, control1: point.Y, control2: point.Y, duration: 10, Size: .02}}
+					local := test.point.Mul(.02)
+					if orientation == terrain.Horizontal {
+						local = terrain.InternalPoint(orientation, local)
+					}
+					center := point.Add(local)
+					hole := terrain.Hole{Shape: shape, Center: center, Radius: .0001,
+						Start: center.Sub(geom.V{X: .0001}), End: center.Add(geom.V{X: .0001}), Width: .0002}
+					cut, err := terrain.CutFromHole(hole)
+					if err != nil {
+						t.Fatal(err)
+					}
+					flock.Carve(cut)
+					if flock.Bats[0].hit != test.hit {
+						t.Fatalf("shape %v: hit = %v, want %v", shape, flock.Bats[0].hit, test.hit)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestHitBatFallsDownThenExpiresWithoutChangingArrivals(t *testing.T) {
+	for _, orientation := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
+		viewport := Viewport{Y: -2, Height: 1}
+		flock, untouched := NewBatFlock(42, 7.5, orientation), NewBatFlock(42, 7.5, orientation)
+		flock.Step(viewport, 6)
+		untouched.Step(viewport, 6)
+		b := flock.Bats[0]
+		point := b.Position(b.Age / b.duration)
+		cut, err := terrain.CutFromHole(terrain.Hole{Shape: terrain.HoleCircle, Center: point, Radius: b.Size * 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		flock.Carve(cut)
+		if !flock.Bats[0].hit || flock.Bats[0].Position(0) != point {
+			t.Fatal("hit did not start the fall at the current position")
+		}
+		// Even a bat about to exit its flight route must finish its fall and burn.
+		flock.Bats[0].duration = b.Age + .001
+		flock.Step(viewport, batFallDuration/2)
+		untouched.Step(viewport, batFallDuration/2)
+		halfway := flock.Bats[0]
+		flock.Carve(cut)
+		if flock.Bats[0] != halfway {
+			t.Fatal("repeated hit restarted the fall")
+		}
+		worldDelta := terrain.WorldPoint(orientation, halfway.Position(0).Sub(point))
+		if math.Abs(worldDelta.X) > 1e-12 || math.Abs(worldDelta.Y-batFallDistance/4) > 1e-12 || halfway.Age != b.Age {
+			t.Fatalf("bat did not fall down with frozen wings: %+v", worldDelta)
+		}
+		// The camera moves and crosses a section boundary while the bat falls.
+		viewport.Y = -10
+		flock.Step(viewport, batFallDuration/2)
+		untouched.Step(viewport, batFallDuration/2)
+		landed := flock.Bats[0].Position(0)
+		worldDelta = terrain.WorldPoint(orientation, landed.Sub(point))
+		if math.Abs(worldDelta.X) > 1e-12 || math.Abs(worldDelta.Y-batFallDistance) > 1e-12 {
+			t.Fatalf("fall distance changed with orientation or camera: %+v", worldDelta)
+		}
+		flock.Step(viewport, burnDuration/2)
+		untouched.Step(viewport, burnDuration/2)
+		if len(flock.Bats) != 1 || flock.Bats[0].Position(0) != landed {
+			t.Fatal("bat did not remain for the burn after falling")
+		}
+		flock.Step(viewport, burnDuration/2+.001)
+		untouched.Step(viewport, burnDuration/2+.001)
+		if len(flock.Bats) != 0 || flock.Next != untouched.Next || flock.rng.Int63() != untouched.rng.Int63() {
+			t.Fatal("expired bat remained or hits changed the arrival sequence")
 		}
 	}
 }

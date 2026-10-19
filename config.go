@@ -87,6 +87,9 @@ type Config struct {
 	// BatsPerMinute is the average number of animated bat arrivals per minute.
 	// It must be finite and nonnegative; zero disables bats.
 	// Bats use world coordinates and are hidden outside ViewShaded.
+	// Runtime cuts hit their silhouettes; hit bats fall downward by 0.16 scene
+	// units over 0.65 seconds, then burn away over 0.7 seconds. This effect is
+	// independent of DecorationBurn. Update advances the animation.
 	BatsPerMinute float64
 	// DecorationBurn enables a brief glowing burn dissolve for decorations
 	// removed by runtime carving. DefaultConfig enables it; the zero Config

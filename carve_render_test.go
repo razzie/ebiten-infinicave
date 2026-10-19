@@ -329,6 +329,7 @@ func (g *carvePixelGame) Draw(*ebiten.Image) {
 	g.done = true
 	checkAppearanceFadePixels(g.t)
 	checkDecorationBurnPixels(g.t)
+	checkBatBurnPixels(g.t)
 	checkPartialVegetationCarvePixels(g.t)
 	checkIndependentGrassPixels(g.t)
 	checkGrassEdgePixels(g.t)

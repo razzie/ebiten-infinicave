@@ -11,7 +11,11 @@ import (
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
-const batMargin = .04
+const (
+	batMargin       = .04
+	batFallDuration = .65
+	batFallDistance = .16 // Several wingspans in scene units.
+)
 
 type Bat struct {
 	Start, End         geom.V  // world coordinates, independent of camera movement
@@ -19,11 +23,20 @@ type Bat struct {
 	duration, Age      float64
 	Size, phase, weave float64
 	shade              float32 // fixed brightness offset for this bat
+	hit                bool
+	fallAge            float64
+	hitPosition        geom.V
+	fallDirection      geom.V
+	hitAngle           float64
 }
 
 // position combines a broad curved route with smaller swoops. Horizontal travel
 // remains monotonic, but eases between faster and slower parts of the crossing.
 func (b Bat) Position(t float64) geom.V {
+	if b.hit {
+		fall := math.Min(1, b.fallAge/batFallDuration)
+		return b.hitPosition.Add(b.fallDirection.Mul(batFallDistance * fall * fall))
+	}
 	t = math.Max(0, math.Min(1, t))
 	u := 1 - t
 	travel := t + .055*math.Sin(2*math.Pi*t)
@@ -47,6 +60,8 @@ type BatFlock struct {
 	PerMinute   float64
 	Next        float64 // seconds until the next arrival
 	Bats        []Bat
+	burn        *BurnDissolve
+	burnSprite  *ebiten.Image
 }
 
 func NewBatFlock(seed int64, perMinute float64, orientation ...terrain.Orientation) *BatFlock {
@@ -54,6 +69,73 @@ func NewBatFlock(seed int64, perMinute float64, orientation ...terrain.Orientati
 	f := &BatFlock{Orientation: terrain.OptionalOrientation(orientation), rng: rand.New(rand.NewSource(seed)), PerMinute: perMinute}
 	f.Next = (60 / perMinute) * (.25 + f.rng.Float64()*.375)
 	return f
+}
+
+// PrepareBurn creates the GPU effect on the game goroutine. Flight and hit
+// simulation remain CPU-only, including when no terrain has loaded yet.
+func (f *BatFlock) PrepareBurn() error {
+	var err error
+	f.burn, err = NewBurnDissolve()
+	return err
+}
+
+func (f *BatFlock) Warm(dst *ebiten.Image) {
+	if f.burn != nil {
+		f.burn.Warm(dst)
+	}
+}
+
+func (f *BatFlock) Reset(seed int64) {
+	fresh := NewBatFlock(seed, f.PerMinute, f.Orientation)
+	f.rng, f.Next, f.Bats = fresh.rng, fresh.Next, nil
+}
+
+func (f *BatFlock) Close() {
+	if f.burn != nil {
+		f.burn.Close()
+		f.burn = nil
+	}
+	if f.burnSprite != nil {
+		f.burnSprite.Deallocate()
+		f.burnSprite = nil
+	}
+	f.Bats = nil
+}
+
+// Carve tests the current wing pose, including wing-only hits. Repeated cuts
+// cannot restart a falling bat, but a repeated terrain cut can hit a new bat.
+func (f *BatFlock) Carve(cut terrain.RockCut) {
+	for i := range f.Bats {
+		b := &f.Bats[i]
+		if b.hit {
+			continue
+		}
+		t := b.Age / b.duration
+		position := b.Position(t)
+		radius := 1.25 * b.Size // Includes the rotated wing tips.
+		if position.X+radius <= cut.Min.X || position.X-radius >= cut.Max.X ||
+			position.Y+radius <= cut.Min.Y || position.Y-radius >= cut.Max.Y {
+			continue
+		}
+		path := batSilhouette(b.flap())
+		transform := &vector.AddPathOptions{}
+		// Flatten curves at the reference raster scale, independent of resizing.
+		transform.GeoM.Scale(b.Size*RasterPixelsPerUnit, b.Size*RasterPixelsPerUnit)
+		transform.GeoM.Rotate(f.SilhouetteAngle(*b, t))
+		var outline vector.Path
+		outline.AddPath(&path, transform)
+		vertices, _ := outline.AppendVerticesAndIndicesForFilling(nil, nil)
+		poly := make([]geom.V, len(vertices))
+		for j, vertex := range vertices {
+			poly[j] = position.Add(geom.V{X: float64(vertex.DstX) / RasterPixelsPerUnit, Y: float64(vertex.DstY) / RasterPixelsPerUnit})
+		}
+		if !cut.Intersects(geom.CleanPolygon(poly), 0) {
+			continue
+		}
+		b.hitAngle = f.SilhouetteAngle(*b, t)
+		b.hitPosition, b.fallDirection = position, terrain.InternalPoint(f.Orientation, geom.V{Y: 1})
+		b.hit = true
+	}
 }
 
 func (f *BatFlock) Update(viewport Viewport) {
@@ -70,6 +152,13 @@ func (f *BatFlock) Step(viewport Viewport, seconds float64) {
 	}
 	alive := f.Bats[:0]
 	for _, b := range f.Bats {
+		if b.hit {
+			b.fallAge += seconds
+			if b.fallAge < batFallDuration+burnDuration {
+				alive = append(alive, b)
+			}
+			continue
+		}
 		b.Age += seconds
 		if b.Age < b.duration {
 			alive = append(alive, b)
@@ -123,41 +212,66 @@ func (f *BatFlock) DrawWithAntialiasing(dst *ebiten.Image, viewport Viewport, aa
 	pixels := view.Pixels
 	scale := float64(pixels) / terrain.Width
 	cameraY := RenderAlignedY(viewport.Y, pixels)
-	options := &vector.DrawPathOptions{AntiAlias: aa}
 	for _, b := range f.Bats {
 		t := b.Age / b.duration
 		position := b.Position(t)
 		x, y := view.OffsetX+position.X*scale, (position.Y-cameraY)*scale
 		size := b.Size * scale
-		if x+size < 0 || x-size > float64(dst.Bounds().Dx()) || y+size < 0 || y-size > float64(dst.Bounds().Dy()) {
+		radius := 1.25 * size
+		if x+radius < 0 || x-radius > float64(dst.Bounds().Dx()) || y+radius < 0 || y-radius > float64(dst.Bounds().Dy()) {
 			continue
 		}
 		alpha := uint8(math.Round(255 * horizontalFade(position.X)))
-		options.ColorScale.Reset()
-		options.ColorScale.ScaleWithColor(color.NRGBA{R: 45, G: 35, B: 40, A: alpha})
-		shade := 1 + b.shade
-		options.ColorScale.Scale(shade, shade, shade, 1)
-		flap := float32(math.Sin(b.Age*2*math.Pi*6 + b.phase))
-		path := batSilhouette(flap)
-		transform := &vector.AddPathOptions{}
-		transform.GeoM.Scale(size, size)
-		transform.GeoM.Rotate(f.SilhouetteAngle(b, t))
-		transform.GeoM.Translate(x, y)
-		var screenPath vector.Path
-		screenPath.AddPath(&path, transform)
-		vector.FillPath(dst, &screenPath, nil, options)
-		// Keep the eyes attached to the head as the bat banks and turns.
-		eyes := color.NRGBA{R: 255, G: 255, B: 255, A: alpha}
-		for _, eyeX := range []float64{-.065, .065} {
-			ex, ey := transform.GeoM.Apply(eyeX, -.15)
-			vector.FillCircle(dst, float32(ex), float32(ey), float32(size*.045), eyes, aa)
+		angle := f.SilhouetteAngle(b, t)
+		if b.hit && b.fallAge > batFallDuration && f.burn != nil {
+			// Reuse one small target for all bats, rasterized at the current
+			// output resolution so resizing never stretches a stale snapshot.
+			edge := int(math.Ceil(3*size)) + 2
+			EnsureEffectImage(&f.burnSprite, edge, edge)
+			f.burnSprite.Clear()
+			center := float64(edge) / 2
+			drawBat(f.burnSprite, b, center, center, size, angle, alpha, aa)
+			f.burn.drawPatch(dst, burnPatch{
+				image: f.burnSprite, min: position.Sub(geom.V{X: center / scale, Y: center / scale}),
+				pixels: pixels, age: b.fallAge - batFallDuration,
+			}, cameraY, view)
+		} else {
+			drawBat(dst, b, x, y, size, angle, alpha, aa)
 		}
+	}
+}
+
+func (b Bat) flap() float32 {
+	return float32(math.Sin(b.Age*2*math.Pi*6 + b.phase))
+}
+
+func drawBat(dst *ebiten.Image, b Bat, x, y, size, angle float64, alpha uint8, aa bool) {
+	options := &vector.DrawPathOptions{AntiAlias: aa}
+	options.ColorScale.ScaleWithColor(color.NRGBA{R: 45, G: 35, B: 40, A: alpha})
+	shade := 1 + b.shade
+	options.ColorScale.Scale(shade, shade, shade, 1)
+	path := batSilhouette(b.flap())
+	transform := &vector.AddPathOptions{}
+	transform.GeoM.Scale(size, size)
+	transform.GeoM.Rotate(angle)
+	transform.GeoM.Translate(x, y)
+	var screenPath vector.Path
+	screenPath.AddPath(&path, transform)
+	vector.FillPath(dst, &screenPath, nil, options)
+	// Keep the eyes attached to the head as the bat banks and turns.
+	eyes := color.NRGBA{R: 255, G: 255, B: 255, A: alpha}
+	for _, eyeX := range []float64{-.065, .065} {
+		ex, ey := transform.GeoM.Apply(eyeX, -.15)
+		vector.FillCircle(dst, float32(ex), float32(ey), float32(size*.045), eyes, aa)
 	}
 }
 
 // Keep the silhouette upright in world coordinates while its route crosses
 // the bounded axis. The landscape compositor supplies the opposite turn.
 func (f *BatFlock) SilhouetteAngle(b Bat, t float64) float64 {
+	if b.hit {
+		return b.hitAngle + 2*math.Min(b.fallAge, batFallDuration)
+	}
 	angle := b.bank(t)
 	if f.Orientation == terrain.Horizontal {
 		angle -= math.Pi / 2

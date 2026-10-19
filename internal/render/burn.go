@@ -73,24 +73,28 @@ func (r *BurnDissolve) Draw(dst *ebiten.Image, cameraY float64, view RenderTrans
 		if patch.grass != grass {
 			continue
 		}
-		size := patch.image.Bounds().Size()
-		y := (patch.min.Y - cameraY) * float64(view.Pixels)
-		scale := float64(view.Pixels) / float64(patch.pixels)
-		if y+float64(size.Y)*scale <= 0 || y >= float64(dst.Bounds().Max.Y) {
-			continue
-		}
-		op := &ebiten.DrawRectShaderOptions{
-			Images: [4]*ebiten.Image{patch.image},
-			Uniforms: map[string]any{
-				"Progress": float32(patch.age / burnDuration),
-				"Origin":   []float32{float32(patch.min.X), float32(patch.min.Y)},
-				"Pixels":   float32(patch.pixels),
-			},
-		}
-		op.GeoM.Scale(scale, scale)
-		op.GeoM.Translate(view.OffsetX+patch.min.X*float64(view.Pixels), y)
-		dst.DrawRectShader(size.X, size.Y, r.shader, op)
+		r.drawPatch(dst, patch, cameraY, view)
 	}
+}
+
+func (r *BurnDissolve) drawPatch(dst *ebiten.Image, patch burnPatch, cameraY float64, view RenderTransform) {
+	size := patch.image.Bounds().Size()
+	y := (patch.min.Y - cameraY) * float64(view.Pixels)
+	scale := float64(view.Pixels) / float64(patch.pixels)
+	if y+float64(size.Y)*scale <= 0 || y >= float64(dst.Bounds().Max.Y) {
+		return
+	}
+	op := &ebiten.DrawRectShaderOptions{
+		Images: [4]*ebiten.Image{patch.image},
+		Uniforms: map[string]any{
+			"Progress": float32(patch.age / burnDuration),
+			"Origin":   []float32{float32(patch.min.X), float32(patch.min.Y)},
+			"Pixels":   float32(patch.pixels),
+		},
+	}
+	op.GeoM.Scale(scale, scale)
+	op.GeoM.Translate(view.OffsetX+patch.min.X*float64(view.Pixels), y)
+	dst.DrawRectShader(size.X, size.Y, r.shader, op)
 }
 
 func (r *BurnDissolve) Clear() {

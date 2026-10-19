@@ -147,3 +147,70 @@ func checkDecorationBurnPixels(t *testing.T) {
 		}
 	}
 }
+
+func checkBatBurnPixels(t *testing.T) {
+	t.Helper()
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		for _, aa := range []AntialiasingMode{AntialiasingFull, AntialiasingOff, AntialiasingFXAA} {
+			// Bat burn also works when decoration burn is disabled.
+			scene, err := NewScene(Config{Seed: 42, BatsPerMinute: 7.5, DisableBackground: true, Orientation: orientation, Antialiasing: aa})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer scene.Close()
+			viewport := render.Viewport{Y: -2, Height: 1}
+			flock := scene.bats
+			flock.Step(viewport, 6)
+			// No sections have loaded; only the bats contribute pixels.
+			if _, err := scene.CarveCircle(terrain.WorldPoint(orientation, V{X: .5, Y: -1.5}), 1); err != nil {
+				t.Fatal(err)
+			}
+			publicViewport := Viewport{Y: -2, Height: 1}
+			if orientation == Horizontal {
+				publicViewport = Viewport{X: 1, Width: 1}
+			}
+			draw := func(pixels int) []byte {
+				img := ebiten.NewImage(pixels, pixels)
+				defer img.Deallocate()
+				scene.Draw(img, publicViewport)
+				data := make([]byte, pixels*pixels*4)
+				img.ReadPixels(data)
+				return data
+			}
+			coverage := func(data []byte) int {
+				count := 0
+				for i := 3; i < len(data); i += 4 {
+					count += int(data[i])
+				}
+				return count
+			}
+			flock.Step(viewport, .65) // Fall finishes before burning begins.
+			full := draw(768)
+			if coverage(full) == 0 {
+				t.Fatalf("orientation %v / AA %v: falling bat vanished before the burn", orientation, aa)
+			}
+			flock.Step(viewport, .35)
+			middle := draw(768)
+			if n := coverage(middle); n == 0 || n >= coverage(full) || !bytes.Equal(middle, draw(768)) {
+				t.Fatalf("orientation %v / AA %v: bat burn did not dissolve or draw advanced it", orientation, aa)
+			}
+			embers := 0
+			for i := 0; i < len(middle); i += 4 {
+				if middle[i] > 100 && middle[i] > middle[i+1] && middle[i+1] > middle[i+2] {
+					embers++
+				}
+			}
+			if embers == 0 {
+				t.Fatal("bat burn has no glowing shader edge")
+			}
+			scene.SetRenderWidth(1024)
+			if coverage(draw(1024)) <= coverage(middle) || !bytes.Equal(middle, draw(768)) {
+				t.Fatal("resizing changed or lost the bat burn")
+			}
+			flock.Step(viewport, .36)
+			if coverage(draw(768)) != 0 {
+				t.Fatal("expired bat burn retained visible pixels")
+			}
+		}
+	}
+}
