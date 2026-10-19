@@ -433,9 +433,10 @@ func (w *world) ensure(y float64, height float64, velocity float64) bool {
 			continue
 		}
 		if section := w.sections[id]; w.inflight != nil && section != nil && section.mesh != nil && incompleteRecipe(*section.mesh) {
-			if _, current := w.requests[id]; !current {
-				// A canceled producer can leave useful published siblings. Fill
-				// its missing products without removing those visible fallbacks.
+			if _, active := w.inflight[id]; !active && !w.hasCompleteRecipe(id) {
+				// Cancellation or offscreen upload abandonment can leave useful
+				// published siblings even after the producer completed. Retry
+				// missing inputs while keeping those visible fallbacks.
 				w.request(id)
 			}
 		}

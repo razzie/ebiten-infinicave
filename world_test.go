@@ -192,6 +192,105 @@ func TestStreamingRequestsAndCacheStayBounded(t *testing.T) {
 	}
 }
 
+func TestRetainedSectionRetriesDiscardedCompletedProducts(t *testing.T) {
+	for _, queued := range []string{"pending", "parked", "resize-upload", "resize-parked"} {
+		for _, partial := range []struct {
+			name     string
+			layers   render.MeshLayers
+			baseOnly bool
+		}{
+			{"base", render.ForegroundLayer, true},
+			{"foreground", render.ForegroundLayer, false},
+			{"missing-growth", render.AllLayers, true},
+		} {
+			t.Run(queued+"/"+partial.name, func(t *testing.T) {
+				w := requestTestWorld(t)
+				w.retainSections = 2
+				w.request(0)
+				job := <-w.jobs
+				mesh := render.SectionMesh{ID: 0, Layers: partial.layers, ForegroundBaseOnly: partial.baseOnly}
+				section := &worldSection{mesh: &mesh, vegetationPending: true}
+				w.sections[0] = section
+				complete := render.SectionMesh{ID: 0, Layers: render.AllLayers}
+				w.results <- sectionResult{SectionMesh: complete, request: job.request}
+				w.collect()
+				if queued != "pending" {
+					w.startUpload(w.pending[0])
+					if queued != "resize-upload" {
+						w.parked[0], w.upload = w.upload, nil
+					}
+				}
+				if queued == "resize-upload" || queued == "resize-parked" {
+					g := &Scene{world: w}
+					g.SetRenderWidth(16)
+				}
+
+				// Scroll outside prefetch but keep the already published section.
+				w.prune(-3, 1, 0)
+				if w.sections[0] != section || w.requests[0] != job.request {
+					t.Fatal("fixture lost the retained section or completed request")
+				}
+				if _, pending := w.pending[0]; pending || w.parked[0] != nil {
+					t.Fatal("offscreen upload work was not discarded")
+				}
+				w.ensure(-.8, .8, 0)
+				flight, retried := w.inflight[0]
+				if !retried || flight.request == job.request {
+					t.Fatal("completed request prevented regeneration of discarded products")
+				}
+				if retry := <-w.jobs; retry.id != 0 || w.sections[0] != section {
+					t.Fatal("retry did not prioritize the partial section and retain published siblings")
+				}
+			})
+		}
+	}
+}
+
+func TestRetainedSectionDoesNotRegenerateQueuedProducts(t *testing.T) {
+	for _, queued := range []string{"pending", "upload", "parked", "split", "growth", "resize-upload", "resize-parked"} {
+		t.Run(queued, func(t *testing.T) {
+			w := requestTestWorld(t)
+			w.request(0)
+			job := <-w.jobs
+			base := render.SectionMesh{ID: 0, Layers: render.ForegroundLayer, ForegroundBaseOnly: true}
+			w.sections[0] = &worldSection{mesh: &base, vegetationPending: true}
+			complete := render.SectionMesh{ID: 0, Layers: render.AllLayers}
+			w.results <- sectionResult{SectionMesh: complete, request: job.request}
+			w.collect()
+			switch queued {
+			case "upload", "parked", "resize-upload", "resize-parked":
+				w.startUpload(w.pending[0])
+				if queued == "parked" || queued == "resize-parked" {
+					w.parked[0], w.upload = w.upload, nil
+				}
+			case "split", "growth":
+				// Complete inputs can span the cached base, private uploads,
+				// and a later foreground recipe waiting for the base to finish.
+				plants := complete
+				plants.Layers = render.BackgroundLayer | render.VegetationLayer
+				w.parked[0] = &sectionUpload{data: plants}
+				foreground := complete
+				foreground.Layers = render.ForegroundLayer
+				w.pending[0] = foreground
+				if queued == "growth" {
+					w.upload = &sectionUpload{data: base, grassData: &foreground}
+					delete(w.pending, 0)
+				}
+			}
+			if queued == "resize-upload" || queued == "resize-parked" {
+				g := &Scene{world: w}
+				g.SetRenderWidth(16)
+			}
+			for range 2 {
+				w.ensure(-.8, .8, 0)
+				if _, retried := w.inflight[0]; retried || w.requests[0] != job.request {
+					t.Fatal("regenerated a completed section whose missing products are still queued")
+				}
+			}
+		})
+	}
+}
+
 func TestPrefetchOnlyExpandsWhileMoving(t *testing.T) {
 	stationary, required := prefetch(-10.8, 1.8, 0, DefaultConfig().LookaheadSections)
 	if !reflect.DeepEqual(stationary, []int64{9, 10, 8, 11}) || required != 4 {

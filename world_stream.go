@@ -328,6 +328,34 @@ func incompleteRecipe(mesh render.SectionMesh) bool {
 	return mesh.LayerMask() != render.AllLayers || mesh.ForegroundBaseOnly
 }
 
+// A completed request does not guarantee that its unpublished inputs survived
+// pruning. Check all retained recipes before retrying a partial section, so
+// products still waiting for an upload (including a resize) are not regenerated.
+func (w *world) hasCompleteRecipe(id int64) bool {
+	var layers render.MeshLayers
+	foregroundComplete := false
+	add := func(mesh render.SectionMesh) {
+		mask := mesh.LayerMask()
+		layers |= mask
+		foregroundComplete = foregroundComplete || mask&render.ForegroundLayer != 0 && !mesh.ForegroundBaseOnly
+	}
+	if section := w.sections[id]; section != nil && section.mesh != nil {
+		add(*section.mesh)
+	}
+	if mesh, pending := w.pending[id]; pending {
+		add(mesh)
+	}
+	for _, u := range []*sectionUpload{w.upload, w.parked[id]} {
+		if u != nil && u.data.ID == id {
+			add(u.data)
+			if u.grassData != nil {
+				add(*u.grassData)
+			}
+		}
+	}
+	return layers == render.AllLayers && foregroundComplete
+}
+
 // Cancellation releases private work, while published siblings retain their
 // recipes, images, reveal clocks, and collision coverage until normal eviction.
 func (w *world) discardUnpublished(id int64) {

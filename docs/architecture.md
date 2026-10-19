@@ -133,6 +133,9 @@ collision events can still publish, then expire with eviction; reset creates a
 new epoch. Cancellation releases private raster work while retaining published
 siblings, their recipes, collision coverage, and reveal clocks. Revisiting an
 incomplete section retries its missing products with those images still visible.
+Retries check cached and queued CPU recipes, including uploads deferred by a
+resize. A completed request cannot suppress regeneration after pruning discards
+unpublished inputs; recipes still waiting to upload prevent redundant generation.
 Request identities belong to the root coordinator; render recipes remain
 independent of request lifetime and raster width. Close drains buffered CPU
 replies immediately, and the dispatcher drains again after canceled producers
