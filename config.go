@@ -79,8 +79,9 @@ type Config struct {
 	// units, from 0 (no extension) to 1. Shadows face down in both orientations.
 	ShadowOffset float64
 	// Fog is moving mist strength between the background and foreground layers.
-	// It must be finite and nonnegative; 0 disables it, 1 is the default strength,
-	// and values above 1 produce denser mist.
+	// It must be finite and nonnegative; 0 disables it, 1 gives visible wisps,
+	// and values above 1 thicken clouds while retaining clear gaps and
+	// background detail.
 	// Mist appears across unloaded bands too. Diagnostic views disable fog.
 	Fog float64
 	// BatsPerMinute is the average number of animated bat arrivals per minute.
@@ -169,7 +170,7 @@ func DefaultConfig() Config {
 		ShadowOpacity:        .65,
 		ShadowBlur:           .002,
 		ShadowOffset:         .05,
-		Fog:                  1.8,
+		Fog:                  1,
 		BatsPerMinute:        7.5,
 		DecorationBurn:       true,
 		AppearanceFade:       true,

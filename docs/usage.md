@@ -98,7 +98,7 @@ The order is background and fog, `BehindRocks`, rear grass blades and hanging gr
 | `BranchingStrategy` | `BranchingSimple`, `BranchingRecursive`, or `BranchingLoops`. |
 | `Texture` | Surface grain strength, from 0 to 16. |
 | `SpikeDensity`, `EdgeRoughness` | Exposed rock edge detail, from 0 to 1. Upward-facing lips stay nearly smooth, with tiny chips, no added outward spikes, and faint bevel highlights. |
-| `Fog`, `BatsPerMinute` | Animated atmosphere and bat arrivals; zero disables each. |
+| `Fog`, `BatsPerMinute` | Animated atmosphere and bat arrivals; zero disables each. Fog strength 1 gives visible wisps; higher values thicken clouds with clear gaps and softly limited opacity to preserve background contrast. |
 | `DecorationBurn` | Burn dissolve decorations removed by runtime carving; enabled by `DefaultConfig()`. |
 | `AppearanceFade` | Fade in arriving rocks and vegetation; enabled by `DefaultConfig()`. |
 | `MushroomDensity`, `GrassDensity`, `HangingGrowthDensity`, `SpiderWebDensity` | Decoration occurrence or coverage from 0 to 1. |
