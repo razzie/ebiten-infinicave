@@ -347,3 +347,5 @@ increases linearly with distance: half the shorter screen dimension gives
 defaults to false, requires enabled fog in the shaded view, and is ignored for PNG exports.
 
 The viewer defaults to portrait/vertical scrolling. Both portrait and landscape modes include a few horizontal background vines among the upright growth. Arrow keys or W/S scroll vertically; in landscape mode use Left/Right or A/D. Page Up and Page Down move by most of a viewport; Home and End return to the starting edge. Hold the left mouse button to carve, and press R to regenerate while keeping the current position. Press Esc to exit the viewer. PNG export captures the first 2400 pixels along the scrolling axis and exits; bats and hover effects are disabled for exports.
+
+The HUD is visible by default. Pass `--no-hud` to hide the FPS counter, loading messages, and carving help/status text. Carving previews and hover highlights remain visible.

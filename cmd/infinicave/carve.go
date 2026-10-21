@@ -152,10 +152,12 @@ func (g *Game) updateCarving() {
 }
 
 func (g *Game) drawCarving(screen *ebiten.Image) {
-	height := screen.Bounds().Dy()
-	ebitenutil.DebugPrintAt(screen, "LMB: hold for blast / drag for drill; release to carve | Wheel: resize; down stops auto growth | RMB: cancel", 8, height-20)
-	if g.carveStatus != "" {
-		ebitenutil.DebugPrintAt(screen, g.carveStatus, 8, height-36)
+	if !g.noHUD {
+		height := screen.Bounds().Dy()
+		ebitenutil.DebugPrintAt(screen, "LMB: hold for blast / drag for drill; release to carve | Wheel: resize; down stops auto growth | RMB: cancel", 8, height-20)
+		if g.carveStatus != "" {
+			ebitenutil.DebugPrintAt(screen, g.carveStatus, 8, height-36)
+		}
 	}
 	c := g.carving
 	if !c.active {

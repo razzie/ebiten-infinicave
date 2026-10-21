@@ -24,6 +24,7 @@ type Game struct {
 	seed         int64
 	output       string
 	fogMouse     bool
+	noHUD        bool
 	highlight    *hoverRenderer
 	ribbon       *ribbonTrail
 	exported     bool
@@ -111,7 +112,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 	g.scene.DrawWithPasses(screen, g.viewport(), passes)
 	g.drawHover(screen)
-	if g.loading {
+	if g.loading && !g.noHUD {
 		message := "Growing upward..."
 		foregroundReady := g.scene.Readiness(g.viewport()).Foreground
 		if foregroundReady {
@@ -124,7 +125,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 	if g.output == "" {
 		g.drawCarving(screen)
-		ebitenutil.DebugPrintAt(screen, fmt.Sprintf("FPS: %.1f", ebiten.ActualFPS()), 8, 8)
+		if !g.noHUD {
+			ebitenutil.DebugPrintAt(screen, fmt.Sprintf("FPS: %.1f", ebiten.ActualFPS()), 8, 8)
+		}
 	}
 	if g.output != "" && !g.exported && !g.loading {
 		g.exported = true

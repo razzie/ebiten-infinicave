@@ -28,7 +28,7 @@ func run() error {
 		return err
 	}
 	defer scene.Close()
-	g := &Game{mode: orientation, scene: scene, seed: config.Seed, output: options.output, fogMouse: options.fogMouse}
+	g := &Game{mode: orientation, scene: scene, seed: config.Seed, output: options.output, fogMouse: options.fogMouse, noHUD: options.noHUD}
 	if options.ribbon != ribbonOff && options.output == "" {
 		g.ribbon = newRibbonTrail(options.ribbon)
 		defer g.ribbon.close()
@@ -64,6 +64,7 @@ type viewerOptions struct {
 	output   string
 	hover    bool
 	fogMouse bool
+	noHUD    bool
 	ribbon   ribbonMode
 }
 
@@ -100,6 +101,7 @@ func parseOptions() (viewerOptions, error) {
 	webMaxSize := flag.Float64("spider-web-max-size", defaults.SpiderWebMaxSize, "maximum spider web span including attachments in scene units (0 uses the default 0.15; cave cross-axis spans 1)")
 	view := flag.String("view", "shaded", "terrain view: shaded, clay, height, normals, shadows")
 	hover := flag.Bool("hover", false, "highlight foreground rocks and guide lines under the mouse")
+	noHUD := flag.Bool("no-hud", false, "hide FPS, loading messages, and carving help/status text")
 	ribbon := flag.String("ribbon", "off", "mouse ribbon trail: off, back (behind rocks), front (above rocks, mushrooms, and webs, below grass and bats); interactive viewer only")
 	tolerance := flag.Float64("collision-tolerance", 0, "collision polygon simplification tolerance in scene units (one section is 1 by 1)")
 	flag.Parse()
@@ -150,7 +152,7 @@ func parseOptions() (viewerOptions, error) {
 	if err != nil {
 		return viewerOptions{}, err
 	}
-	return viewerOptions{config: config, output: *output, hover: *hover, ribbon: ribbonMode, fogMouse: *fogMouse}, nil
+	return viewerOptions{config: config, output: *output, hover: *hover, ribbon: ribbonMode, fogMouse: *fogMouse, noHUD: *noHUD}, nil
 }
 
 func parseMode(mode string) (infinicave.Orientation, error) {
