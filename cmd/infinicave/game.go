@@ -23,6 +23,7 @@ type Game struct {
 	loading      bool
 	seed         int64
 	output       string
+	fogMouse     bool
 	highlight    *hoverRenderer
 	ribbon       *ribbonTrail
 	exported     bool
@@ -74,10 +75,33 @@ func (g *Game) Update() error {
 	g.scene.SetRenderWidth(g.renderPixels())
 	g.updateCamera()
 	g.camera.step()
+	g.updateFogVelocity()
 	g.loading = !g.scene.Update(g.viewport())
 	g.updateCarving()
 	g.updateRibbon()
 	return nil
+}
+
+func (g *Game) updateFogVelocity() {
+	if !g.fogMouse || g.output != "" {
+		return
+	}
+	velocity := infinicave.V{}
+	if ebiten.IsFocused() {
+		x, y := ebiten.CursorPositionF()
+		velocity = g.mouseFogVelocity(infinicave.V{X: x, Y: y})
+	}
+	g.scene.SetFogVelocity(velocity)
+}
+
+func (g *Game) mouseFogVelocity(cursor infinicave.V) infinicave.V {
+	if g.screenWidth <= 0 || g.screenHeight <= 0 {
+		return infinicave.V{}
+	}
+	center := infinicave.V{X: float64(g.screenWidth) / 2, Y: float64(g.screenHeight) / 2}
+	// One scale for both axes keeps flow aimed at the pointer on any aspect
+	// ratio. Half the shorter screen dimension gives 0.1 scene units/second.
+	return cursor.Sub(center).Mul(.2 / float64(g.renderPixels()))
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {

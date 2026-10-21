@@ -227,6 +227,53 @@ func TestFogConfigurationAndLifecycle(t *testing.T) {
 	}
 }
 
+func TestFogVelocityLifecycle(t *testing.T) {
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		scene, err := NewScene(Config{Fog: 1, Orientation: orientation})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(scene.Close)
+		wind := V{X: .12, Y: -.03}
+		scene.SetFogVelocity(wind)
+		fog := scene.fog
+		if fog.Velocity != wind {
+			t.Fatalf("%v: fog velocity = %v, want %v", orientation, fog.Velocity, wind)
+		}
+		for _, invalid := range []V{{X: math.NaN()}, {Y: math.NaN()}, {X: math.Inf(1)}, {Y: math.Inf(-1)}} {
+			scene.SetFogVelocity(invalid)
+			if fog.Velocity != wind {
+				t.Fatal("invalid velocity changed fog motion")
+			}
+		}
+		scene.SetRenderWidth(128)
+		scene.Reset(42)
+		if scene.fog != fog || fog.Velocity != wind {
+			t.Fatal("reset or resizing lost fog velocity")
+		}
+		scene.SetFogVelocity(V{})
+		if fog.Velocity != (V{}) {
+			t.Fatal("zero velocity did not stop fog")
+		}
+		scene.Close()
+		scene.SetFogVelocity(wind)
+		if fog.Velocity != (V{}) {
+			t.Fatal("closed scene accepted fog velocity")
+		}
+	}
+	for _, config := range []Config{{}, {Fog: 1, View: ViewClay}} {
+		scene, err := NewScene(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scene.SetFogVelocity(V{X: .1})
+		if scene.fog != nil {
+			t.Fatal("setting velocity enabled disabled fog")
+		}
+		scene.Close()
+	}
+}
+
 func TestGeometryRevisionTracksPublicationGrowthAndEviction(t *testing.T) {
 	// Padded copies join across world Y=-4. Section 4 additionally extends
 	// the same formation; section 3 remains cached when section 4 is evicted.

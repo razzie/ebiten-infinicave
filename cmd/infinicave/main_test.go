@@ -27,6 +27,27 @@ func TestViewerAntialiasingFlag(t *testing.T) {
 	}
 }
 
+func TestViewerFogMouseFlag(t *testing.T) {
+	oldFlags, oldArgs := flag.CommandLine, os.Args
+	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{nil, false},
+		{[]string{"-fog-mouse"}, true},
+		{[]string{"-fog-mouse=false"}, false},
+		{[]string{"-mode", "landscape", "-fog-mouse"}, true},
+	} {
+		flag.CommandLine = flag.NewFlagSet("fog-mouse-options", flag.ContinueOnError)
+		os.Args = append([]string{"infinicave"}, tc.args...)
+		options, err := parseOptions()
+		if err != nil || options.fogMouse != tc.want || options.config.Fog != infinicave.DefaultConfig().Fog {
+			t.Fatalf("fog mouse: got %v, want %v, config fog %g, error %v", options.fogMouse, tc.want, options.config.Fog, err)
+		}
+	}
+}
+
 func TestViewerStreamingFlags(t *testing.T) {
 	oldFlags, oldArgs := flag.CommandLine, os.Args
 	t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })

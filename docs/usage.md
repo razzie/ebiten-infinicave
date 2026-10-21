@@ -51,6 +51,16 @@ this automatically for PNG exports; use `-appearance-fade=false` to disable it
 interactively. `AppearanceBurn` and `-appearance-burn` remain compatibility
 aliases for the fade-in setting.
 
+With fog enabled (`config.Fog > 0` in the shaded view), call
+`scene.SetFogVelocity(infinicave.V{X: 0.1, Y: -0.02})` to simulate wind moving
+right and slightly upward. Components are world units per second in either
+orientation; the vector's length is the speed. Call it on the game goroutine,
+including during `Update` for changing wind. The next scene `Update` advances
+the fog at that velocity without jumping the pattern. Pass `infinicave.V{}` to
+stop it. The setting survives `Reset` and resizing. Nonfinite vectors and calls
+with fog disabled or after `Close` are ignored. Until the setter is called,
+clouds and wisps retain their original independent drift.
+
 ## Coordinates and Orientation
 
 All positions, distances, radii, velocities, and collision tolerances use scene units. A section is one unit square and `infinicave.Width` and `infinicave.SectionHeight` are each 1.
@@ -310,8 +320,15 @@ Run `go run ./cmd/infinicave -h` for the complete flag list. Useful examples:
 go run ./cmd/infinicave -seed 42 -mode landscape
 go run ./cmd/infinicave -seed 42 -branching loops
 go run ./cmd/infinicave -seed 42 -disable-background
+go run ./cmd/infinicave -seed 42 -fog-mouse
 go run ./cmd/infinicave -retain-sections 2 -lookahead-sections 1
 go run ./cmd/infinicave -seed 42 -view normals -output normals.png
 ```
+
+With `-fog-mouse`, fog flows from screen center toward the pointer in either
+orientation. The normalized screen center `(0.5, 0.5)` stops the fog, and speed
+increases linearly with distance: half the shorter screen dimension gives
+0.1 scene units per second. Flow pauses while the window is unfocused. This flag
+defaults to false, requires enabled fog in the shaded view, and is ignored for PNG exports.
 
 The viewer defaults to portrait/vertical scrolling. Both portrait and landscape modes include a few horizontal background vines among the upright growth. Arrow keys or W/S scroll vertically; in landscape mode use Left/Right or A/D. Page Up and Page Down move by most of a viewport; Home and End return to the starting edge. Hold the left mouse button to carve, and press R to regenerate while keeping the current position. Press Esc to exit the viewer. PNG export captures the first 2400 pixels along the scrolling axis and exits; bats and hover effects are disabled for exports.

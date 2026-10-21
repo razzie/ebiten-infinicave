@@ -2,6 +2,7 @@ package infinicave
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/razzie/ebiten-infinicave/internal/render"
@@ -215,6 +216,18 @@ func (g *Scene) SetRenderWidth(pixels int) {
 	g.world.pixels = pixels
 	g.world.deferUpload()
 	g.world.deferParked()
+}
+
+// SetFogVelocity sets fog motion in world units per second: positive X moves
+// right and positive Y moves down, in either orientation. A zero vector stops
+// the fog. Changes take effect on the next Update without moving the pattern
+// abruptly, and survive Reset and resizing. Call on the game goroutine.
+// Nonfinite components, disabled fog, and calls after Close are ignored.
+func (g *Scene) SetFogVelocity(velocity V) {
+	if g.closed || g.fog == nil || math.IsNaN(velocity.X) || math.IsNaN(velocity.Y) || math.IsInf(velocity.X, 0) || math.IsInf(velocity.Y, 0) {
+		return
+	}
+	g.fog.SetVelocity(velocity)
 }
 
 // Draw draws available terrain, fog, vegetation, and enabled bats into dst,

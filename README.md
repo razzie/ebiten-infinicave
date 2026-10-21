@@ -47,7 +47,9 @@ Run the interactive viewer:
 go run ./cmd/infinicave -seed 42
 ```
 
-Use `-mode landscape` to scroll horizontally. Export a PNG without opening the viewer:
+Use `-mode landscape` to scroll horizontally. Add `-fog-mouse` to steer fog
+toward the mouse pointer from screen center; the center stops it and moving
+farther away increases its speed. Export a PNG without opening the viewer:
 
 ```sh
 go run ./cmd/infinicave -seed 42 -output scene.png

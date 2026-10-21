@@ -1,6 +1,7 @@
 package render
 
 import (
+	"bytes"
 	"context"
 	"math"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/razzie/ebiten-infinicave/internal/geom"
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
 
@@ -93,5 +95,71 @@ func (g *fogTestGame) Draw(*ebiten.Image) {
 			}
 			previous = append(previous[:0], data...)
 		}
+		g.checkWind(orientation)
+	}
+}
+
+func (g *fogTestGame) checkWind(orientation terrain.Orientation) {
+	g.t.Helper()
+	r, err := NewFogRenderer(1, orientation)
+	if err != nil {
+		g.t.Fatal(err)
+	}
+	defer r.Close()
+	const pixels = 128
+	dst := ebiten.NewImage(pixels, pixels)
+	defer dst.Deallocate()
+	snapshot := func() []byte {
+		dst.Clear()
+		r.DrawSection(dst, 0, 0, RenderTransform{Pixels: pixels})
+		data := make([]byte, pixels*pixels*4)
+		dst.ReadPixels(data)
+		return data
+	}
+	// Start with nonzero independent drift to catch position jumps at a change.
+	for range 30 {
+		r.Update()
+	}
+	before := snapshot()
+	tps := ebiten.TPS()
+	if tps <= 0 {
+		tps = ebiten.DefaultTPS
+	}
+	for _, scale := range []float64{1, -1, 2} {
+		r.SetVelocity(geom.V{X: .125 * float64(tps) * scale, Y: -.0625 * float64(tps) * scale})
+		if !bytes.Equal(before, snapshot()) {
+			g.t.Fatal("changing wind jumped the fog pattern")
+		}
+		r.Update()
+		after := snapshot()
+		dx, dy := int(16*scale), int(-8*scale)
+		if orientation == terrain.Horizontal {
+			dx, dy = dy, -dx
+		}
+		changed := false
+		for y := 32; y < pixels-32; y++ {
+			for x := 32; x < pixels-32; x++ {
+				i := (y*pixels + x) * 4
+				j := ((y-dy)*pixels + x - dx) * 4
+				for c := range 4 {
+					// Allow one byte for GPU floating-point rounding.
+					if math.Abs(float64(after[i+c])-float64(before[j+c])) > 1 {
+						g.t.Fatalf("%v scale %g: fog did not follow world velocity at %d,%d", orientation, scale, x, y)
+					}
+				}
+				changed = changed || after[i+3] != before[i+3]
+			}
+		}
+		if !changed {
+			g.t.Fatal("wind did not move fog")
+		}
+		before = after
+	}
+	r.SetVelocity(geom.V{})
+	for range 60 {
+		r.Update()
+	}
+	if !bytes.Equal(before, snapshot()) {
+		g.t.Fatal("zero velocity did not freeze clouds and wisps")
 	}
 }

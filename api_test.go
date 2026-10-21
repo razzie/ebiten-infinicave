@@ -26,6 +26,16 @@ func TestPublicAntialiasingAndReadiness(t *testing.T) {
 	}
 }
 
+func TestPublicFogVelocity(t *testing.T) {
+	scene, err := infinicave.NewScene(infinicave.Config{Fog: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer scene.Close()
+	scene.SetFogVelocity(infinicave.V{X: .1, Y: -.02})
+	scene.SetFogVelocity(infinicave.V{})
+}
+
 func TestPublicCarveTerrain(t *testing.T) {
 	scene, err := infinicave.NewScene(infinicave.Config{})
 	if err != nil {

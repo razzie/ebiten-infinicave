@@ -83,6 +83,7 @@ type Config struct {
 	// and values above 1 thicken clouds while retaining clear gaps and
 	// background detail.
 	// Mist appears across unloaded bands too. Diagnostic views disable fog.
+	// Use Scene.SetFogVelocity to control its direction and speed at runtime.
 	Fog float64
 	// BatsPerMinute is the average number of animated bat arrivals per minute.
 	// It must be finite and nonnegative; zero disables bats.

@@ -28,7 +28,7 @@ func run() error {
 		return err
 	}
 	defer scene.Close()
-	g := &Game{mode: orientation, scene: scene, seed: config.Seed, output: options.output}
+	g := &Game{mode: orientation, scene: scene, seed: config.Seed, output: options.output, fogMouse: options.fogMouse}
 	if options.ribbon != ribbonOff && options.output == "" {
 		g.ribbon = newRibbonTrail(options.ribbon)
 		defer g.ribbon.close()
@@ -60,10 +60,11 @@ func run() error {
 
 // viewerOptions translates command-line flags into library and viewer settings.
 type viewerOptions struct {
-	config infinicave.Config
-	output string
-	hover  bool
-	ribbon ribbonMode
+	config   infinicave.Config
+	output   string
+	hover    bool
+	fogMouse bool
+	ribbon   ribbonMode
 }
 
 func parseOptions() (viewerOptions, error) {
@@ -87,6 +88,7 @@ func parseOptions() (viewerOptions, error) {
 	shadowBlur := flag.Float64("shadow-blur", defaults.ShadowBlur, "dynamic rock shadow softness in scene units (range 0-0.05)")
 	shadowOffset := flag.Float64("shadow-offset", defaults.ShadowOffset, "downward rock shadow reach in scene units (0 disables extension, range 0-1)")
 	fog := flag.Float64("fog", defaults.Fog, "moving fog strength between background and foreground layers (0 disables it, values above 1 increase density)")
+	fogMouse := flag.Bool("fog-mouse", false, "steer fog toward the mouse from screen center; center stops it, distance controls speed (interactive viewer only)")
 	batsPerMinute := flag.Float64("bats-per-minute", defaults.BatsPerMinute, "average bat arrivals per minute (0 disables them, interactive viewer only)")
 	decorationBurn := flag.Bool("decoration-burn", defaults.DecorationBurn, "burn dissolve decorations removed by carving")
 	appearanceFade := flag.Bool("appearance-fade", defaults.AppearanceFade, "fade in arriving rocks and vegetation (interactive viewer only)")
@@ -148,7 +150,7 @@ func parseOptions() (viewerOptions, error) {
 	if err != nil {
 		return viewerOptions{}, err
 	}
-	return viewerOptions{config: config, output: *output, hover: *hover, ribbon: ribbonMode}, nil
+	return viewerOptions{config: config, output: *output, hover: *hover, ribbon: ribbonMode, fogMouse: *fogMouse}, nil
 }
 
 func parseMode(mode string) (infinicave.Orientation, error) {
