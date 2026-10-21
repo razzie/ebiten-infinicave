@@ -36,6 +36,7 @@ type Scene struct {
 	background           *render.BackgroundRenderer
 	disableBackground    bool
 	bats                 *render.BatFlock
+	batQueryWorldID      uint64
 	decorationBurn       *render.BurnDissolve
 	appearanceFade       *render.FadeRenderer
 	geometryRevisionBase uint64 // revisions accumulated across world resets
@@ -319,6 +320,7 @@ func (g *Scene) Reset(seed int64) {
 	if g.bats != nil {
 		g.bats.Reset(seed)
 	}
+	g.batQueryWorldID = 0
 }
 
 // Close stops background work and releases all GPU resources. It is safe to

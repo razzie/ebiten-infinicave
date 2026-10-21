@@ -8,6 +8,58 @@ import (
 	"github.com/razzie/ebiten-infinicave"
 )
 
+func TestPublicBatQueriesAndHits(t *testing.T) {
+	for _, orientation := range []infinicave.Orientation{infinicave.Vertical, infinicave.Horizontal} {
+		scene, err := infinicave.NewScene(infinicave.Config{
+			Seed: 42, BatsPerMinute: 7200, Orientation: orientation,
+			DisableBackground: true,
+			LoadSection:       func(int64) infinicave.SectionContent { return infinicave.SectionContent{} },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(scene.Close)
+		options := infinicave.QueryOptions{Targets: infinicave.TargetBat}
+		if result, err := scene.Query(infinicave.Ray{}, options); err != nil || !result.Complete || result.Found {
+			t.Fatalf("bat query before arrivals: %+v / %v", result, err)
+		}
+		viewport := infinicave.Viewport{Y: -2, Height: 1}
+		if orientation == infinicave.Horizontal {
+			viewport = infinicave.Viewport{X: 1, Width: 1}
+		}
+		scene.Update(viewport)
+		var id infinicave.BatID
+		// Sweep across the arrival band to find a silhouette using only public APIs.
+		for i := 0; i <= 1000; i++ {
+			ray := infinicave.Ray{Origin: infinicave.V{X: -1, Y: -2 + float64(i)/1000},
+				Direction: infinicave.V{X: 1}, MaxDistance: 3}
+			if orientation == infinicave.Horizontal {
+				ray.Origin = infinicave.V{X: -ray.Origin.Y, Y: ray.Origin.X}
+				ray.Direction = infinicave.V{Y: 1}
+			}
+			result, err := scene.Query(ray, options)
+			if err != nil || !result.Complete {
+				t.Fatalf("public bat query: %+v / %v", result, err)
+			}
+			if result.Found {
+				if result.Hit.Kind != infinicave.TargetBat {
+					t.Fatalf("unexpected bat hit kind: %+v", result.Hit)
+				}
+				id = result.Hit.BatID
+				break
+			}
+		}
+		if id == (infinicave.BatID{}) || !scene.HitBat(id) || scene.HitBat(id) || scene.HitBat(infinicave.BatID{}) {
+			t.Fatalf("%s: public query could not shoot a bat exactly once", orientation)
+		}
+		scene.Reset(42)
+		if scene.HitBat(id) {
+			t.Fatal("reset accepted the old bat ID")
+		}
+		scene.Close()
+	}
+}
+
 func TestPublicAntialiasingAndReadiness(t *testing.T) {
 	for _, mode := range []infinicave.AntialiasingMode{infinicave.AntialiasingFull, infinicave.AntialiasingOff, infinicave.AntialiasingFXAA} {
 		parsed, err := infinicave.ParseAntialiasingMode(mode.String())

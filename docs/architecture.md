@@ -11,7 +11,7 @@ them directly.
 | Public geometry | `geometry.go`, `config.go`, `carve.go` | Expose geometry, generation, collision, orientation, and edit entry points with the existing import path |
 | Streaming | `world.go`, `world_workers.go`, `world_stream.go`, `uploads.go` | Request sections, coordinate workers and request identities, retain CPU results, budget and publish GPU uploads, and evict distant sections |
 | World composition | `scene.go`, `world_render.go`, `carve_render.go`, `carve_burn.go` | Expose custom drawing hooks, draw cached layers and fades, refresh images after edits, and capture removed decorations |
-| Queries and identity | `query.go` | Track loaded coverage, formation and guide IDs, aliases, and revisions |
+| Queries and identity | `query.go` | Track loaded coverage, formation, guide, and bat IDs, aliases, and revisions; coordinate optional bat queries and hits |
 | Geometry algorithms | `internal/geom/` | Vectors, polygon clipping and triangulation, and ray/segment intersections |
 | Terrain and vegetation | `internal/terrain/` | Deterministic section generation, guides, Voronoi rock, lighting, vines, mushrooms, collision topology, and geometry edits |
 | Meshes and effects | `internal/render/` | Prepare meshes, scale raster coordinates, batch draws, render effects, and manage their GPU resources |

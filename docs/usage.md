@@ -242,7 +242,7 @@ Points use section-local coordinates in the owned unit square. Generation copies
 
 ## Queries and Collision
 
-Queries use world coordinates and do not generate terrain. A ray query can target rock, guides, or both:
+Queries use world coordinates and do not generate terrain. A ray query can target rocks, guides, flying bats, or any combination. Zero `Targets` keeps the default of rocks and guides; bats are opt-in:
 
 ```go
 result, err := scene.Query(infinicave.Ray{
@@ -256,6 +256,21 @@ result, err := scene.Query(infinicave.Ray{
 ```
 
 Check `result.Complete` before treating a miss as final: terrain along the ray may not be loaded. `result.Found` indicates a hit, with point, normal, distance, target kind, and object ID. A zero direction or maximum distance performs a point query. Rock hits use exact union boundaries, including authored holes and runtime cuts.
+
+To shoot a bat, query `TargetBat` and pass the returned `BatID` to `HitBat`:
+
+```go
+result, err := scene.Query(ray, infinicave.QueryOptions{
+    Targets: infinicave.TargetRock | infinicave.TargetBat,
+})
+if err == nil && result.Found && result.Hit.Kind == infinicave.TargetBat {
+    scene.HitBat(result.Hit.BatID)
+}
+```
+
+Bat queries test the current wing silhouette in either orientation, independently of camera position and render resolution. Querying does not change the bat. `HitBat` starts its existing fall and burn animation without carving terrain, and returns false for zero, foreign, expired, or already-hit IDs. Falling and burning bats are excluded from queries. Bat IDs stay valid while flying, including across updates and terrain eviction; reset and close expire them. Call both methods on the game goroutine.
+
+Bat-only queries (`Targets: infinicave.TargetBat`) are complete even over unloaded terrain and include bats in the side margins. Combined queries respect terrain availability: an unloaded interval before a bat leaves the result incomplete, since it could hide a nearer selected rock or guide. At equal distances, guides take priority, then bats, then rocks; the older ID wins within each kind.
 
 Use `scene.CollisionGeometry(id)` for a loaded section's world-space rock polygons. The returned geometry is an independent copy. `Config.OnCollisionReady` can notify your game as soon as collision polygons are available, before render layers finish; the callback runs on the game goroutine during `Update`. Runtime carving reports affected sections through `CarveResult.SectionIDs`, which can be used to refresh physics shapes.
 

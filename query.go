@@ -16,6 +16,7 @@ type TargetMask uint8
 const (
 	TargetRock TargetMask = 1 << iota
 	TargetGuide
+	TargetBat
 )
 
 // Ray uses world coordinates and scene units. Direction is normalized by Query;
@@ -51,15 +52,22 @@ type FormationID struct{ world, object uint64 }
 // or when CarveTerrain changes geometry anywhere in the scene.
 type GuideID struct{ world, object uint64 }
 
-// Hit describes a query intersection. Kind is TargetRock or TargetGuide; only
-// the corresponding ID is set. Normal is a unit 2D surface normal, pointing out
-// of solid rock or away from a guide's radius. An exact guide-line intersection
-// uses a perpendicular facing against the ray. Normal is zero for point queries
-// and casts starting inside a target. Distance is measured from Ray.Origin.
+// BatID is an opaque, comparable reference to a flying bat in one Scene world.
+// It expires when the bat is hit, leaves the scene, or on Reset or Close.
+// Bat IDs are independent of terrain loading, eviction, and render resolution.
+type BatID struct{ world, object uint64 }
+
+// Hit describes a query intersection. Kind is TargetRock, TargetGuide, or
+// TargetBat; only the corresponding ID is set. Normal is a unit 2D surface
+// normal, pointing out of solid rock or a bat silhouette, or away from a guide's
+// radius. An exact guide-line intersection uses a perpendicular facing against
+// the ray. Normal is zero for point queries and casts starting inside a target.
+// Distance is measured from Ray.Origin.
 type Hit struct {
 	Kind          TargetMask
 	FormationID   FormationID
 	GuideID       GuideID
+	BatID         BatID
 	Point, Normal V
 	Distance      float64
 	StartedInside bool
@@ -69,6 +77,7 @@ type Hit struct {
 // Complete means terrain along the ray up to the hit (or the full cast on a
 // miss) was available. If unloaded terrain precedes a candidate hit, Found and
 // Complete are both false: that candidate cannot be confirmed as nearest.
+// Bat-only queries are complete independently of terrain availability.
 type QueryResult struct {
 	Hit      Hit
 	Found    bool
@@ -108,11 +117,14 @@ type GuideGeometry struct {
 	Min, Max V
 }
 
-// Query finds the nearest rock formation or guide along a finite ray, or at a
-// point. It uses exact geometry without camera rounding, hover guide priority,
-// collision simplification, or GPU work. At equal distances guides win ties,
-// then the older object ID wins. All points use world coordinates, not viewport
-// coordinates. Only cached terrain is searched; Query never starts generation.
+// Query finds the nearest selected rock formation, guide, or flying bat along a
+// finite ray, or at a point. It uses exact geometry without camera rounding,
+// hover guide priority, collision simplification, or GPU work.
+// At equal distances guides win ties, then bats, then rocks; within each kind
+// the older object ID wins.
+// Bats are opt-in via TargetBat and use their current wing silhouettes.
+// All points use world coordinates, not viewport coordinates. Only cached
+// terrain is searched; Query never starts generation.
 // Call on the game goroutine after Update, as with other Scene methods.
 // Invalid arguments return an error. Closed scenes return an incomplete result.
 func (g *Scene) Query(ray Ray, options QueryOptions) (QueryResult, error) {
@@ -140,19 +152,42 @@ func (g *Scene) query(ray Ray, options QueryOptions) (QueryResult, error) {
 	if direction == (V{}) {
 		ray.MaxDistance = 0
 	}
+	result, cutoff := QueryResult{Complete: true}, math.Inf(1)
+	if options.Targets&(TargetRock|TargetGuide) != 0 {
+		result, cutoff = g.queryTerrain(ray, direction, options)
+	}
+	if options.Targets&TargetBat != 0 && g.bats != nil {
+		bat, found := g.bats.Raycast(ray.Origin, direction, ray.MaxDistance)
+		if found && bat.Distance < cutoff-geom.QueryEpsilon {
+			hit := Hit{Kind: TargetBat, BatID: BatID{g.batWorldID(), bat.ID},
+				Point: bat.Point, Normal: bat.Normal, Distance: bat.Distance, StartedInside: bat.StartedInside}
+			if !result.Found || hit.Distance < result.Hit.Distance-geom.QueryEpsilon ||
+				(math.Abs(hit.Distance-result.Hit.Distance) <= geom.QueryEpsilon && hitLess(hit, result.Hit)) {
+				result = QueryResult{Hit: hit, Found: true, Complete: true}
+			}
+		}
+	}
+	return result, nil
+}
+
+// queryTerrain also returns the first unavailable distance, so bat candidates
+// cannot bypass terrain that might contain a nearer selected object.
+func (g *Scene) queryTerrain(ray Ray, direction V, options QueryOptions) (QueryResult, float64) {
 	index := g.world.queryIndex()
 	// The playable world is a unit-wide strip above the floor. Rays may start
 	// outside it and enter it; portions outside it are confirmed empty.
 	start, end, intersects := geom.RayBox(ray.Origin, direction, ray.MaxDistance,
 		V{X: 0, Y: math.Inf(-1)}, V{X: Width, Y: 0})
 	if !intersects {
-		return QueryResult{Complete: true}, nil
+		return QueryResult{Complete: true}, math.Inf(1)
 	}
 	cutoff, covered := index.coverage(ray.Origin, direction, start, end, options)
 	result := QueryResult{Complete: covered}
 	limit := end
 	if !covered {
 		limit = cutoff
+	} else {
+		cutoff = math.Inf(1)
 	}
 	consider := func(hit Hit) {
 		// A closing edge at the start of unknown terrain is not a confirmed
@@ -209,7 +244,24 @@ func (g *Scene) query(ray Ray, options QueryOptions) (QueryResult, error) {
 			}
 		}
 	}
-	return result, nil
+	return result, cutoff
+}
+
+// HitBat starts the queried bat's fall and burn animation without carving
+// terrain. It returns false for zero, foreign, expired, or already-hit IDs.
+// Call on the game goroutine, as with Query. Query itself never hits a bat.
+func (g *Scene) HitBat(id BatID) bool {
+	if g.closed || g.world == nil || g.bats == nil || id.object == 0 || id.world != g.batWorldID() {
+		return false
+	}
+	return g.bats.HitBat(id.object)
+}
+
+func (g *Scene) batWorldID() uint64 {
+	if g.batQueryWorldID == 0 {
+		g.batQueryWorldID = queryWorldCounter.Add(1)
+	}
+	return g.batQueryWorldID
 }
 
 // Formation fetches an independent copy of a queried formation's cached
@@ -263,7 +315,7 @@ func validateQuery(ray Ray, options QueryOptions) (V, error) {
 	finite := func(x float64) bool { return !math.IsNaN(x) && !math.IsInf(x, 0) }
 	if !finite(ray.Origin.X) || !finite(ray.Origin.Y) || !finite(ray.Direction.X) || !finite(ray.Direction.Y) ||
 		!finite(ray.MaxDistance) || ray.MaxDistance < 0 || !finite(options.GuideRadius) || options.GuideRadius < 0 ||
-		options.Targets & ^(TargetRock|TargetGuide) != 0 {
+		options.Targets & ^(TargetRock|TargetGuide|TargetBat) != 0 {
 		return V{}, fmt.Errorf("infinicave: query requires finite coordinates, nonnegative finite distances, and valid targets")
 	}
 	scale := math.Max(math.Abs(ray.Direction.X), math.Abs(ray.Direction.Y))
@@ -283,10 +335,13 @@ func validateQuery(ray Ray, options QueryOptions) (V, error) {
 
 func hitLess(a, b Hit) bool {
 	if a.Kind != b.Kind {
-		return a.Kind == TargetGuide
+		return a.Kind == TargetGuide || (a.Kind == TargetBat && b.Kind == TargetRock)
 	}
 	if a.Kind == TargetGuide {
 		return a.GuideID.object < b.GuideID.object
+	}
+	if a.Kind == TargetBat {
+		return a.BatID.object < b.BatID.object
 	}
 	return a.FormationID.object < b.FormationID.object
 }

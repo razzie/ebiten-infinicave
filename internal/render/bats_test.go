@@ -164,6 +164,100 @@ func TestBatCarvingHitsSilhouette(t *testing.T) {
 	}
 }
 
+func TestBatRaycastSilhouette(t *testing.T) {
+	for _, orientation := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
+		for _, test := range []struct {
+			name  string
+			point geom.V
+			hit   bool
+		}{
+			{"body", geom.V{}, true},
+			{"wing", geom.V{X: .75, Y: .08}, true},
+			{"air between ear and wing", geom.V{X: .75, Y: -.5}, false},
+			{"distant", geom.V{X: 3}, false},
+		} {
+			t.Run(orientation.String()+"/"+test.name, func(t *testing.T) {
+				center := geom.V{X: .5, Y: -.5}
+				flock := NewBatFlock(42, 7.5, orientation)
+				b := Bat{ID: 1, Start: center, End: center, control1: center.Y, control2: center.Y, duration: 10, Size: .02}
+				flock.Bats = []Bat{b}
+				point := center.Add(terrain.InternalPoint(orientation, test.point.Mul(b.Size)))
+				hit, found := flock.Raycast(point, geom.V{}, 0)
+				if found != test.hit || (found && (hit.ID != b.ID || hit.Point != point ||
+					!hit.StartedInside || hit.Distance != 0 || hit.Normal != (geom.V{}))) {
+					t.Fatalf("point query: %+v / %v", hit, found)
+				}
+				// Cast through the same pose from above in the silhouette frame.
+				direction := terrain.InternalPoint(orientation, geom.V{Y: 1})
+				origin := point.Sub(direction.Mul(.1))
+				hit, found = flock.Raycast(origin, direction, .1)
+				if found != test.hit {
+					t.Fatalf("ray query: %+v / %v", hit, found)
+				}
+				if found {
+					if hit.StartedInside || hit.Distance < .07 || hit.Distance > .1 ||
+						math.Abs(hit.Normal.Len()-1) > 1e-10 || hit.Normal.Dot(direction) > 0 ||
+						hit.Point.Sub(origin.Add(direction.Mul(hit.Distance))).Len() > 1e-10 {
+						t.Fatalf("ray intersection: %+v", hit)
+					}
+					if _, found := flock.Raycast(origin, direction, hit.Distance-.00001); found {
+						t.Fatal("short ray reached the bat")
+					}
+				}
+				if flock.Bats[0] != b {
+					t.Fatal("query changed the bat")
+				}
+			})
+		}
+	}
+}
+
+func TestBatRaycastNearestAndStableIdentity(t *testing.T) {
+	center := geom.V{X: .5, Y: -.5}
+	flock := NewBatFlock(42, 7.5)
+	b := Bat{ID: 2, Start: center, End: center, control1: center.Y, control2: center.Y, duration: 10, Size: .02}
+	near := b
+	near.ID, near.Start.X, near.End.X = 3, .3, .3
+	flock.Bats = []Bat{b, near}
+	origin, direction := geom.V{Y: center.Y}, geom.V{X: 1}
+	hit, found := flock.Raycast(origin, direction, 1)
+	if !found || hit.ID != near.ID || !flock.HitBat(hit.ID) || flock.HitBat(hit.ID) {
+		t.Fatalf("nearest bat or repeated hit: %+v / %v", hit, found)
+	}
+	hit, found = flock.Raycast(origin, direction, 1)
+	if !found || hit.ID != b.ID {
+		t.Fatal("falling bat remained a target")
+	}
+	// Equal-distance hits prefer the older identity, regardless of slice order.
+	older := b
+	older.ID = 1
+	flock.Bats = append(flock.Bats, older)
+	if hit, _ := flock.Raycast(origin, direction, 1); hit.ID != older.ID {
+		t.Fatal("bat tie did not select the older ID")
+	}
+	// Compaction and arrivals never recycle an expired identity, including reset.
+	flock = NewBatFlock(42, 7.5)
+	viewport := Viewport{Y: -2, Height: 1}
+	flock.Step(viewport, 6)
+	id := flock.Bats[0].ID
+	flock.Step(viewport, .1)
+	b = flock.Bats[0]
+	if hit, found := flock.Raycast(b.Position(b.Age/b.duration), geom.V{}, 0); !found || hit.ID != id {
+		t.Fatal("update changed a flying bat's identity")
+	}
+	flock.Reset(42)
+	flock.Step(viewport, 6)
+	if flock.Bats[0].ID == id || flock.HitBat(id) {
+		t.Fatal("reset revived an old bat identity")
+	}
+	id = flock.Bats[0].ID
+	flock.Next = 100
+	flock.Step(viewport, 100)
+	if flock.HitBat(id) {
+		t.Fatal("expired bat accepted a hit")
+	}
+}
+
 func TestHitBatFallsDownThenExpiresWithoutChangingArrivals(t *testing.T) {
 	for _, orientation := range []terrain.Orientation{terrain.Vertical, terrain.Horizontal} {
 		viewport := Viewport{Y: -2, Height: 1}

@@ -18,6 +18,7 @@ const (
 )
 
 type Bat struct {
+	ID                 uint64
 	Start, End         geom.V  // world coordinates, independent of camera movement
 	control1, control2 float64 // heights of the cubic route's control points
 	duration, Age      float64
@@ -56,12 +57,14 @@ func (b Bat) bank(t float64) float64 {
 
 type BatFlock struct {
 	Orientation terrain.Orientation
-	rng         *rand.Rand
-	PerMinute   float64
-	Next        float64 // seconds until the next arrival
-	Bats        []Bat
-	burn        *BurnDissolve
-	burnSprite  *ebiten.Image
+
+	nextID     uint64
+	rng        *rand.Rand
+	PerMinute  float64
+	Next       float64 // seconds until the next arrival
+	Bats       []Bat
+	burn       *BurnDissolve
+	burnSprite *ebiten.Image
 }
 
 func NewBatFlock(seed int64, perMinute float64, orientation ...terrain.Orientation) *BatFlock {
@@ -117,25 +120,99 @@ func (f *BatFlock) Carve(cut terrain.RockCut) {
 			position.Y+radius <= cut.Min.Y || position.Y-radius >= cut.Max.Y {
 			continue
 		}
-		path := batSilhouette(b.flap())
-		transform := &vector.AddPathOptions{}
-		// Flatten curves at the reference raster scale, independent of resizing.
-		transform.GeoM.Scale(b.Size*RasterPixelsPerUnit, b.Size*RasterPixelsPerUnit)
-		transform.GeoM.Rotate(f.SilhouetteAngle(*b, t))
-		var outline vector.Path
-		outline.AddPath(&path, transform)
-		vertices, _ := outline.AppendVerticesAndIndicesForFilling(nil, nil)
-		poly := make([]geom.V, len(vertices))
-		for j, vertex := range vertices {
-			poly[j] = position.Add(geom.V{X: float64(vertex.DstX) / RasterPixelsPerUnit, Y: float64(vertex.DstY) / RasterPixelsPerUnit})
-		}
-		if !cut.Intersects(geom.CleanPolygon(poly), 0) {
+		if !cut.Intersects(f.silhouette(*b), 0) {
 			continue
 		}
-		b.hitAngle = f.SilhouetteAngle(*b, t)
-		b.hitPosition, b.fallDirection = position, terrain.InternalPoint(f.Orientation, geom.V{Y: 1})
-		b.hit = true
+		f.hit(b)
 	}
+}
+
+// silhouette shares the current wing pose between carving and ray queries.
+func (f *BatFlock) silhouette(b Bat) []geom.V {
+	t := b.Age / b.duration
+	position := b.Position(t)
+	path := batSilhouette(b.flap())
+	transform := &vector.AddPathOptions{}
+	// Flatten curves at the reference raster scale, independent of resizing.
+	transform.GeoM.Scale(b.Size*RasterPixelsPerUnit, b.Size*RasterPixelsPerUnit)
+	transform.GeoM.Rotate(f.SilhouetteAngle(b, t))
+	var outline vector.Path
+	outline.AddPath(&path, transform)
+	vertices, _ := outline.AppendVerticesAndIndicesForFilling(nil, nil)
+	poly := make([]geom.V, len(vertices))
+	for j, vertex := range vertices {
+		poly[j] = position.Add(geom.V{X: float64(vertex.DstX) / RasterPixelsPerUnit, Y: float64(vertex.DstY) / RasterPixelsPerUnit})
+	}
+	return geom.CleanPolygon(poly)
+}
+
+type BatHit struct {
+	ID            uint64
+	Point, Normal geom.V
+	Distance      float64
+	StartedInside bool
+}
+
+// Raycast tests flying silhouettes in internal scene coordinates. Direction
+// must be normalized or zero. Falling and burning bats are excluded.
+func (f *BatFlock) Raycast(origin, direction geom.V, limit float64) (BatHit, bool) {
+	var best BatHit
+	found := false
+	for _, b := range f.Bats {
+		if b.hit {
+			continue
+		}
+		position := b.Position(b.Age / b.duration)
+		radius := geom.V{X: 1.25 * b.Size, Y: 1.25 * b.Size}
+		if _, _, ok := geom.RayBox(origin, direction, limit, position.Sub(radius), position.Add(radius)); !ok {
+			continue
+		}
+		poly := f.silhouette(b)
+		hit := BatHit{ID: b.ID}
+		if (terrain.CollisionGeometry{Polygons: [][]geom.V{poly}}).Contains(origin) {
+			hit.Point, hit.StartedInside = origin, true
+		} else {
+			if direction == (geom.V{}) {
+				continue
+			}
+			hit.Distance = math.Inf(1)
+			for i, a := range poly {
+				end := poly[(i+1)%len(poly)]
+				if distance, ok := geom.RaySegment(origin, direction, a, end, limit); ok && distance < hit.Distance {
+					hit.Distance = distance
+					hit.Point = origin.Add(direction.Mul(distance))
+					hit.Normal = end.Sub(a).Perp().Norm().Mul(-1)
+				}
+			}
+			if math.IsInf(hit.Distance, 1) {
+				continue
+			}
+		}
+		if !found || hit.Distance < best.Distance-geom.QueryEpsilon ||
+			(math.Abs(hit.Distance-best.Distance) <= geom.QueryEpsilon && hit.ID < best.ID) {
+			best, found = hit, true
+		}
+	}
+	return best, found
+}
+
+// HitBat starts a flying bat's fall without changing terrain or arrivals.
+func (f *BatFlock) HitBat(id uint64) bool {
+	for i := range f.Bats {
+		b := &f.Bats[i]
+		if b.ID == id && !b.hit {
+			f.hit(b)
+			return true
+		}
+	}
+	return false
+}
+
+func (f *BatFlock) hit(b *Bat) {
+	t := b.Age / b.duration
+	b.hitAngle = f.SilhouetteAngle(*b, t)
+	b.hitPosition, b.fallDirection = b.Position(t), terrain.InternalPoint(f.Orientation, geom.V{Y: 1})
+	b.hit = true
 }
 
 func (f *BatFlock) Update(viewport Viewport) {
@@ -199,6 +276,8 @@ func (f *BatFlock) spawn(viewport Viewport, age float64) {
 	// Reuse the random phase to preserve the arrival and flight sequence.
 	b.shade = float32((b.phase/(2*math.Pi) - .5) * .3)
 	if b.Age < b.duration {
+		f.nextID++
+		b.ID = f.nextID
 		f.Bats = append(f.Bats, b)
 	}
 }

@@ -6,8 +6,162 @@ import (
 	"testing"
 
 	"github.com/razzie/ebiten-infinicave/internal/geom"
+	"github.com/razzie/ebiten-infinicave/internal/render"
 	"github.com/razzie/ebiten-infinicave/internal/terrain"
 )
+
+func TestQueryBatsOptInAndHit(t *testing.T) {
+	for _, orientation := range []Orientation{Vertical, Horizontal} {
+		t.Run(orientation.String(), func(t *testing.T) {
+			scene, err := NewScene(Config{Seed: 42, BatsPerMinute: 7.5, Orientation: orientation})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(scene.Close)
+			scene.bats.Step(render.Viewport{Y: -2, Height: 1}, 6)
+			bat := scene.bats.Bats[0]
+			bat.Age, bat.Start, bat.End = 0, V{X: .5, Y: -1.5}, V{X: .8, Y: -1.5}
+			scene.bats.Bats = []render.Bat{bat}
+			point := terrain.WorldPoint(orientation, bat.Start)
+			options := QueryOptions{Targets: TargetBat}
+			r := mustQuery(t, scene, Ray{Origin: point}, options)
+			if !r.Found || !r.Complete || r.Hit.Kind != TargetBat || r.Hit.BatID == (BatID{}) ||
+				r.Hit.FormationID != (FormationID{}) || r.Hit.GuideID != (GuideID{}) ||
+				!r.Hit.StartedInside || r.Hit.Point != point || r.Hit.Normal != (V{}) || r.Hit.Distance != 0 {
+				t.Fatalf("bat-only point query over unloaded terrain: %+v", r)
+			}
+			if scene.world.queries != nil || len(scene.world.sections) != 0 || scene.bats.Bats[0] != bat {
+				t.Fatal("bat query loaded/indexed terrain or changed the bat")
+			}
+			id := r.Hit.BatID
+			direction := terrain.WorldPoint(orientation, V{X: 1})
+			ray := Ray{Origin: point.Sub(direction.Mul(.1)), Direction: direction.Mul(8), MaxDistance: .2}
+			r = mustQuery(t, scene, ray, options)
+			if !r.Found || !r.Complete || r.Hit.BatID != id || r.Hit.StartedInside ||
+				r.Hit.Distance < .07 || r.Hit.Distance > .1 || math.Abs(r.Hit.Normal.Len()-1) > 1e-9 ||
+				r.Hit.Normal.Dot(direction) > 0 || r.Hit.Point.Sub(ray.Origin.Add(direction.Mul(r.Hit.Distance))).Len() > 1e-9 {
+				t.Fatalf("world-space bat ray: %+v", r)
+			}
+			ray.MaxDistance = .05
+			if r := mustQuery(t, scene, ray, options); r.Found || !r.Complete {
+				t.Fatalf("short bat ray: %+v", r)
+			}
+			if r := mustQuery(t, scene, Ray{Origin: point}, QueryOptions{}); r.Found {
+				t.Fatal("default targets included bats")
+			}
+			foreign := queryScene()
+			foreign.bats = render.NewBatFlock(42, 7.5, orientation)
+			foreign.bats.Bats = []render.Bat{bat}
+			if foreign.HitBat(id) || scene.HitBat(BatID{}) {
+				t.Fatal("zero or foreign bat ID accepted")
+			}
+			revision := scene.GeometryRevision()
+			if !scene.HitBat(id) || scene.HitBat(id) {
+				t.Fatal("hit did not start the fall exactly once")
+			}
+			if r := mustQuery(t, scene, Ray{Origin: point}, options); r.Found || !r.Complete {
+				t.Fatalf("falling bat remained queryable: %+v", r)
+			}
+			if scene.GeometryRevision() != revision || len(scene.world.cuts) != 0 || len(scene.world.sections) != 0 {
+				t.Fatal("hitting a bat changed terrain")
+			}
+			scene.Reset(42)
+			scene.bats.Step(render.Viewport{Y: -2, Height: 1}, 6)
+			if scene.HitBat(id) {
+				t.Fatal("reset accepted a stale bat ID")
+			}
+			scene.Close()
+			if scene.HitBat(id) {
+				t.Fatal("closed scene accepted a bat ID")
+			}
+			if r := mustQuery(t, scene, Ray{Origin: point}, options); r.Found || r.Complete {
+				t.Fatalf("closed scene bat query: %+v", r)
+			}
+		})
+	}
+	disabled := queryScene()
+	if r := mustQuery(t, disabled, Ray{}, QueryOptions{Targets: TargetBat}); r.Found || !r.Complete {
+		t.Fatalf("disabled bats: %+v", r)
+	}
+}
+
+func TestQueryBatsNearestAndTerrainCoverage(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		point    V
+		data     []terrain.SectionData
+		ray      Ray
+		targets  TargetMask
+		kind     TargetMask
+		complete bool
+	}{
+		{"bat before rock", V{X: .3, Y: -.5}, []terrain.SectionData{{Foreground: RockGrid{terrainRect(.6, .4, .1, .2)}}},
+			Ray{Origin: V{X: .1, Y: -.5}, Direction: V{X: 1}, MaxDistance: .8}, TargetRock | TargetBat, TargetBat, true},
+		{"rock before bat", V{X: .6, Y: -.5}, []terrain.SectionData{{Foreground: RockGrid{terrainRect(.3, .4, .1, .2)}}},
+			Ray{Origin: V{X: .1, Y: -.5}, Direction: V{X: 1}, MaxDistance: .8}, TargetRock | TargetBat, TargetRock, true},
+		{"guide before bat", V{X: .6, Y: -.5}, []terrain.SectionData{{Guides: []Guide{{Pts: []V{{X: .3, Y: .4}, {X: .3, Y: .6}}}}}},
+			Ray{Origin: V{X: .1, Y: -.5}, Direction: V{X: 1}, MaxDistance: .8}, TargetGuide | TargetBat, TargetGuide, true},
+		{"bat wins rock tie", V{X: .5, Y: -.5}, []terrain.SectionData{{Foreground: RockGrid{terrainRect(.4, .4, .2, .2)}}},
+			Ray{Origin: V{X: .5, Y: -.5}}, TargetRock | TargetBat, TargetBat, true},
+		{"guide wins bat tie", V{X: .5, Y: -.5}, []terrain.SectionData{{Guides: []Guide{{Pts: []V{{X: .5, Y: .4}, {X: .5, Y: .6}}}}}},
+			Ray{Origin: V{X: .5, Y: -.5}}, TargetGuide | TargetBat, TargetGuide, true},
+		{"bat before unloaded band", V{X: .5, Y: -.7}, []terrain.SectionData{{}},
+			Ray{Origin: V{X: .5, Y: -.5}, Direction: V{Y: -1}, MaxDistance: 2}, TargetRock | TargetBat, TargetBat, true},
+		{"bat beyond unloaded band", V{X: .5, Y: -2.5}, []terrain.SectionData{{}},
+			Ray{Origin: V{X: .5, Y: -.5}, Direction: V{Y: -1}, MaxDistance: 3}, TargetRock | TargetBat, 0, false},
+		{"bat-only beyond unloaded band", V{X: .5, Y: -2.5}, nil,
+			Ray{Origin: V{X: .5, Y: -.5}, Direction: V{Y: -1}, MaxDistance: 3}, TargetBat, TargetBat, true},
+		{"bat in side margin", V{X: -.2, Y: -.5}, nil,
+			Ray{Origin: V{X: -.4, Y: -.5}, Direction: V{X: 1}, MaxDistance: .3}, TargetRock | TargetBat, TargetBat, true},
+		{"bat before entering unloaded world", V{X: -.2, Y: -.5}, nil,
+			Ray{Origin: V{X: -.4, Y: -.5}, Direction: V{X: 1}, MaxDistance: 1}, TargetRock | TargetBat, TargetBat, true},
+	} {
+		for _, orientation := range []Orientation{Vertical, Horizontal} {
+			t.Run(test.name+"/"+orientation.String(), func(t *testing.T) {
+				scene := queryScene(test.data...)
+				scene.orientation = orientation
+				scene.bats = render.NewBatFlock(42, 7.5, orientation)
+				scene.bats.Step(render.Viewport{Y: -2, Height: 1}, 6)
+				bat := scene.bats.Bats[0]
+				bat.Age, bat.Start, bat.End = 0, test.point, test.point.Add(V{X: .3})
+				scene.bats.Bats = []render.Bat{bat}
+				ray := test.ray
+				ray.Origin, ray.Direction = terrain.WorldPoint(orientation, ray.Origin), terrain.WorldPoint(orientation, ray.Direction)
+				r := mustQuery(t, scene, ray, QueryOptions{Targets: test.targets})
+				if r.Complete != test.complete || r.Found != (test.kind != 0) || r.Hit.Kind != test.kind {
+					t.Fatalf("nearest/coverage: %+v", r)
+				}
+			})
+		}
+	}
+}
+
+func TestQueryBatIDSurvivesTerrainChanges(t *testing.T) {
+	scene := queryScene(terrain.SectionData{Foreground: RockGrid{terrainRect(.2, .2, .1, .2)}})
+	scene.bats = render.NewBatFlock(42, 7.5)
+	scene.bats.Step(render.Viewport{Y: -2, Height: 1}, 6)
+	bat := scene.bats.Bats[0]
+	bat.Age, bat.Start, bat.End = 0, V{X: .7, Y: -.5}, V{X: .8, Y: -.5}
+	scene.bats.Bats = []render.Bat{bat}
+	ray, options := Ray{Origin: bat.Start}, QueryOptions{Targets: TargetBat}
+	id := mustQuery(t, scene, ray, options).Hit.BatID
+	// Build the terrain identities, then invalidate them with a terrain-only cut.
+	mustQuery(t, scene, Ray{Origin: V{X: .25, Y: -.7}}, QueryOptions{})
+	result, err := scene.CarveTerrain(Hole{Shape: HoleCircle, Center: V{X: .25, Y: -.7}, Radius: .02})
+	if err != nil || len(result.SectionIDs) == 0 || scene.world.queries != nil {
+		t.Fatalf("fixture did not invalidate terrain identities: %+v / %v", result, err)
+	}
+	if r := mustQuery(t, scene, ray, options); !r.Found || r.Hit.BatID != id {
+		t.Fatalf("terrain cut expired a flying bat: %+v", r)
+	}
+	scene.world.prune(-10, 1, 0)
+	if len(scene.world.sections) != 0 {
+		t.Fatal("fixture did not evict terrain")
+	}
+	if r := mustQuery(t, scene, ray, options); !r.Found || r.Hit.BatID != id || !scene.HitBat(id) {
+		t.Fatalf("terrain eviction expired a flying bat: %+v", r)
+	}
+}
 
 func TestQueryFormationPointRayAndFetch(t *testing.T) {
 	scene := queryScene(terrain.SectionData{Foreground: RockGrid{
