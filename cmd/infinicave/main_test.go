@@ -189,8 +189,6 @@ func TestViewerAppearanceFadeFlag(t *testing.T) {
 		{nil, true},
 		{[]string{"-appearance-fade=false"}, false},
 		{[]string{"-appearance-fade=true"}, true},
-		{[]string{"-appearance-burn=false"}, false},
-		{[]string{"-appearance-burn=true"}, true},
 		{[]string{"-output", "scene.png", "-appearance-fade=true"}, false},
 	} {
 		flag.CommandLine = flag.NewFlagSet("appearance-options", flag.ContinueOnError)

@@ -48,8 +48,8 @@ visible as growth arrives, and resizing does not restart the effect. Collision,
 queries, and readiness are immediate; the animation advances only in `Update`.
 For a fully revealed still image, disable it before `NewScene`. The viewer does
 this automatically for PNG exports; use `-appearance-fade=false` to disable it
-interactively. `AppearanceBurn` and `-appearance-burn` remain compatibility
-aliases for the fade-in setting.
+interactively. The library's `AppearanceBurn` field remains a compatibility
+alias for the fade-in setting.
 
 With fog enabled (`config.Fog > 0` in the shaded view), call
 `scene.SetFogVelocity(infinicave.V{X: 0.1, Y: -0.02})` to simulate wind moving
